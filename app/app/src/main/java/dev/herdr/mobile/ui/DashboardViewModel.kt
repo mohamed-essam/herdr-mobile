@@ -31,5 +31,11 @@ class DashboardViewModel(
 
     fun registerPush(endpoint: String) = client.registerPush(endpoint)
 
+    suspend fun openTerminal(target: String, cols: Int, rows: Int) = client.openTerminal(target, cols, rows)
+    fun termInput(termId: String, data: ByteArray) = client.sendTermInput(termId, data)
+    fun termResize(termId: String, cols: Int, rows: Int) = client.sendTermResize(termId, cols, rows)
+    fun closeTerminal(termId: String) = client.closeTerminal(termId)
+    val frames get() = client.frames
+
     override fun onCleared() { client.close() }
 }
