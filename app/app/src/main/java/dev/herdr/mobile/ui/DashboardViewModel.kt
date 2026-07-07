@@ -29,5 +29,7 @@ class DashboardViewModel(
 
     suspend fun quickKey(paneId: String, key: String) = client.sendKeys(paneId, key)
 
+    fun registerPush(endpoint: String) = client.registerPush(endpoint)
+
     override fun onCleared() { client.close() }
 }
