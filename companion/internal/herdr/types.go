@@ -7,6 +7,8 @@ type RPCError struct {
 	Message string `json:"message"`
 }
 
+func (e *RPCError) Error() string { return e.Code + ": " + e.Message }
+
 type Response struct {
 	ID     string          `json:"id"`
 	Result json.RawMessage `json:"result"`
