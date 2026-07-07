@@ -6,7 +6,12 @@ package com.termux.terminal;
 final class JNI {
 
     static {
-        System.loadLibrary("termux");
+        try {
+            System.loadLibrary("termux");
+        } catch (Throwable ignored) {
+            // Remote-only build: no local subprocess is ever spawned, so the native
+            // library is intentionally absent. Native methods must never be invoked.
+        }
     }
 
     /**

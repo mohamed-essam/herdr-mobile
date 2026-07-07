@@ -37,9 +37,20 @@ public class RemoteTerminalSession extends TerminalSession {
     /** The view calls this on layout/rotation; forward size changes upstream. */
     @Override
     public void updateSize(int columns, int rows, int cellWidthPixels, int cellHeightPixels) {
-        boolean firstTime = (mEmulator == null);
-        super.updateSize(columns, rows, cellWidthPixels, cellHeightPixels);
-        if (!firstTime) mIo.sendResize(columns, rows);
+        if (mEmulator == null) {
+            // our initializeEmulator override creates the emulator (no subprocess) and sends the initial resize
+            initializeEmulator(columns, rows, cellWidthPixels, cellHeightPixels);
+        } else {
+            // resize the emulator directly — do NOT call super, whose else-branch calls
+            // JNI.setPtyWindowSize (crashes: this remote build bundles no libtermux.so)
+            mEmulator.resize(columns, rows, cellWidthPixels, cellHeightPixels);
+            mIo.sendResize(columns, rows);
+        }
+    }
+
+    @Override
+    public void finishIfRunning() {
+        // remote session: no local subprocess or file descriptor to tear down (avoid JNI.close)
     }
 
     /** All view-originated input (keys, codepoints, paste) routes here. */
