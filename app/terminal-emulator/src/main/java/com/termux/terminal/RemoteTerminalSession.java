@@ -46,8 +46,7 @@ public class RemoteTerminalSession extends TerminalSession {
     @Override
     public void write(byte[] data, int offset, int count) {
         if (data == null || count <= 0) return;
-        byte[] slice = (offset == 0 && count == data.length) ? data : Arrays.copyOfRange(data, offset, offset + count);
-        mIo.sendInput(slice);
+        mIo.sendInput(Arrays.copyOfRange(data, offset, offset + count));
     }
 
     /** Feed bytes received from the companion into the emulator (main thread). */
