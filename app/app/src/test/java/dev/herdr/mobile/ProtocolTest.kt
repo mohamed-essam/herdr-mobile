@@ -41,4 +41,20 @@ class ProtocolTest {
         assertTrue(json.contains("\"text\":\"y\""))
         assertTrue(json.contains("\"paneId\":\"w6:p1\""))
     }
+
+    @Test fun parsesTermFrames() {
+        assertTrue(parseServerFrame("""{"t":"term_opened","reqId":"r1","termId":"t1"}""") is ServerFrame.TermOpened)
+        val d = parseServerFrame("""{"t":"term_data","termId":"t1","data":"aGk="}""")
+        assertTrue(d is ServerFrame.TermData)
+        assertEquals("aGk=", (d as ServerFrame.TermData).data)
+        val x = parseServerFrame("""{"t":"term_exit","termId":"t1","code":3}""")
+        assertEquals(3, (x as ServerFrame.TermExit).code)
+    }
+
+    @Test fun buildsTermClientMessages() {
+        assertTrue(ClientMsg.termOpen("r1", "w6:p1", 80, 24).contains("\"term_open\""))
+        assertTrue(ClientMsg.termInput("t1", "aGk=").contains("\"aGk=\""))
+        assertTrue(ClientMsg.termResize("t1", 100, 40).contains("\"cols\":100"))
+        assertTrue(ClientMsg.termClose("t1").contains("\"term_close\""))
+    }
 }

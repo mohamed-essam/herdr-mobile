@@ -26,6 +26,10 @@ sealed interface ServerFrame {
     data class ErrorFrame(val reqId: String, val code: String, val message: String) : ServerFrame
     data object Pong : ServerFrame
     data object Unknown : ServerFrame
+    data class TermOpened(val reqId: String, val termId: String) : ServerFrame
+    data class TermData(val termId: String, val data: String) : ServerFrame
+    data class TermExit(val termId: String, val code: Int) : ServerFrame
+    data class TermError(val reqId: String, val termId: String, val message: String) : ServerFrame
 }
 
 fun parseServerFrame(text: String): ServerFrame {
@@ -43,6 +47,15 @@ fun parseServerFrame(text: String): ServerFrame {
             obj["reqId"]?.jsonPrimitive?.content ?: "", obj["code"]!!.jsonPrimitive.content,
             obj["message"]!!.jsonPrimitive.content)
         "pong" -> ServerFrame.Pong
+        "term_opened" -> ServerFrame.TermOpened(
+            obj["reqId"]!!.jsonPrimitive.content, obj["termId"]!!.jsonPrimitive.content)
+        "term_data" -> ServerFrame.TermData(
+            obj["termId"]!!.jsonPrimitive.content, obj["data"]!!.jsonPrimitive.content)
+        "term_exit" -> ServerFrame.TermExit(
+            obj["termId"]!!.jsonPrimitive.content, obj["code"]?.jsonPrimitive?.int ?: 0)
+        "term_error" -> ServerFrame.TermError(
+            obj["reqId"]?.jsonPrimitive?.content ?: "", obj["termId"]?.jsonPrimitive?.content ?: "",
+            obj["message"]?.jsonPrimitive?.content ?: "")
         else -> ServerFrame.Unknown
     }
 }
@@ -60,4 +73,12 @@ object ClientMsg {
     fun sendKeys(reqId: String, paneId: String, keys: String) =
         obj("t" to JsonPrimitive("send_keys"), "reqId" to JsonPrimitive(reqId), "paneId" to JsonPrimitive(paneId), "keys" to JsonPrimitive(keys))
     fun ping() = obj("t" to JsonPrimitive("ping"))
+    fun termOpen(reqId: String, target: String, cols: Int, rows: Int) =
+        obj("t" to JsonPrimitive("term_open"), "reqId" to JsonPrimitive(reqId), "target" to JsonPrimitive(target), "cols" to JsonPrimitive(cols), "rows" to JsonPrimitive(rows))
+    fun termInput(termId: String, dataB64: String) =
+        obj("t" to JsonPrimitive("term_input"), "termId" to JsonPrimitive(termId), "data" to JsonPrimitive(dataB64))
+    fun termResize(termId: String, cols: Int, rows: Int) =
+        obj("t" to JsonPrimitive("term_resize"), "termId" to JsonPrimitive(termId), "cols" to JsonPrimitive(cols), "rows" to JsonPrimitive(rows))
+    fun termClose(termId: String) =
+        obj("t" to JsonPrimitive("term_close"), "termId" to JsonPrimitive(termId))
 }

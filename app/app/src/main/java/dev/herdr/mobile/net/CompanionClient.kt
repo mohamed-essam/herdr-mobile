@@ -57,6 +57,8 @@ class CompanionClient(private val http: OkHttpClient = OkHttpClient()) {
                     is ServerFrame.PaneRead -> pending.remove(frame.reqId)?.complete(frame)
                     is ServerFrame.Ack -> pending.remove(frame.reqId)?.complete(frame)
                     is ServerFrame.ErrorFrame -> pending.remove(frame.reqId)?.complete(frame)
+                    is ServerFrame.TermOpened -> pending.remove(frame.reqId)?.complete(frame)
+                    is ServerFrame.TermError -> if (frame.reqId.isNotEmpty()) pending.remove(frame.reqId)?.complete(frame)
                     else -> {}
                 }
                 _frames.tryEmit(frame)
@@ -121,6 +123,24 @@ class CompanionClient(private val http: OkHttpClient = OkHttpClient()) {
         val f = request(id, ClientMsg.sendKeys(id, paneId, keys))
         if (f is ServerFrame.ErrorFrame) throw RuntimeException(f.message)
     }
+
+    suspend fun openTerminal(target: String, cols: Int, rows: Int): String {
+        val id = "r${seq.incrementAndGet()}"
+        return when (val f = request(id, ClientMsg.termOpen(id, target, cols, rows))) {
+            is ServerFrame.TermOpened -> f.termId
+            is ServerFrame.TermError -> throw RuntimeException(f.message)
+            else -> throw RuntimeException("unexpected reply to term_open")
+        }
+    }
+
+    fun sendTermInput(termId: String, data: ByteArray) {
+        val b64 = android.util.Base64.encodeToString(data, android.util.Base64.NO_WRAP)
+        ws?.send(ClientMsg.termInput(termId, b64))
+    }
+
+    fun sendTermResize(termId: String, cols: Int, rows: Int) { ws?.send(ClientMsg.termResize(termId, cols, rows)) }
+
+    fun closeTerminal(termId: String) { ws?.send(ClientMsg.termClose(termId)) }
 
     fun registerPush(endpoint: String) {
         lastPushEndpoint = endpoint
