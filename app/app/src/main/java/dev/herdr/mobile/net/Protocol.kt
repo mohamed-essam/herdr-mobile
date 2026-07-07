@@ -1,0 +1,63 @@
+package dev.herdr.mobile.net
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.*
+
+internal val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+
+@Serializable
+data class Pane(
+    val paneId: String,
+    val workspaceId: String = "",
+    val tabId: String = "",
+    val cwd: String = "",
+    val focused: Boolean = false,
+    val agent: String? = null,
+    val agentStatus: String? = null,
+)
+
+sealed interface ServerFrame {
+    data object Welcome : ServerFrame
+    data class Panes(val panes: List<Pane>) : ServerFrame
+    data class PaneUpdate(val pane: Pane) : ServerFrame
+    data class PaneRemoved(val paneId: String) : ServerFrame
+    data class PaneRead(val reqId: String, val paneId: String, val source: String, val text: String) : ServerFrame
+    data class Ack(val reqId: String) : ServerFrame
+    data class ErrorFrame(val reqId: String, val code: String, val message: String) : ServerFrame
+    data object Pong : ServerFrame
+    data object Unknown : ServerFrame
+}
+
+fun parseServerFrame(text: String): ServerFrame {
+    val obj = json.parseToJsonElement(text).jsonObject
+    return when (obj["t"]?.jsonPrimitive?.content) {
+        "welcome" -> ServerFrame.Welcome
+        "panes" -> ServerFrame.Panes(json.decodeFromJsonElement(obj["panes"]!!))
+        "pane_update" -> ServerFrame.PaneUpdate(json.decodeFromJsonElement(obj["pane"]!!))
+        "pane_removed" -> ServerFrame.PaneRemoved(obj["paneId"]!!.jsonPrimitive.content)
+        "pane_read" -> ServerFrame.PaneRead(
+            obj["reqId"]!!.jsonPrimitive.content, obj["paneId"]!!.jsonPrimitive.content,
+            obj["source"]!!.jsonPrimitive.content, obj["text"]!!.jsonPrimitive.content)
+        "ack" -> ServerFrame.Ack(obj["reqId"]!!.jsonPrimitive.content)
+        "error" -> ServerFrame.ErrorFrame(
+            obj["reqId"]?.jsonPrimitive?.content ?: "", obj["code"]!!.jsonPrimitive.content,
+            obj["message"]!!.jsonPrimitive.content)
+        "pong" -> ServerFrame.Pong
+        else -> ServerFrame.Unknown
+    }
+}
+
+object ClientMsg {
+    private fun obj(vararg pairs: Pair<String, JsonElement>) =
+        JsonObject(pairs.toMap()).toString()
+
+    fun hello() = obj("t" to JsonPrimitive("hello"), "client" to JsonPrimitive("herdr-mobile"), "clientVersion" to JsonPrimitive("1.0.0"))
+    fun registerPush(endpoint: String) = obj("t" to JsonPrimitive("register_push"), "endpoint" to JsonPrimitive(endpoint))
+    fun readPane(reqId: String, paneId: String, source: String, lines: Int) =
+        obj("t" to JsonPrimitive("read_pane"), "reqId" to JsonPrimitive(reqId), "paneId" to JsonPrimitive(paneId), "source" to JsonPrimitive(source), "lines" to JsonPrimitive(lines))
+    fun sendText(reqId: String, paneId: String, text: String) =
+        obj("t" to JsonPrimitive("send_text"), "reqId" to JsonPrimitive(reqId), "paneId" to JsonPrimitive(paneId), "text" to JsonPrimitive(text))
+    fun sendKeys(reqId: String, paneId: String, keys: String) =
+        obj("t" to JsonPrimitive("send_keys"), "reqId" to JsonPrimitive(reqId), "paneId" to JsonPrimitive(paneId), "keys" to JsonPrimitive(keys))
+    fun ping() = obj("t" to JsonPrimitive("ping"))
+}
