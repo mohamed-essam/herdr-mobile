@@ -12,8 +12,10 @@ type Pane struct {
 	TabID       string `json:"tabId"`
 	CWD         string `json:"cwd"`
 	Focused     bool   `json:"focused"`
-	Agent       string `json:"agent"`
-	AgentStatus string `json:"agentStatus"`
+	// omitempty so non-agent panes send no agent/agentStatus at all; the app
+	// then decodes them as null and renders "—" rather than a blank cell.
+	Agent       string `json:"agent,omitempty"`
+	AgentStatus string `json:"agentStatus,omitempty"`
 }
 
 type Change struct {
