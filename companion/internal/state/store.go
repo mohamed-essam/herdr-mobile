@@ -1,6 +1,10 @@
 package state
 
-import "github.com/messam/herdr-mobile/companion/internal/herdr"
+import (
+	"sync"
+
+	"github.com/messam/herdr-mobile/companion/internal/herdr"
+)
 
 type Pane struct {
 	PaneID      string `json:"paneId"`
@@ -23,6 +27,7 @@ type Transition struct {
 }
 
 type Store struct {
+	mu    sync.Mutex
 	panes map[string]Pane
 }
 
@@ -34,6 +39,8 @@ func toPane(i herdr.PaneInfo) Pane {
 }
 
 func (s *Store) Apply(infos []herdr.PaneInfo) ([]Change, []Transition) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var changes []Change
 	var transitions []Transition
 	seen := map[string]bool{}
@@ -65,6 +72,8 @@ func (s *Store) Apply(infos []herdr.PaneInfo) ([]Change, []Transition) {
 }
 
 func (s *Store) Snapshot() []Pane {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	out := make([]Pane, 0, len(s.panes))
 	for _, p := range s.panes {
 		out = append(out, p)

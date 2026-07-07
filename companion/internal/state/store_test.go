@@ -40,3 +40,22 @@ func TestApplyDetectsNewChangedRemoved(t *testing.T) {
 		t.Fatalf("want removed, got %+v", ch)
 	}
 }
+
+func TestStoreConcurrentApplyAndSnapshot(t *testing.T) {
+	s := NewStore()
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 1000; i++ {
+			s.Apply([]herdr.PaneInfo{{PaneID: "w1:p1", WorkspaceID: "w1", AgentStatus: "working"}})
+		}
+		close(done)
+	}()
+	for {
+		select {
+		case <-done:
+			return
+		default:
+			_ = s.Snapshot()
+		}
+	}
+}

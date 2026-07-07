@@ -1,0 +1,158 @@
+package engine
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/messam/herdr-mobile/companion/internal/herdr"
+	"github.com/messam/herdr-mobile/companion/internal/notify"
+	"github.com/messam/herdr-mobile/companion/internal/proto"
+	"github.com/messam/herdr-mobile/companion/internal/state"
+	"github.com/messam/herdr-mobile/companion/internal/wsserver"
+)
+
+type Config struct {
+	SocketPath       string
+	ListenAddr       string
+	PollInterval     time.Duration
+	DebounceFinished time.Duration
+}
+
+type Engine struct {
+	cfg    Config
+	client *herdr.Client
+	store  *state.Store
+	srv    *wsserver.Server
+
+	mu       sync.Mutex
+	endpoint string
+}
+
+func New(cfg Config) *Engine {
+	if cfg.PollInterval == 0 {
+		cfg.PollInterval = 1500 * time.Millisecond
+	}
+	if cfg.DebounceFinished == 0 {
+		cfg.DebounceFinished = 4 * time.Second
+	}
+	c := herdr.New(cfg.SocketPath)
+	e := &Engine{cfg: cfg, client: c, store: state.NewStore()}
+	e.srv = wsserver.NewServer(wsserver.AllowAll{}, c)
+	e.srv.SetInitialSnapshot(e.store.Snapshot)
+	e.srv.SetPushEndpoint(e.setEndpoint)
+	return e
+}
+
+func (e *Engine) setEndpoint(ep string) {
+	e.mu.Lock()
+	e.endpoint = ep
+	e.mu.Unlock()
+}
+
+func (e *Engine) Run(ctx context.Context) error {
+	// probe herdr version for the welcome frame (best-effort)
+	if raw, err := e.client.Call(ctx, "ping", nil); err == nil {
+		var pong struct {
+			Version  string `json:"version"`
+			Protocol int    `json:"protocol"`
+		}
+		_ = json.Unmarshal(raw, &pong)
+		e.srv.SetHerdrInfo(pong.Version, pong.Protocol)
+	}
+
+	go e.pollLoop(ctx)
+
+	httpSrv := &http.Server{Addr: e.cfg.ListenAddr, Handler: e.srv.Handler()}
+	go func() { <-ctx.Done(); shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second); defer cancel(); httpSrv.Shutdown(shutdownCtx) }()
+	err := httpSrv.ListenAndServe()
+	if err == http.ErrServerClosed {
+		return nil
+	}
+	return err
+}
+
+func (e *Engine) pollLoop(ctx context.Context) {
+	t := time.NewTicker(e.cfg.PollInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			e.pollOnce(ctx)
+		}
+	}
+}
+
+func (e *Engine) pollOnce(ctx context.Context) {
+	panes, err := e.client.ListPanes(ctx)
+	if err != nil {
+		return
+	}
+	changes, transitions := e.store.Apply(panes)
+	for _, ch := range changes {
+		if ch.Kind == "removed" {
+			e.srv.Broadcast(proto.PaneRemoved(ch.PaneID))
+		} else {
+			e.srv.Broadcast(proto.PaneUpdate(ch.Pane))
+		}
+	}
+	for _, tr := range transitions {
+		e.handleTransition(ctx, tr)
+	}
+}
+
+func (e *Engine) handleTransition(ctx context.Context, tr state.Transition) {
+	body := ""
+	if tr.To == "blocked" {
+		if txt, err := e.client.ReadPane(ctx, tr.PaneID, "detection", 40); err == nil {
+			body = lastNonEmptyLine(txt)
+		}
+	}
+	push, ok := notify.ShouldNotify(tr, body)
+	if !ok {
+		return
+	}
+	if push.Kind == "finished" {
+		// debounce: only fire if still not working after the window
+		go func() {
+			select {
+			case <-ctx.Done():
+			case <-time.After(e.cfg.DebounceFinished):
+				for _, p := range e.store.Snapshot() {
+					if p.PaneID == tr.PaneID && p.AgentStatus == "working" {
+						return // resumed; suppress
+					}
+				}
+				e.fire(ctx, push)
+			}
+		}()
+		return
+	}
+	e.fire(ctx, push)
+}
+
+func (e *Engine) fire(ctx context.Context, p notify.Push) {
+	e.mu.Lock()
+	ep := e.endpoint
+	e.mu.Unlock()
+	if ep == "" {
+		return
+	}
+	n := notify.NewHTTPNotifier(ep, http.DefaultClient)
+	_ = n.Notify(ctx, p)
+}
+
+func lastNonEmptyLine(s string) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) != "" {
+			return strings.TrimSpace(lines[i])
+		}
+	}
+	return ""
+}
