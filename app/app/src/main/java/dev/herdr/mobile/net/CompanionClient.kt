@@ -1,7 +1,13 @@
 package dev.herdr.mobile.net
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import okhttp3.*
 import java.util.concurrent.ConcurrentHashMap
@@ -15,17 +21,36 @@ class CompanionClient(private val http: OkHttpClient = OkHttpClient()) {
     private val _connected = MutableStateFlow(false)
     val connected: StateFlow<Boolean> = _connected.asStateFlow()
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var ws: WebSocket? = null
     private val seq = AtomicInteger(0)
     private val pending = ConcurrentHashMap<String, CompletableDeferred<ServerFrame>>()
 
+    @Volatile private var url: String? = null
+    @Volatile private var manualClose = false
+    @Volatile private var lastPushEndpoint: String? = null
+    private var reconnectJob: Job? = null
+    private var backoffMs = 1000L
+
     fun connect(url: String) {
-        val req = Request.Builder().url(url).build()
+        this.url = url
+        manualClose = false
+        openSocket()
+    }
+
+    private fun openSocket() {
+        val target = url ?: return
+        val req = Request.Builder().url(target).build()
         ws = http.newWebSocket(req, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                backoffMs = 1000L // reset backoff on a healthy connection
                 _connected.value = true
                 webSocket.send(ClientMsg.hello())
+                // re-assert our push endpoint after a (re)connect — the companion
+                // holds it in memory and loses it across restarts.
+                lastPushEndpoint?.let { webSocket.send(ClientMsg.registerPush(it)) }
             }
+
             override fun onMessage(webSocket: WebSocket, text: String) {
                 val frame = parseServerFrame(text)
                 when (frame) {
@@ -36,9 +61,35 @@ class CompanionClient(private val http: OkHttpClient = OkHttpClient()) {
                 }
                 _frames.tryEmit(frame)
             }
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { _connected.value = false }
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { _connected.value = false }
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                // A server-initiated close arrives here; finish the handshake and
+                // reconnect (onClosed may not fire until we complete the close).
+                _connected.value = false
+                webSocket.close(1000, null)
+                scheduleReconnect()
+            }
+
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                _connected.value = false
+                scheduleReconnect()
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                _connected.value = false
+                scheduleReconnect()
+            }
         })
+    }
+
+    private fun scheduleReconnect() {
+        if (manualClose) return
+        if (reconnectJob?.isActive == true) return
+        reconnectJob = scope.launch {
+            delay(backoffMs)
+            backoffMs = (backoffMs * 2).coerceAtMost(15_000L)
+            if (!manualClose) openSocket()
+        }
     }
 
     fun send(raw: String) { ws?.send(raw) }
@@ -71,7 +122,15 @@ class CompanionClient(private val http: OkHttpClient = OkHttpClient()) {
         if (f is ServerFrame.ErrorFrame) throw RuntimeException(f.message)
     }
 
-    fun registerPush(endpoint: String) { ws?.send(ClientMsg.registerPush(endpoint)) }
+    fun registerPush(endpoint: String) {
+        lastPushEndpoint = endpoint
+        ws?.send(ClientMsg.registerPush(endpoint))
+    }
 
-    fun close() { ws?.close(1000, "bye"); ws = null }
+    fun close() {
+        manualClose = true
+        reconnectJob?.cancel()
+        ws?.close(1000, "bye")
+        ws = null
+    }
 }
