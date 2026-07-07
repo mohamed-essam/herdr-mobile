@@ -38,6 +38,24 @@ func TestClientSendTextReachesHerdr(t *testing.T) {
 	}
 }
 
+func TestClientSendKeysSendsArray(t *testing.T) {
+	// herdr requires `keys` to be a sequence (array); a bare string is rejected.
+	f := newFakeHerdr(t)
+	c := New(f.SocketPath())
+	if err := c.SendKeys(context.Background(), "w6:p1", "enter"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case params := <-f.lastSend:
+		keys, ok := params["keys"].([]any)
+		if !ok || len(keys) != 1 || keys[0] != "enter" {
+			t.Fatalf("keys must be a 1-element array [\"enter\"], got %#v", params["keys"])
+		}
+	case <-time.After(time.Second):
+		t.Fatal("send_keys never reached herdr")
+	}
+}
+
 func TestClientCallPropagatesRPCError(t *testing.T) {
 	f := newFakeHerdr(t)
 	c := New(f.SocketPath())

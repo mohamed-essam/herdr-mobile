@@ -83,7 +83,10 @@ func (c *Client) SendText(ctx context.Context, paneID, text string) error {
 }
 
 func (c *Client) SendKeys(ctx context.Context, paneID, keys string) error {
-	_, err := c.Call(ctx, "pane.send_keys", map[string]any{"pane_id": paneID, "keys": keys})
+	// herdr's pane.send_keys expects `keys` as a sequence (array) of key-combo
+	// strings, not a single string — a bare string is rejected with
+	// "invalid type: string, expected a sequence". We send one combo per call.
+	_, err := c.Call(ctx, "pane.send_keys", map[string]any{"pane_id": paneID, "keys": []string{keys}})
 	return err
 }
 
