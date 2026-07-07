@@ -1,5 +1,6 @@
 package dev.herdr.mobile.ui
 
+import android.content.Context
 import android.view.KeyEvent
 import android.view.MotionEvent
 import com.termux.terminal.TerminalSession
@@ -9,7 +10,11 @@ import com.termux.view.TerminalViewClient
 /** No-frills client: default gestures, hardware-key passthrough, no logging. */
 class TerminalViewClientImpl(private val view: TerminalView) : TerminalViewClient {
     override fun onScale(scale: Float): Float = 1.0f
-    override fun onSingleTapUp(e: MotionEvent) { view.requestFocus() }
+    override fun onSingleTapUp(e: MotionEvent) {
+        view.requestFocus()
+        val imm = view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+        imm.showSoftInput(view, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+    }
     override fun shouldBackButtonBeMappedToEscape(): Boolean = false
     override fun shouldEnforceCharBasedInput(): Boolean = true
     override fun shouldUseCtrlSpaceWorkaround(): Boolean = false

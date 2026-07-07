@@ -73,6 +73,8 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
             factory = { ctx ->
                 TerminalView(ctx, null).apply {
                     setTextSize(36)
+                    isFocusable = true
+                    isFocusableInTouchMode = true
                     val client = TerminalViewClientImpl(this)
                     setTerminalViewClient(client)
                     val sessionClient = terminalSessionClient(this)
@@ -107,7 +109,10 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
                                 .onFailure { status = "failed: ${it.message}" }
                         }
                     }
-                    doOnLayout { openWhenEmulatorReady() }
+                    doOnLayout {
+                        requestFocus()
+                        openWhenEmulatorReady()
+                    }
                 }
             },
         )
