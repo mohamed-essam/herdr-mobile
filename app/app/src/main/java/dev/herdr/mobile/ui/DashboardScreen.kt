@@ -1,13 +1,18 @@
 package dev.herdr.mobile.ui
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.herdr.mobile.net.Pane
+import dev.herdr.mobile.ui.theme.statusColor
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -23,17 +28,125 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
         }
     }
 
-    Scaffold(topBar = {
-        TopAppBar(title = { Text("herdr") }, actions = {
-            Text(if (connected) "●" else "○", modifier = Modifier.padding(end = 16.dp))
-        })
-    }) { pad ->
-        LazyColumn(Modifier.padding(pad).fillMaxSize()) {
-            items(panes, key = { it.paneId }) { PaneRow(it) { p -> selected = p } }
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = { HerdrTopBar(connected, panes.size) },
+    ) { pad ->
+        Column(Modifier.padding(pad).fillMaxSize()) {
+            if (!connected) ReconnectingBanner()
+            if (panes.isEmpty()) {
+                EmptyState(connected)
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(vertical = 8.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(panes, key = { it.paneId }) { PaneRow(it) { p -> selected = p } }
+                }
+            }
         }
     }
 
     selected?.let { pane ->
         QuickReplySheet(vm, pane) { selected = null }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HerdrTopBar(connected: Boolean, count: Int) {
+    val dark = isSystemInDarkTheme()
+    TopAppBar(
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+        ),
+        title = {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("herdr", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        "  ❯",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Text(
+                    "one terminal for the whole herd",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        actions = {
+            val color = if (connected) statusColor("done", dark) else statusColor("working", dark)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(end = 16.dp),
+            ) {
+                if (connected) {
+                    Text("●", color = color, style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "$count",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                } else {
+                    Text(spinnerFrame(), color = color, style = MaterialTheme.typography.titleMedium)
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun ReconnectingBanner() {
+    Surface(color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        ) {
+            Text(
+                spinnerFrame(),
+                color = statusColor("working", isSystemInDarkTheme()),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                "reconnecting to companion…",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmptyState(connected: Boolean) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                if (connected) "◌" else "⠿",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                if (connected) "no panes yet" else "connecting…",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            if (connected) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "start an agent in herdr and it'll show up here",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
     }
 }

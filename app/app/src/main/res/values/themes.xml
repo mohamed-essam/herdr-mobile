@@ -4,5 +4,9 @@
          theme-aware light/dark) in ui/theme; this only needs to provide a
          no-action-bar window that exists at minSdk 26 without pulling in the
          View-based Material Components library. -->
-    <style name="Theme.HerdrMobile" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.HerdrMobile" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/herdr_window</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
 </resources>

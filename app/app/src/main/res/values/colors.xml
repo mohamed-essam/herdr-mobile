@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Pre-Compose window background. Day = Catppuccin Latte crust. -->
+    <color name="herdr_window">#FFDCE0E8</color>
+</resources>
