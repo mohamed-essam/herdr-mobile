@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -193,6 +194,9 @@ func (c *client) closeTerm(id string) {
 	delete(c.sessions, id)
 	c.smu.Unlock()
 	if sess != nil {
+		// sess.Close() kills the child, which makes its PTY read loop exit and
+		// still fire onExit -> term_exit; that's intentional, not a double-signal
+		// bug — an explicit term_close is expected to be followed by term_exit.
 		_ = sess.Close()
 	}
 }
@@ -208,6 +212,12 @@ func (c *client) closeAll() {
 }
 
 func (s *Server) openTerm(ctx context.Context, c *client, reqID, target string, cols, rows int) {
+	// target flows unauthenticated-WS-client -> argv for `herdr agent attach`;
+	// reject anything that could be smuggled in as a flag rather than a pane/agent id.
+	if target == "" || strings.HasPrefix(target, "-") {
+		c.send <- proto.TermError(reqID, "", "invalid target")
+		return
+	}
 	c.smu.Lock()
 	over := len(c.sessions) >= maxTerms
 	c.smu.Unlock()
