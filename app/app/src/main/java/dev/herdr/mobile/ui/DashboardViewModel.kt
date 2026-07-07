@@ -20,15 +20,6 @@ class DashboardViewModel(
         client.connect(url)
     }
 
-    suspend fun peek(paneId: String): String = client.readPane(paneId)
-
-    suspend fun reply(paneId: String, text: String, sendEnter: Boolean) {
-        if (text.isNotEmpty()) client.sendText(paneId, text)
-        if (sendEnter) client.sendKeys(paneId, "enter")
-    }
-
-    suspend fun quickKey(paneId: String, key: String) = client.sendKeys(paneId, key)
-
     fun registerPush(endpoint: String) = client.registerPush(endpoint)
 
     suspend fun openTerminal(target: String, cols: Int, rows: Int) = client.openTerminal(target, cols, rows)

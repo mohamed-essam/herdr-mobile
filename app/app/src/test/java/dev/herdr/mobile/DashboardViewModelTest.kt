@@ -17,7 +17,7 @@ class DashboardViewModelTest {
     @Before fun setUp() { Dispatchers.setMain(Dispatchers.Unconfined) }
     @After fun tearDown() { Dispatchers.resetMain() }
 
-    @Test fun pumpsFramesIntoRepoAndPeeksPane() = runBlocking {
+    @Test fun pumpsFramesIntoRepoAndReadsPaneViaClient() = runBlocking {
         val server = MockWebServer()
         server.enqueue(MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
             override fun onOpen(ws: WebSocket, response: Response) {
@@ -32,11 +32,12 @@ class DashboardViewModelTest {
             }
         }))
         server.start()
-        val vm = DashboardViewModel(CompanionClient(), PaneRepository())
+        val client = CompanionClient()
+        val vm = DashboardViewModel(client, PaneRepository())
         vm.start(server.url("/").toString().replace("http", "ws"))
         withTimeout(3000) { while (vm.panes.value.isEmpty()) delay(20) }
         assertEquals("blocked", vm.panes.value.first().agentStatus)
-        val text = vm.peek("w6:p1")
+        val text = client.readPane("w6:p1")
         assertEquals("Proceed? (y/n)", text)
         server.shutdown()
     }

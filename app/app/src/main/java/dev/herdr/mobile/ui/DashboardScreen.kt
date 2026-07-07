@@ -21,11 +21,15 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
     val connected by vm.connected.collectAsState()
     var selected by remember { mutableStateOf<Pane?>(null) }
 
-    // open the sheet if launched from a notification
     LaunchedEffect(initialPaneId, panes) {
         if (initialPaneId != null && selected == null) {
-            panes.firstOrNull { it.paneId == initialPaneId }?.let { selected = it }
+            panes.firstOrNull { it.paneId == initialPaneId && it.agent != null }?.let { selected = it }
         }
+    }
+
+    selected?.let { pane ->
+        TerminalScreen(vm, pane) { selected = null }
+        return   // full-screen terminal replaces the dashboard while open
     }
 
     Scaffold(
@@ -37,18 +41,13 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
             if (panes.isEmpty()) {
                 EmptyState(connected)
             } else {
-                LazyColumn(
-                    contentPadding = PaddingValues(vertical = 8.dp),
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    items(panes, key = { it.paneId }) { PaneRow(it) { p -> selected = p } }
+                LazyColumn(contentPadding = PaddingValues(vertical = 8.dp), modifier = Modifier.fillMaxSize()) {
+                    items(panes, key = { it.paneId }) { pane ->
+                        PaneRow(pane) { p -> if (p.agent != null) selected = p }
+                    }
                 }
             }
         }
-    }
-
-    selected?.let { pane ->
-        QuickReplySheet(vm, pane) { selected = null }
     }
 }
 
