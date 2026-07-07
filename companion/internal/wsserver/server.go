@@ -2,11 +2,15 @@ package wsserver
 
 import (
 	"context"
+	"encoding/base64"
 	"net/http"
+	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"github.com/coder/websocket"
 	"github.com/messam/herdr-mobile/companion/internal/proto"
+	"github.com/messam/herdr-mobile/companion/internal/pty"
 	"github.com/messam/herdr-mobile/companion/internal/state"
 )
 
@@ -24,19 +28,26 @@ type Server struct {
 	herdrVer  string
 	herdrProt int
 
+	termSeq    atomic.Uint64
+	attachArgv func(target string) []string
+
 	mu      sync.Mutex
 	clients map[*client]struct{}
 }
 
 type client struct {
-	conn *websocket.Conn
-	send chan []byte
+	conn     *websocket.Conn
+	send     chan []byte
+	sessions map[string]*pty.Session
+	smu      sync.Mutex
 }
 
 func NewServer(auth Authorizer, rpc HerdrRPC) *Server {
-	return &Server{auth: auth, rpc: rpc, clients: map[*client]struct{}{},
+	srv := &Server{auth: auth, rpc: rpc, clients: map[*client]struct{}{},
 		snapshot: func() []state.Pane { return nil }, onPush: func(string) {},
 		herdrVer: "unknown", herdrProt: 0}
+	srv.attachArgv = func(target string) []string { return []string{"herdr", "agent", "attach", target} }
+	return srv
 }
 
 func (s *Server) SetInitialSnapshot(fn func() []state.Pane) { s.snapshot = fn }
@@ -68,12 +79,12 @@ func (s *Server) Handler() http.Handler {
 		if err != nil {
 			return
 		}
-		c := &client{conn: conn, send: make(chan []byte, 64)}
+		c := &client{conn: conn, send: make(chan []byte, 64), sessions: map[string]*pty.Session{}}
 		// enqueue welcome + snapshot BEFORE the client is visible to Broadcast
 		c.send <- proto.Welcome(s.herdrVer, s.herdrProt)
 		c.send <- proto.PanesSnapshot(s.snapshot())
 		s.add(c)
-		defer s.remove(c)
+		defer func() { c.closeAll(); s.remove(c) }()
 
 		ctx := r.Context()
 		go s.writeLoop(ctx, c)
@@ -140,6 +151,92 @@ func (s *Server) readLoop(ctx context.Context, c *client) {
 				continue
 			}
 			c.send <- proto.Ack(m.ReqID)
+		case "term_open":
+			s.openTerm(ctx, c, m.ReqID, m.Target, m.Cols, m.Rows)
+		case "term_input":
+			if sess := c.get(m.TermID); sess != nil {
+				if data, err := base64.StdEncoding.DecodeString(m.Data); err == nil {
+					_ = sess.Write(data)
+				}
+			}
+		case "term_resize":
+			if sess := c.get(m.TermID); sess != nil {
+				_ = sess.Resize(uint16(m.Cols), uint16(m.Rows))
+			}
+		case "term_close":
+			c.closeTerm(m.TermID)
 		}
 	}
+}
+
+// sendBlocking enqueues frame on c.send, blocking until it fits (or ctx is
+// done). Terminal data must never be silently dropped the way pane
+// broadcasts are, so this backpressures the PTY read loop instead.
+func sendBlocking(ctx context.Context, c *client, frame []byte) {
+	select {
+	case c.send <- frame:
+	case <-ctx.Done():
+	}
+}
+
+const maxTerms = 8
+
+func (c *client) get(id string) *pty.Session {
+	c.smu.Lock()
+	defer c.smu.Unlock()
+	return c.sessions[id]
+}
+
+func (c *client) closeTerm(id string) {
+	c.smu.Lock()
+	sess := c.sessions[id]
+	delete(c.sessions, id)
+	c.smu.Unlock()
+	if sess != nil {
+		_ = sess.Close()
+	}
+}
+
+func (c *client) closeAll() {
+	c.smu.Lock()
+	all := c.sessions
+	c.sessions = map[string]*pty.Session{}
+	c.smu.Unlock()
+	for _, s := range all {
+		_ = s.Close()
+	}
+}
+
+func (s *Server) openTerm(ctx context.Context, c *client, reqID, target string, cols, rows int) {
+	c.smu.Lock()
+	over := len(c.sessions) >= maxTerms
+	c.smu.Unlock()
+	if over {
+		c.send <- proto.TermError(reqID, "", "too many terminals")
+		return
+	}
+	if cols <= 0 {
+		cols = 80
+	}
+	if rows <= 0 {
+		rows = 24
+	}
+	termID := "t" + strconv.FormatUint(s.termSeq.Add(1), 10)
+	sess, err := pty.Start(s.attachArgv(target), uint16(cols), uint16(rows),
+		func(b []byte) {
+			sendBlocking(ctx, c, proto.TermData(termID, base64.StdEncoding.EncodeToString(b)))
+		},
+		func(code int) {
+			c.closeTerm(termID)
+			sendBlocking(ctx, c, proto.TermExit(termID, code))
+		},
+	)
+	if err != nil {
+		c.send <- proto.TermError(reqID, "", err.Error())
+		return
+	}
+	c.smu.Lock()
+	c.sessions[termID] = sess
+	c.smu.Unlock()
+	c.send <- proto.TermOpened(reqID, termID)
 }
