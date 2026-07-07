@@ -6,6 +6,7 @@
     <application
         android:label="herdr"
         android:theme="@style/Theme.HerdrMobile"
+        android:usesCleartextTraffic="true"
         android:allowBackup="true">
         <activity
             android:name=".MainActivity"
