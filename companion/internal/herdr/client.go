@@ -86,3 +86,53 @@ func (c *Client) SendKeys(ctx context.Context, paneID, keys string) error {
 	_, err := c.Call(ctx, "pane.send_keys", map[string]any{"pane_id": paneID, "keys": keys})
 	return err
 }
+
+func (c *Client) Subscribe(ctx context.Context, paneID, eventType string) (<-chan Event, error) {
+	conn, err := c.dial(ctx)
+	if err != nil {
+		return nil, err
+	}
+	id := "s" + strconv.FormatUint(c.seq.Add(1), 10)
+	req := map[string]any{"id": id, "method": "events.subscribe",
+		"params": map[string]any{"subscriptions": []map[string]any{{"type": eventType, "pane_id": paneID}}}}
+	b, _ := json.Marshal(req)
+	if _, err := conn.Write(append(b, '\n')); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	out := make(chan Event, 16)
+	go func() {
+		defer close(out)
+		defer conn.Close()
+		done := make(chan struct{})
+		defer close(done)
+		go func() {
+			select {
+			case <-ctx.Done():
+				conn.Close()
+			case <-done:
+			}
+		}()
+		r := bufio.NewReader(conn)
+		first := true
+		for {
+			line, err := r.ReadBytes('\n')
+			if err != nil {
+				return
+			}
+			if first {
+				first = false // skip subscription_started
+				continue
+			}
+			var e Event
+			if json.Unmarshal(line, &e) == nil && e.Type != "" {
+				select {
+				case out <- e:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+	return out, nil
+}
