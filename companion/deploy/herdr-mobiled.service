@@ -1,0 +1,13 @@
+[Unit]
+Description=herdr-mobile companion daemon
+After=network-online.target
+
+[Service]
+# Bind to your Tailscale IP so the API is reachable only on your tailnet.
+# Find it with: tailscale ip -4
+ExecStart=%h/.local/bin/herdr-mobiled --listen %i:8787
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
