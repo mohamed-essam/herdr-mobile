@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -175,7 +176,7 @@ func (e *Engine) handleTransition(ctx context.Context, tr state.Transition) {
 			body = lastNonEmptyLine(txt)
 		}
 	}
-	push, ok := notify.ShouldNotify(tr, body)
+	push, ok := notify.ShouldNotify(tr, e.displayName(tr.PaneID), body)
 	if !ok {
 		return
 	}
@@ -196,6 +197,21 @@ func (e *Engine) handleTransition(ctx context.Context, tr state.Transition) {
 		return
 	}
 	e.fire(ctx, push)
+}
+
+// displayName returns the friendly pane name for notification titles: the cwd
+// basename (the project folder, e.g. "omega3") if present, else the workspace
+// id. Read from the store snapshot since a Transition carries only the id.
+func (e *Engine) displayName(paneID string) string {
+	for _, p := range e.store.Snapshot() {
+		if p.PaneID == paneID {
+			if b := filepath.Base(p.CWD); b != "" && b != "." && b != string(filepath.Separator) {
+				return b
+			}
+			return p.WorkspaceID
+		}
+	}
+	return ""
 }
 
 func (e *Engine) fire(ctx context.Context, p notify.Push) {

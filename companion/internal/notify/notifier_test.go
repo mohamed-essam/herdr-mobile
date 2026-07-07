@@ -11,17 +11,30 @@ import (
 )
 
 func TestShouldNotifyBlocked(t *testing.T) {
-	p, ok := ShouldNotify(state.Transition{PaneID: "w6:p1", WorkspaceID: "w6", From: "working", To: "blocked"}, "Proceed? (y/n)")
+	p, ok := ShouldNotify(state.Transition{PaneID: "w6:p1", WorkspaceID: "w6", From: "working", To: "blocked"}, "", "Proceed? (y/n)")
 	if !ok || p.Kind != "blocked" || p.Title != "w6 needs you" || p.Body != "Proceed? (y/n)" {
 		t.Fatalf("bad blocked push: %+v ok=%v", p, ok)
 	}
 }
 
+func TestShouldNotifyUsesDisplayName(t *testing.T) {
+	// A friendly display name (the project/cwd basename) wins over the raw
+	// workspace id in the title.
+	p, ok := ShouldNotify(state.Transition{PaneID: "w7:p1", WorkspaceID: "w7", From: "working", To: "done"}, "omega3", "")
+	if !ok || p.Title != "omega3 finished" {
+		t.Fatalf("display name should drive the title, got %+v ok=%v", p, ok)
+	}
+	// And the WorkspaceID field still carries the raw id for the app.
+	if p.WorkspaceID != "w7" {
+		t.Fatalf("workspaceId should stay the raw id, got %q", p.WorkspaceID)
+	}
+}
+
 func TestShouldNotifyFinishedOnlyFromWorking(t *testing.T) {
-	if _, ok := ShouldNotify(state.Transition{WorkspaceID: "w6", From: "idle", To: "done"}, ""); ok {
+	if _, ok := ShouldNotify(state.Transition{WorkspaceID: "w6", From: "idle", To: "done"}, "", ""); ok {
 		t.Fatal("idle->done should not notify")
 	}
-	p, ok := ShouldNotify(state.Transition{WorkspaceID: "w6", From: "working", To: "idle"}, "")
+	p, ok := ShouldNotify(state.Transition{WorkspaceID: "w6", From: "working", To: "idle"}, "", "")
 	if !ok || p.Kind != "finished" || p.Title != "w6 finished" {
 		t.Fatalf("working->idle should be a finished push, got %+v ok=%v", p, ok)
 	}
@@ -31,7 +44,7 @@ func TestShouldNotifyFinishedOnlyFromWorking(t *testing.T) {
 }
 
 func TestShouldNotifyIgnoresOther(t *testing.T) {
-	if _, ok := ShouldNotify(state.Transition{From: "idle", To: "working"}, ""); ok {
+	if _, ok := ShouldNotify(state.Transition{From: "idle", To: "working"}, "", ""); ok {
 		t.Fatal("idle->working should not notify")
 	}
 }

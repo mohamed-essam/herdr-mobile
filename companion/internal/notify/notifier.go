@@ -22,16 +22,22 @@ type Notifier interface {
 	Notify(ctx context.Context, p Push) error
 }
 
-// ShouldNotify encodes the two v1 triggers. lastBody is the last non-empty
-// output line for the pane (used as the blocked notification body).
-func ShouldNotify(tr state.Transition, lastBody string) (Push, bool) {
+// ShouldNotify encodes the two v1 triggers. displayName is the friendly pane
+// name shown in the title (the project/cwd basename); it falls back to the
+// workspace id when empty. lastBody is the last non-empty output line for the
+// pane (used as the blocked notification body).
+func ShouldNotify(tr state.Transition, displayName, lastBody string) (Push, bool) {
+	name := displayName
+	if name == "" {
+		name = tr.WorkspaceID
+	}
 	switch {
 	case tr.To == "blocked":
 		return Push{Kind: "blocked", PaneID: tr.PaneID, WorkspaceID: tr.WorkspaceID,
-			Title: tr.WorkspaceID + " needs you", Body: lastBody}, true
+			Title: name + " needs you", Body: lastBody}, true
 	case tr.From == "working" && (tr.To == "idle" || tr.To == "done"):
 		return Push{Kind: "finished", PaneID: tr.PaneID, WorkspaceID: tr.WorkspaceID,
-			Title: tr.WorkspaceID + " finished", Body: ""}, true
+			Title: name + " finished", Body: ""}, true
 	default:
 		return Push{}, false
 	}
