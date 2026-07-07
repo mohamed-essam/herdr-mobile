@@ -1,0 +1,13 @@
+# Go
+/companion/herdr-mobiled
+*.test
+*.out
+# Android
+/app/.gradle/
+/app/build/
+/app/app/build/
+/app/local.properties
+/app/.idea/
+*.apk
+# misc
+.DS_Store
