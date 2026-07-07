@@ -17,6 +17,11 @@ type ClientMsg struct {
 	Lines         int    `json:"lines"`
 	Text          string `json:"text"`
 	Keys          string `json:"keys"`
+	TermID        string `json:"termId"`
+	Target        string `json:"target"`
+	Cols          int    `json:"cols"`
+	Rows          int    `json:"rows"`
+	Data          string `json:"data"`
 }
 
 func ParseClient(b []byte) (ClientMsg, error) {
@@ -28,7 +33,7 @@ func ParseClient(b []byte) (ClientMsg, error) {
 func must(v any) []byte { b, _ := json.Marshal(v); return b }
 
 func Welcome(version string, protocol int) []byte {
-	return must(map[string]any{"t": "welcome", "herdrVersion": version, "herdrProtocol": protocol, "companionProtocol": 1})
+	return must(map[string]any{"t": "welcome", "herdrVersion": version, "herdrProtocol": protocol, "companionProtocol": 2})
 }
 func PanesSnapshot(p []state.Pane) []byte {
 	return must(map[string]any{"t": "panes", "panes": p})
@@ -43,3 +48,15 @@ func ErrorFrame(reqID, code, message string) []byte {
 	return must(map[string]any{"t": "error", "reqId": reqID, "code": code, "message": message})
 }
 func Pong() []byte { return must(map[string]any{"t": "pong"}) }
+func TermOpened(reqID, termID string) []byte {
+	return must(map[string]any{"t": "term_opened", "reqId": reqID, "termId": termID})
+}
+func TermData(termID, dataB64 string) []byte {
+	return must(map[string]any{"t": "term_data", "termId": termID, "data": dataB64})
+}
+func TermExit(termID string, code int) []byte {
+	return must(map[string]any{"t": "term_exit", "termId": termID, "code": code})
+}
+func TermError(reqID, termID, message string) []byte {
+	return must(map[string]any{"t": "term_error", "reqId": reqID, "termId": termID, "message": message})
+}
