@@ -16,3 +16,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "herdr-mobile"
 include(":app")
+include(":terminal-emulator")
+include(":terminal-view")

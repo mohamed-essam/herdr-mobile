@@ -56,6 +56,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.datastore.preferences)
     implementation(libs.unifiedpush)
+    implementation(project(":terminal-view"))
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
