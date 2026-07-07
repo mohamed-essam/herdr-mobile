@@ -99,8 +99,12 @@ class CompanionClient(private val http: OkHttpClient = OkHttpClient()) {
     private suspend fun request(reqId: String, raw: String): ServerFrame {
         val d = CompletableDeferred<ServerFrame>()
         pending[reqId] = d
-        ws?.send(raw)
-        return withTimeout(8000) { d.await() }
+        try {
+            ws?.send(raw)
+            return withTimeout(8000) { d.await() }
+        } finally {
+            pending.remove(reqId)
+        }
     }
 
     suspend fun readPane(paneId: String, source: String = "detection", lines: Int = 40): String {
