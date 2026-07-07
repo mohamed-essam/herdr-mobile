@@ -86,6 +86,7 @@ type fakeHerdr struct {
 	path  string
 	mu    sync.Mutex
 	panes []herdr.PaneInfo
+	subs  []chan map[string]any
 }
 
 func newFakeHerdr(t *testing.T) *fakeHerdr {
@@ -98,7 +99,15 @@ func newFakeHerdr(t *testing.T) *fakeHerdr {
 	}
 	f := &fakeHerdr{ln: ln, path: path}
 	go f.serve()
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(func() {
+		ln.Close()
+		f.mu.Lock()
+		for _, ch := range f.subs {
+			close(ch)
+		}
+		f.subs = nil
+		f.mu.Unlock()
+	})
 	return f
 }
 
@@ -141,8 +150,30 @@ func (f *fakeHerdr) handle(c net.Conn) {
 		enc.Encode(map[string]any{"id": req.ID, "result": map[string]any{"type": "pane_list", "panes": panes}})
 	case "pane.read":
 		enc.Encode(map[string]any{"id": req.ID, "result": map[string]any{"type": "pane_read", "read": map[string]any{"pane_id": req.Params["pane_id"], "source": req.Params["source"], "text": ""}}})
+	case "events.subscribe":
+		ch := make(chan map[string]any, 16)
+		f.mu.Lock()
+		f.subs = append(f.subs, ch)
+		f.mu.Unlock()
+		enc.Encode(map[string]any{"id": req.ID, "result": map[string]any{"type": "subscription_started"}})
+		for ev := range ch {
+			if err := enc.Encode(ev); err != nil {
+				return
+			}
+		}
 	default:
 		enc.Encode(map[string]any{"id": req.ID, "error": map[string]any{"code": "unknown_method", "message": req.Method}})
+	}
+}
+
+func (f *fakeHerdr) PushEvent(paneID, status string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, ch := range f.subs {
+		select {
+		case ch <- map[string]any{"type": "pane.agent_status_changed", "pane_id": paneID, "agent_status": status}:
+		default:
+		}
 	}
 }
 
@@ -175,5 +206,45 @@ func TestEngineFiresBlockedPushToRegisteredEndpoint(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("no push fired")
+	}
+}
+
+func TestEngineSubscriptionTriggersFastPoll(t *testing.T) {
+	f := newFakeHerdr(t)
+	f.SetPanes([]herdr.PaneInfo{{PaneID: "w6:p1", WorkspaceID: "w6", Agent: "claude", AgentStatus: "working"}})
+
+	gotPush := make(chan map[string]any, 1)
+	pushSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var m map[string]any
+		json.NewDecoder(r.Body).Decode(&m)
+		select {
+		case gotPush <- m:
+		default:
+		}
+	}))
+	defer pushSrv.Close()
+
+	// Poll interval long enough that the TICKER cannot be what delivers the push.
+	e := New(Config{SocketPath: f.SocketPath(), ListenAddr: "127.0.0.1:0", PollInterval: 5 * time.Second})
+	e.setEndpoint(pushSrv.URL)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go e.pollLoop(ctx)
+
+	// Let the immediate first poll establish "working" and open the subscription.
+	time.Sleep(300 * time.Millisecond)
+
+	// Flip to blocked and notify via the subscription (not the ticker).
+	f.SetPanes([]herdr.PaneInfo{{PaneID: "w6:p1", WorkspaceID: "w6", Agent: "claude", AgentStatus: "blocked"}})
+	f.PushEvent("w6:p1", "blocked")
+
+	select {
+	case m := <-gotPush:
+		if m["kind"] != "blocked" {
+			t.Fatalf("want blocked push, got %v", m)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("subscription did not trigger a fast poll/push within 2s (ticker is 5s)")
 	}
 }

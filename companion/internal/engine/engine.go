@@ -30,6 +30,9 @@ type Engine struct {
 
 	mu       sync.Mutex
 	endpoint string
+
+	trigger chan struct{}
+	subs    map[string]context.CancelFunc
 }
 
 func New(cfg Config) *Engine {
@@ -44,6 +47,8 @@ func New(cfg Config) *Engine {
 	e.srv = wsserver.NewServer(wsserver.AllowAll{}, c)
 	e.srv.SetInitialSnapshot(e.store.Snapshot)
 	e.srv.SetPushEndpoint(e.setEndpoint)
+	e.trigger = make(chan struct{}, 1)
+	e.subs = map[string]context.CancelFunc{}
 	return e
 }
 
@@ -78,13 +83,70 @@ func (e *Engine) Run(ctx context.Context) error {
 func (e *Engine) pollLoop(ctx context.Context) {
 	t := time.NewTicker(e.cfg.PollInterval)
 	defer t.Stop()
+	defer e.cancelAllSubs()
+	// immediate first poll + subscribe so we don't wait a full interval
+	e.pollOnce(ctx)
+	e.reconcileSubs(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 			e.pollOnce(ctx)
+			e.reconcileSubs(ctx)
+		case <-e.trigger:
+			e.pollOnce(ctx)
+			e.reconcileSubs(ctx)
 		}
+	}
+}
+
+// reconcileSubs opens a per-pane agent_status_changed subscription for every
+// agent-bearing pane and cancels subscriptions for panes that are gone. Runs
+// only on the poll goroutine, so e.subs needs no lock. Subscription events
+// poke e.trigger (coalesced), causing an immediate pollOnce — the store stays
+// the single transition source, so notifications never double-fire.
+func (e *Engine) reconcileSubs(ctx context.Context) {
+	desired := map[string]bool{}
+	for _, p := range e.store.Snapshot() {
+		if p.Agent != "" {
+			desired[p.PaneID] = true
+		}
+	}
+	for id := range desired {
+		if _, ok := e.subs[id]; ok {
+			continue
+		}
+		cctx, cancel := context.WithCancel(ctx)
+		ch, err := e.client.Subscribe(cctx, id, "pane.agent_status_changed")
+		if err != nil {
+			cancel()
+			continue
+		}
+		e.subs[id] = cancel
+		go e.drainSub(ch)
+	}
+	for id, cancel := range e.subs {
+		if !desired[id] {
+			cancel()
+			delete(e.subs, id)
+		}
+	}
+}
+
+func (e *Engine) drainSub(ch <-chan herdr.Event) {
+	for range ch {
+		select {
+		case e.trigger <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (e *Engine) cancelAllSubs() {
+	for id, cancel := range e.subs {
+		cancel()
+		delete(e.subs, id)
 	}
 }
 
