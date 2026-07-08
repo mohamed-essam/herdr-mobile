@@ -47,7 +47,12 @@ func NewServer(auth Authorizer, rpc HerdrRPC) *Server {
 	srv := &Server{auth: auth, rpc: rpc, clients: map[*client]struct{}{},
 		snapshot: func() []state.Pane { return nil }, onPush: func(string) {},
 		herdrVer: "unknown", herdrProt: 0}
-	srv.attachArgv = func(target string) []string { return []string{"herdr", "agent", "attach", target} }
+	// --takeover: the phone seizes the pane's attachment even if a client (e.g. the
+	// desktop herdr TUI or a stale attach) already holds it. --takeover is a fixed
+	// literal we control, not client input, so it can't be a flag-injection vector.
+	srv.attachArgv = func(target string) []string {
+		return []string{"herdr", "agent", "attach", target, "--takeover"}
+	}
 	return srv
 }
 
