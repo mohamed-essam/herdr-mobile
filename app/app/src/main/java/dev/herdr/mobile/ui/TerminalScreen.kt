@@ -28,6 +28,8 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
     var termId by remember { mutableStateOf<String?>(null) }
     var session by remember { mutableStateOf<RemoteTerminalSession?>(null) }
     var view by remember { mutableStateOf<TerminalView?>(null) }
+    var client by remember { mutableStateOf<TerminalViewClientImpl?>(null) }
+    val storedFont by vm.terminalFontSize.collectAsState()
     var emulatorReady by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("connecting…") }
     val title = pane.cwd.substringAfterLast('/').ifBlank { pane.workspaceId.ifBlank { pane.paneId } }
@@ -70,6 +72,12 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
             .onFailure { status = "failed: ${it.message}" }
     }
 
+    // Apply a stored font size that arrives after the view was created.
+    LaunchedEffect(storedFont) {
+        val px = storedFont ?: return@LaunchedEffect
+        client?.applyFontSize(px)
+    }
+
     DisposableEffect(Unit) {
         onDispose { termId?.let { vm.closeTerminal(it) } }
     }
@@ -96,10 +104,15 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
             modifier = Modifier.padding(pad).fillMaxSize(),
             factory = { ctx ->
                 TerminalView(ctx, null).apply {
-                    setTextSize(36)
+                    val density = ctx.resources.displayMetrics.density
+                    val bounds = fontBounds(density)
+                    val initialPx = storedFont ?: bounds.default
+                    val c = TerminalViewClientImpl(this, initialPx, bounds) { vm.setTerminalFontSize(it) }
+                    client = c
+                    setTextSize(initialPx)
                     isFocusable = true
                     isFocusableInTouchMode = true
-                    setTerminalViewClient(TerminalViewClientImpl(this))
+                    setTerminalViewClient(c)
                     val sess = RemoteTerminalSession(terminalSessionClient(this), object : RemoteTerminalSession.Io {
                         override fun sendInput(data: ByteArray) { termId?.let { vm.termInput(it, data) } }
                         override fun sendResize(cols: Int, rows: Int) { termId?.let { vm.termResize(it, cols, rows) } }

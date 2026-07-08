@@ -7,9 +7,30 @@ import com.termux.terminal.TerminalSession
 import com.termux.view.TerminalView
 import com.termux.view.TerminalViewClient
 
-/** No-frills client: default gestures, hardware-key passthrough, no logging. */
-class TerminalViewClientImpl(private val view: TerminalView) : TerminalViewClient {
-    override fun onScale(scale: Float): Float = 1.0f
+/** No-frills client: pinch-to-zoom font sizing, hardware-key passthrough, no logging. */
+class TerminalViewClientImpl(
+    private val view: TerminalView,
+    initialPx: Int,
+    private val bounds: FontBounds,
+    private val onFontSizeChanged: (Int) -> Unit,
+) : TerminalViewClient {
+    private var textSizePx = initialPx
+
+    /** Apply a size without notifying the persist callback (used to seed a stored value). */
+    fun applyFontSize(px: Int) {
+        textSizePx = px
+        view.setTextSize(px)
+    }
+
+    override fun onScale(scale: Float): Float {
+        val next = steppedFontSize(textSizePx, scale, bounds) ?: return scale
+        if (next != textSizePx) {
+            textSizePx = next
+            view.setTextSize(next)
+            onFontSizeChanged(next)
+        }
+        return 1.0f // threshold crossed: reset the gesture accumulator
+    }
     override fun onSingleTapUp(e: MotionEvent) {
         view.requestFocus()
         val imm = view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
