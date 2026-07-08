@@ -20,18 +20,20 @@ import com.termux.terminal.TerminalSession
 import com.termux.view.TerminalView
 import dev.herdr.mobile.net.Pane
 import dev.herdr.mobile.net.ServerFrame
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
-    val scope = rememberCoroutineScope()
+    val connected by vm.connected.collectAsState()
     var termId by remember { mutableStateOf<String?>(null) }
     var session by remember { mutableStateOf<RemoteTerminalSession?>(null) }
+    var view by remember { mutableStateOf<TerminalView?>(null) }
+    var emulatorReady by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("connecting…") }
     val title = pane.cwd.substringAfterLast('/').ifBlank { pane.workspaceId.ifBlank { pane.paneId } }
 
-    // Feed incoming term_data into the emulator; react to exit.
+    // Feed incoming term_data for the ACTIVE termId into the emulator; react to exit.
+    // Re-subscribes automatically when termId changes (e.g. after a reconnect re-attach).
     LaunchedEffect(termId) {
         val id = termId ?: return@LaunchedEffect
         vm.frames.collect { f ->
@@ -44,6 +46,28 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
                 else -> {}
             }
         }
+    }
+
+    // (Re)attach whenever the WS is connected and the emulator exists. On a
+    // mid-session WS drop the companion tears down our PTY session (closeAll),
+    // so the retained termId is dead: clear it and show a reconnecting state.
+    // CompanionClient auto-reconnects; when it does, open a FRESH attach
+    // (scrollback from before the drop is not restored). Gating on emulatorReady
+    // preserves the no-byte-drop guarantee (feed() drops bytes with no emulator).
+    LaunchedEffect(connected, emulatorReady) {
+        if (!connected) {
+            if (termId != null) termId = null
+            if (emulatorReady) status = "reconnecting…"
+            return@LaunchedEffect
+        }
+        if (!emulatorReady || termId != null) return@LaunchedEffect
+        val emu = view?.mEmulator
+        val cols = emu?.mColumns ?: 80
+        val rows = emu?.mRows ?: 24
+        status = "connecting…"
+        runCatching { vm.openTerminal(pane.paneId, cols, rows) }
+            .onSuccess { termId = it; status = "connected" }
+            .onFailure { status = "failed: ${it.message}" }
     }
 
     DisposableEffect(Unit) {
@@ -75,43 +99,24 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
                     setTextSize(36)
                     isFocusable = true
                     isFocusableInTouchMode = true
-                    val client = TerminalViewClientImpl(this)
-                    setTerminalViewClient(client)
-                    val sessionClient = terminalSessionClient(this)
-                    val sess = RemoteTerminalSession(sessionClient, object : RemoteTerminalSession.Io {
+                    setTerminalViewClient(TerminalViewClientImpl(this))
+                    val sess = RemoteTerminalSession(terminalSessionClient(this), object : RemoteTerminalSession.Io {
                         override fun sendInput(data: ByteArray) { termId?.let { vm.termInput(it, data) } }
                         override fun sendResize(cols: Int, rows: Int) { termId?.let { vm.termResize(it, cols, rows) } }
                     })
                     session = sess
+                    view = this
                     attachSession(sess)
-
-                    // RemoteTerminalSession.feed() silently drops bytes if they arrive before
-                    // the emulator exists. The emulator is only created lazily, once the view
-                    // has a real (non-zero) width/height during layout (see
-                    // TerminalView#updateSize()/#onSizeChanged()) - attachSession() above is a
-                    // no-op for that purpose since the view has no size yet. So we must NOT open
-                    // the remote terminal (which makes the companion start streaming term_data)
-                    // until mEmulator is non-null - otherwise the earliest bytes (e.g. the shell
-                    // banner/prompt) would be lost. doOnLayout fires once layout has happened, by
-                    // which point onSizeChanged() has already run and created the emulator; as a
-                    // defensive fallback (in case layout produced a still-zero size, e.g. a
-                    // momentarily hidden pane) we retry via post() until mEmulator appears, then
-                    // open using its real cols/rows instead of a guessed 80x24.
-                    fun openWhenEmulatorReady() {
-                        val emu = mEmulator
-                        if (emu == null) {
-                            post { openWhenEmulatorReady() }
-                            return
-                        }
-                        scope.launch {
-                            runCatching { vm.openTerminal(pane.paneId, emu.mColumns, emu.mRows) }
-                                .onSuccess { termId = it; status = "connected" }
-                                .onFailure { status = "failed: ${it.message}" }
-                        }
+                    // The emulator is created lazily during layout (onSizeChanged ->
+                    // updateSize). Signal readiness once it exists (retry if the first
+                    // layout produced a zero size) so the (re)attach effect opens with
+                    // real cols/rows and never before the emulator can accept bytes.
+                    fun markReadyWhenEmulatorExists() {
+                        if (mEmulator != null) emulatorReady = true else post { markReadyWhenEmulatorExists() }
                     }
                     doOnLayout {
                         requestFocus()
-                        openWhenEmulatorReady()
+                        markReadyWhenEmulatorExists()
                     }
                 }
             },
