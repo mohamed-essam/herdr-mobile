@@ -132,4 +132,30 @@ class ProtocolTest {
         assertTrue(mv.contains("\"t\":\"move\"") && mv.contains("\"dest\":\"tab\"") && mv.contains("\"tabId\":\"w7:t1\""))
         assertTrue(ClientMsg.listAgents("a1").contains("\"list_agents\""))
     }
+
+    @Test fun parsesCloseImpactWithSiblings() {
+        val f = parseServerFrame("""{"t":"close_impact","reqId":"i1","workspaceId":"w1","alsoCloses":[{"workspaceId":"w2","label":"ops"}]}""")
+        assertTrue(f is ServerFrame.CloseImpact)
+        val ci = f as ServerFrame.CloseImpact
+        assertEquals("w1", ci.workspaceId)
+        assertEquals(1, ci.alsoCloses.size)
+        assertEquals("ops", ci.alsoCloses.single().label)
+    }
+
+    @Test fun parsesCloseImpactEmptyAndMissingArray() {
+        val empty = parseServerFrame("""{"t":"close_impact","reqId":"i2","workspaceId":"w1","alsoCloses":[]}""")
+        assertTrue((empty as ServerFrame.CloseImpact).alsoCloses.isEmpty())
+        // missing / null alsoCloses must not throw — same defensiveness as agents
+        val missing = parseServerFrame("""{"t":"close_impact","reqId":"i3","workspaceId":"w1"}""")
+        assertTrue((missing as ServerFrame.CloseImpact).alsoCloses.isEmpty())
+        val nulled = parseServerFrame("""{"t":"close_impact","reqId":"i4","workspaceId":"w1","alsoCloses":null}""")
+        assertTrue((nulled as ServerFrame.CloseImpact).alsoCloses.isEmpty())
+    }
+
+    @Test fun buildsCloseImpactRequest() {
+        val json = ClientMsg.closeImpact("i1", "w1")
+        assertTrue(json.contains("\"t\":\"close_impact\""))
+        assertTrue(json.contains("\"workspaceId\":\"w1\""))
+        assertTrue(json.contains("\"reqId\":\"i1\""))
+    }
 }
