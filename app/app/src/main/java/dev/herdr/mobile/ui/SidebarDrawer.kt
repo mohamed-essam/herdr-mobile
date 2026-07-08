@@ -259,6 +259,48 @@ fun RowActionSheet(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AgentPickerSheet(agents: List<String>, onPick: (String) -> Unit, onOther: () -> Unit, onDismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
+            Text("New agent", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+            agents.forEach { name -> SheetItem(name, { onPick(name) }) }
+            SheetItem("Other…", onOther, color = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MoveDestinationSheet(
+    tree: List<WorkspaceNode>,
+    currentTabId: String,
+    onExistingTab: (String) -> Unit,
+    onNewTab: () -> Unit,
+    onNewWorkspace: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
+            Text("Move to…", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+            SheetItem("New tab", onNewTab)
+            SheetItem("New workspace", onNewWorkspace)
+            tree.forEach { w ->
+                w.tabs.forEach { t ->
+                    if (t.tab.tabId != currentTabId && t.tab.tabId.isNotBlank()) {
+                        val wsLabel = w.ws.label.ifEmpty { "(unknown)" }
+                        val tabLabel = t.tab.label.ifEmpty { t.tab.number.toString() }
+                        SheetItem("$wsLabel / $tabLabel", { onExistingTab(t.tab.tabId) })
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun SheetItem(label: String, onClick: () -> Unit, color: androidx.compose.ui.graphics.Color = LocalContentColor.current) {
     Text(
