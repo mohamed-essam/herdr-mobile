@@ -16,9 +16,40 @@ data class Pane(
     val agentStatus: String? = null,
 )
 
+@Serializable
+data class Worktree(
+    val repoName: String? = null,
+    val isLinkedWorktree: Boolean = false,
+)
+
+@Serializable
+data class Workspace(
+    val workspaceId: String,
+    val label: String = "",
+    val number: Int = 0,
+    val agentStatus: String? = null,
+    val focused: Boolean = false,
+    val paneCount: Int = 0,
+    val tabCount: Int = 0,
+    val worktree: Worktree? = null,
+)
+
+@Serializable
+data class Tab(
+    val tabId: String,
+    val label: String = "",
+    val number: Int = 0,
+    val workspaceId: String = "",
+    val agentStatus: String? = null,
+    val focused: Boolean = false,
+    val paneCount: Int = 0,
+)
+
 sealed interface ServerFrame {
     data object Welcome : ServerFrame
     data class Panes(val panes: List<Pane>) : ServerFrame
+    data class Workspaces(val workspaces: List<Workspace>) : ServerFrame
+    data class Tabs(val tabs: List<Tab>) : ServerFrame
     data class PaneUpdate(val pane: Pane) : ServerFrame
     data class PaneRemoved(val paneId: String) : ServerFrame
     data class PaneRead(val reqId: String, val paneId: String, val source: String, val text: String) : ServerFrame
@@ -37,6 +68,8 @@ fun parseServerFrame(text: String): ServerFrame {
     return when (obj["t"]?.jsonPrimitive?.content) {
         "welcome" -> ServerFrame.Welcome
         "panes" -> ServerFrame.Panes(json.decodeFromJsonElement(obj["panes"]!!))
+        "workspaces" -> ServerFrame.Workspaces(json.decodeFromJsonElement(obj["workspaces"]!!))
+        "tabs" -> ServerFrame.Tabs(json.decodeFromJsonElement(obj["tabs"]!!))
         "pane_update" -> ServerFrame.PaneUpdate(json.decodeFromJsonElement(obj["pane"]!!))
         "pane_removed" -> ServerFrame.PaneRemoved(obj["paneId"]!!.jsonPrimitive.content)
         "pane_read" -> ServerFrame.PaneRead(

@@ -57,4 +57,21 @@ class ProtocolTest {
         assertTrue(ClientMsg.termResize("t1", 100, 40).contains("\"cols\":100"))
         assertTrue(ClientMsg.termClose("t1").contains("\"term_close\""))
     }
+
+    @Test fun parsesWorkspacesFrameWithWorktree() {
+        val f = parseServerFrame("""{"t":"workspaces","workspaces":[{"workspaceId":"w5","label":"wt-cost","number":2,"focused":true,"paneCount":1,"tabCount":1,"worktree":{"repoName":"ops","isLinkedWorktree":true}}]}""")
+        assertTrue(f is ServerFrame.Workspaces)
+        val w = (f as ServerFrame.Workspaces).workspaces.single()
+        assertEquals("wt-cost", w.label)
+        assertEquals("ops", w.worktree?.repoName)
+        assertTrue(w.worktree?.isLinkedWorktree == true)
+    }
+
+    @Test fun parsesWorkspaceWithoutWorktreeAndTabsFrame() {
+        val w = (parseServerFrame("""{"t":"workspaces","workspaces":[{"workspaceId":"w3","label":"apollo","number":1,"paneCount":1,"tabCount":1}]}""") as ServerFrame.Workspaces).workspaces.single()
+        assertNull(w.worktree)
+        val tabs = (parseServerFrame("""{"t":"tabs","tabs":[{"tabId":"w7:t2","label":"2","number":2,"workspaceId":"w7","agentStatus":"unknown","paneCount":1}]}""") as ServerFrame.Tabs).tabs.single()
+        assertEquals("w7:t2", tabs.tabId)
+        assertEquals("w7", tabs.workspaceId)
+    }
 }
