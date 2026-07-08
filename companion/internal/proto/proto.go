@@ -33,10 +33,16 @@ func ParseClient(b []byte) (ClientMsg, error) {
 func must(v any) []byte { b, _ := json.Marshal(v); return b }
 
 func Welcome(version string, protocol int) []byte {
-	return must(map[string]any{"t": "welcome", "herdrVersion": version, "herdrProtocol": protocol, "companionProtocol": 2})
+	return must(map[string]any{"t": "welcome", "herdrVersion": version, "herdrProtocol": protocol, "companionProtocol": 3})
 }
 func PanesSnapshot(p []state.Pane) []byte {
 	return must(map[string]any{"t": "panes", "panes": p})
+}
+func WorkspacesSnapshot(w []state.Workspace) []byte {
+	return must(map[string]any{"t": "workspaces", "workspaces": w})
+}
+func TabsSnapshot(tabs []state.Tab) []byte {
+	return must(map[string]any{"t": "tabs", "tabs": tabs})
 }
 func PaneUpdate(p state.Pane) []byte { return must(map[string]any{"t": "pane_update", "pane": p}) }
 func PaneRemoved(id string) []byte   { return must(map[string]any{"t": "pane_removed", "paneId": id}) }

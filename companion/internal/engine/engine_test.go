@@ -63,6 +63,12 @@ func TestServerSendsWelcomeThenSnapshotThenUpdate(t *testing.T) {
 	if f := readFrame(t, c); f["t"] != "panes" {
 		t.Fatalf("want panes, got %v", f["t"])
 	}
+	if f := readFrame(t, c); f["t"] != "workspaces" {
+		t.Fatalf("want workspaces, got %v", f["t"])
+	}
+	if f := readFrame(t, c); f["t"] != "tabs" {
+		t.Fatalf("want tabs, got %v", f["t"])
+	}
 
 	// broadcast an update
 	srvObj.Broadcast([]byte(`{"t":"pane_update","pane":{"paneId":"w6:p1","agentStatus":"blocked"}}`))

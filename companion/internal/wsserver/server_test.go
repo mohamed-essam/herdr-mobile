@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/messam/herdr-mobile/companion/internal/state"
 )
 
 // stubRPC satisfies HerdrRPC without touching herdr.
@@ -17,7 +18,7 @@ type stubRPC struct{}
 
 func (stubRPC) ReadPane(context.Context, string, string, int) (string, error) { return "", nil }
 func (stubRPC) SendText(context.Context, string, string) error                { return nil }
-func (stubRPC) SendKeys(context.Context, string, string) error               { return nil }
+func (stubRPC) SendKeys(context.Context, string, string) error                { return nil }
 
 // readUntil reads frames until one with t==want is seen (or timeout).
 func readUntil(t *testing.T, ctx context.Context, c *websocket.Conn, want string) map[string]any {
@@ -172,5 +173,38 @@ func TestTermOpenMaxTermsCap(t *testing.T) {
 	opened := readUntil(t, ctx, c, "term_opened")
 	if id, _ := opened["termId"].(string); id == "" {
 		t.Fatal("expected term_opened after freeing a slot via term_close")
+	}
+}
+
+func TestInitialSnapshotIncludesWorkspacesAndTabs(t *testing.T) {
+	s := NewServer(AllowAll{}, stubRPC{})
+	s.SetWorkspaceSnapshot(func() []state.Workspace {
+		return []state.Workspace{{WorkspaceID: "w7", Label: "omega3", Number: 4, PaneCount: 2, TabCount: 2}}
+	})
+	s.SetTabSnapshot(func() []state.Tab {
+		return []state.Tab{{TabID: "w7:t1", Label: "1", Number: 1, WorkspaceID: "w7"}}
+	})
+
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	ctx := context.Background()
+	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close(websocket.StatusNormalClosure, "")
+
+	welcome := readUntil(t, ctx, c, "welcome")
+	if welcome["companionProtocol"].(float64) != 3 {
+		t.Fatalf("want companionProtocol 3, got %v", welcome["companionProtocol"])
+	}
+	ws := readUntil(t, ctx, c, "workspaces")
+	arr := ws["workspaces"].([]any)
+	if len(arr) != 1 || arr[0].(map[string]any)["label"] != "omega3" {
+		t.Fatalf("bad workspaces frame: %+v", ws)
+	}
+	tabs := readUntil(t, ctx, c, "tabs")
+	if len(tabs["tabs"].([]any)) != 1 {
+		t.Fatalf("bad tabs frame: %+v", tabs)
 	}
 }

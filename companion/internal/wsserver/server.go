@@ -22,12 +22,14 @@ type HerdrRPC interface {
 }
 
 type Server struct {
-	auth      Authorizer
-	rpc       HerdrRPC
-	snapshot  func() []state.Pane
-	onPush    func(endpoint string)
-	herdrVer  string
-	herdrProt int
+	auth        Authorizer
+	rpc         HerdrRPC
+	snapshot    func() []state.Pane
+	wsSnapshot  func() []state.Workspace
+	tabSnapshot func() []state.Tab
+	onPush      func(endpoint string)
+	herdrVer    string
+	herdrProt   int
 
 	termSeq    atomic.Uint64
 	attachArgv func(target string) []string
@@ -46,6 +48,7 @@ type client struct {
 func NewServer(auth Authorizer, rpc HerdrRPC) *Server {
 	srv := &Server{auth: auth, rpc: rpc, clients: map[*client]struct{}{},
 		snapshot: func() []state.Pane { return nil }, onPush: func(string) {},
+		wsSnapshot: func() []state.Workspace { return nil }, tabSnapshot: func() []state.Tab { return nil },
 		herdrVer: "unknown", herdrProt: 0}
 	// --takeover: the phone seizes the pane's attachment even if a client (e.g. the
 	// desktop herdr TUI or a stale attach) already holds it. --takeover is a fixed
@@ -56,9 +59,11 @@ func NewServer(auth Authorizer, rpc HerdrRPC) *Server {
 	return srv
 }
 
-func (s *Server) SetInitialSnapshot(fn func() []state.Pane) { s.snapshot = fn }
-func (s *Server) SetPushEndpoint(fn func(string))           { s.onPush = fn }
-func (s *Server) SetHerdrInfo(ver string, prot int)         { s.herdrVer, s.herdrProt = ver, prot }
+func (s *Server) SetInitialSnapshot(fn func() []state.Pane)        { s.snapshot = fn }
+func (s *Server) SetWorkspaceSnapshot(fn func() []state.Workspace) { s.wsSnapshot = fn }
+func (s *Server) SetTabSnapshot(fn func() []state.Tab)             { s.tabSnapshot = fn }
+func (s *Server) SetPushEndpoint(fn func(string))                  { s.onPush = fn }
+func (s *Server) SetHerdrInfo(ver string, prot int)                { s.herdrVer, s.herdrProt = ver, prot }
 
 func (s *Server) Broadcast(frame []byte) {
 	s.mu.Lock()
@@ -89,6 +94,8 @@ func (s *Server) Handler() http.Handler {
 		// enqueue welcome + snapshot BEFORE the client is visible to Broadcast
 		c.send <- proto.Welcome(s.herdrVer, s.herdrProt)
 		c.send <- proto.PanesSnapshot(s.snapshot())
+		c.send <- proto.WorkspacesSnapshot(s.wsSnapshot())
+		c.send <- proto.TabsSnapshot(s.tabSnapshot())
 		s.add(c)
 		defer func() { c.closeAll(); s.remove(c) }()
 
@@ -98,8 +105,13 @@ func (s *Server) Handler() http.Handler {
 	})
 }
 
-func (s *Server) add(c *client)    { s.mu.Lock(); s.clients[c] = struct{}{}; s.mu.Unlock() }
-func (s *Server) remove(c *client) { s.mu.Lock(); delete(s.clients, c); s.mu.Unlock(); c.conn.Close(websocket.StatusNormalClosure, "") }
+func (s *Server) add(c *client) { s.mu.Lock(); s.clients[c] = struct{}{}; s.mu.Unlock() }
+func (s *Server) remove(c *client) {
+	s.mu.Lock()
+	delete(s.clients, c)
+	s.mu.Unlock()
+	c.conn.Close(websocket.StatusNormalClosure, "")
+}
 
 func (s *Server) writeLoop(ctx context.Context, c *client) {
 	for {
