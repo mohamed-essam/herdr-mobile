@@ -39,17 +39,24 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
     var emulatorReady by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("connecting…") }
     var takenOver by remember { mutableStateOf(false) }
+    var attaching by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val title = pane.cwd.substringAfterLast('/').ifBlank { pane.workspaceId.ifBlank { pane.paneId } }
 
     suspend fun attachOnce() {
-        val emu = view?.mEmulator
-        val cols = emu?.mColumns ?: 80
-        val rows = emu?.mRows ?: 24
-        status = "connecting…"
-        runCatching { vm.openTerminal(pane.paneId, cols, rows) }
-            .onSuccess { termId = it; status = "connected"; takenOver = false }
-            .onFailure { status = "failed: ${it.message}" }
+        if (attaching) return
+        attaching = true
+        try {
+            val emu = view?.mEmulator
+            val cols = emu?.mColumns ?: 80
+            val rows = emu?.mRows ?: 24
+            status = "connecting…"
+            runCatching { vm.openTerminal(pane.paneId, cols, rows) }
+                .onSuccess { termId = it; status = "connected"; takenOver = false }
+                .onFailure { status = "failed: ${it.message}" }
+        } finally {
+            attaching = false
+        }
     }
 
     // Feed incoming term_data for the ACTIVE termId into the emulator; react to exit.
