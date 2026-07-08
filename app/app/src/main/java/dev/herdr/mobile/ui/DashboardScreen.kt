@@ -37,6 +37,13 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
         if (open != null && panes.none { it.paneId == open.paneId }) selected = null
     }
 
+    var pendingOpenTerminalId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { vm.autoOpen.collect { pendingOpenTerminalId = it } }
+    LaunchedEffect(panes, pendingOpenTerminalId) {
+        val tid = pendingOpenTerminalId ?: return@LaunchedEffect
+        panes.firstOrNull { it.terminalId == tid }?.let { selected = it; pendingOpenTerminalId = null }
+    }
+
     selected?.let { pane ->
         TerminalScreen(vm, pane) { selected = null }
         return   // full-screen terminal replaces the dashboard while open
@@ -51,6 +58,8 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
     var actionTarget by remember { mutableStateOf<RowAction?>(null) }   // action sheet open for
     var renameTarget by remember { mutableStateOf<RowAction?>(null) }   // rename dialog open for
     var confirmTarget by remember { mutableStateOf<RowAction?>(null) }  // close-confirm open for
+    var agentPickerFor by remember { mutableStateOf<RowAction?>(null) } // agent picker open for (Task 5)
+    var moveTargetPaneId by remember { mutableStateOf<String?>(null) }  // move sheet open for (Task 5)
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(Unit) {
@@ -71,6 +80,7 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
                     selected = p
                 },
                 onRowAction = { a -> if (a.id.isNotBlank()) actionTarget = a },
+                onNewWorkspace = { vm.createNode(what = "workspace") },
             )
         },
     ) {
@@ -96,6 +106,11 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
         actionTarget?.let { target ->
             RowActionSheet(
                 target = target,
+                onNewTab = { vm.createNode(what = "tab", workspaceId = target.id); actionTarget = null },
+                onNewAgent = { agentPickerFor = target; actionTarget = null },
+                onNewShell = { vm.createNode(what = "shell", workspaceId = target.workspaceId); actionTarget = null },
+                onSplit = { dir -> vm.createNode(what = "shell", paneId = target.id, direction = dir); actionTarget = null },
+                onMove = { moveTargetPaneId = target.id; actionTarget = null },
                 onRename = { renameTarget = target; actionTarget = null },
                 onClose = {
                     actionTarget = null

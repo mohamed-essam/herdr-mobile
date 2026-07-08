@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
@@ -58,6 +59,7 @@ fun SidebarDrawer(
     onToggle: (String) -> Unit,
     onSelectPane: (Pane) -> Unit,
     onRowAction: (RowAction) -> Unit,
+    onNewWorkspace: () -> Unit,
 ) {
     val dark = isSystemInDarkTheme()
     val rows = flatten(tree, collapsed)
@@ -71,6 +73,16 @@ fun SidebarDrawer(
             ) {
                 Text("herdr", style = MaterialTheme.typography.titleMedium)
                 Text("  ❯", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "+",
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier
+                        .clickable(onClick = onNewWorkspace)
+                        .semantics { contentDescription = "new workspace" }
+                        .padding(horizontal = 12.dp, vertical = 2.dp),
+                )
             }
             LazyColumn(Modifier.fillMaxSize()) {
                 items(rows, key = { rowKey(it) }) { row ->
@@ -213,31 +225,48 @@ private fun StatusGlyph(status: String?, dark: Boolean) {
 @Composable
 fun RowActionSheet(
     target: RowAction,
+    onNewTab: () -> Unit,
+    onNewAgent: () -> Unit,
+    onNewShell: () -> Unit,
+    onSplit: (String) -> Unit,   // "right" | "down"
+    onMove: () -> Unit,
     onRename: () -> Unit,
     onClose: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
-            Text(
-                target.label,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-            )
-            Text(
-                "Rename",
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.fillMaxWidth().clickable { onRename() }.padding(horizontal = 20.dp, vertical = 14.dp),
-            )
-            Text(
-                "Close",
-                style = MaterialTheme.typography.bodyLarge,
-                color = statusColor("blocked", isSystemInDarkTheme()),
-                modifier = Modifier.fillMaxWidth().clickable { onClose() }.padding(horizontal = 20.dp, vertical = 14.dp),
-            )
+            Text(target.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+            when (target.kind) {
+                NodeKind.WORKSPACE -> {
+                    SheetItem("New tab", onNewTab)
+                    SheetItem("New agent", onNewAgent)
+                }
+                NodeKind.TAB -> {
+                    SheetItem("New shell", onNewShell)
+                    SheetItem("New agent", onNewAgent)
+                }
+                NodeKind.PANE -> {
+                    SheetItem("Split right", onClick = { onSplit("right") })
+                    SheetItem("Split down", onClick = { onSplit("down") })
+                    SheetItem("Move…", onMove)
+                }
+            }
+            SheetItem("Rename", onRename)
+            SheetItem("Close", onClose, color = statusColor("blocked", isSystemInDarkTheme()))
         }
     }
+}
+
+@Composable
+private fun SheetItem(label: String, onClick: () -> Unit, color: androidx.compose.ui.graphics.Color = LocalContentColor.current) {
+    Text(
+        label,
+        style = MaterialTheme.typography.bodyLarge,
+        color = color,
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 14.dp),
+    )
 }
 
 private fun wsAction(node: WorkspaceNode) = RowAction(
@@ -254,6 +283,7 @@ private fun tabAction(node: TabNode) = RowAction(
     label = node.tab.label.ifEmpty { node.tab.number.toString() },
     paneCount = node.panes.size,
     hasAgent = node.panes.any { it.agent != null },
+    workspaceId = node.tab.workspaceId,
 )
 
 private fun paneAction(pane: Pane) = RowAction(
