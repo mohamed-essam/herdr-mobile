@@ -211,6 +211,9 @@ func (s *Server) readLoop(ctx context.Context, c *client) {
 			if err != nil {
 				names = nil // app still shows the "Other…" option
 			}
+			if names == nil {
+				names = []string{}
+			}
 			c.send <- proto.Agents(m.ReqID, names)
 		}
 	}

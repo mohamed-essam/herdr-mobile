@@ -413,6 +413,52 @@ func TestMoveAndListAgents(t *testing.T) {
 	}
 }
 
+func TestCreateFailureNoPoke(t *testing.T) {
+	rpc := &stubRPC{failOn: "agent.start:claude"}
+	s := NewServer(AllowAll{}, rpc)
+	poked := make(chan struct{}, 1)
+	s.SetPoke(func() { poked <- struct{}{} })
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	ctx := context.Background()
+	c, _, _ := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	defer c.Close(websocket.StatusNormalClosure, "")
+
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"create","reqId":"cf","what":"agent","tabId":"w7:t1","agentName":"claude","argv":["claude"]}`))
+	res := readUntil(t, ctx, c, "created")
+	if res["ok"] != false || res["error"] == nil || res["error"] == "" {
+		t.Fatalf("expected create ok=false with error, got %+v", res)
+	}
+	select {
+	case <-poked:
+		t.Fatal("failed create must not poke")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestMoveFailureNoPoke(t *testing.T) {
+	rpc := &stubRPC{failOn: "pane.move:new_tab"}
+	s := NewServer(AllowAll{}, rpc)
+	poked := make(chan struct{}, 1)
+	s.SetPoke(func() { poked <- struct{}{} })
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	ctx := context.Background()
+	c, _, _ := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	defer c.Close(websocket.StatusNormalClosure, "")
+
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"move","reqId":"mf","paneId":"w7:p2","dest":"new_tab"}`))
+	res := readUntil(t, ctx, c, "action_result")
+	if res["ok"] != false || res["error"] == nil || res["error"] == "" {
+		t.Fatalf("expected move ok=false, got %+v", res)
+	}
+	select {
+	case <-poked:
+		t.Fatal("failed move must not poke")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
 func TestCreateRejectsUnknownWhat(t *testing.T) {
 	s := NewServer(AllowAll{}, &stubRPC{})
 	s.SetPoke(func() {})

@@ -95,7 +95,7 @@ fun parseServerFrame(text: String): ServerFrame {
             obj["error"]?.jsonPrimitive?.content)
         "agents" -> ServerFrame.Agents(
             obj["reqId"]?.jsonPrimitive?.content ?: "",
-            obj["agents"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList())
+            (obj["agents"] as? JsonArray)?.map { it.jsonPrimitive.content } ?: emptyList())
         "pong" -> ServerFrame.Pong
         "term_opened" -> ServerFrame.TermOpened(
             obj["reqId"]!!.jsonPrimitive.content, obj["termId"]!!.jsonPrimitive.content)

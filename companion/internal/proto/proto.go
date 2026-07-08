@@ -30,7 +30,6 @@ type ClientMsg struct {
 	What        string   `json:"what"`
 	AgentName   string   `json:"agentName"`
 	Argv        []string `json:"argv"`
-	Cwd         string   `json:"cwd"`
 	Direction   string   `json:"direction"`
 	Dest        string   `json:"dest"`
 	WorkspaceID string   `json:"workspaceId"`
