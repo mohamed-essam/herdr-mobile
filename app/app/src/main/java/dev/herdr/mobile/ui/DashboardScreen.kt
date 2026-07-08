@@ -4,6 +4,8 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -13,6 +15,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.herdr.mobile.net.Pane
 import dev.herdr.mobile.ui.theme.statusColor
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -32,18 +35,42 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
         return   // full-screen terminal replaces the dashboard while open
     }
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = { HerdrTopBar(connected, panes.size) },
-    ) { pad ->
-        Column(Modifier.padding(pad).fillMaxSize()) {
-            if (!connected) ReconnectingBanner()
-            if (panes.isEmpty()) {
-                EmptyState(connected)
-            } else {
-                LazyColumn(contentPadding = PaddingValues(vertical = 8.dp), modifier = Modifier.fillMaxSize()) {
-                    items(panes, key = { it.paneId }) { pane ->
-                        PaneRow(pane) { p -> if (p.agent != null) selected = p }
+    val tree by vm.tree.collectAsState()
+    val collapsed by vm.collapsed.collectAsState()
+    val lastOpened by vm.lastOpenedPaneId.collectAsState()
+    val focusedPaneId = panes.firstOrNull { it.focused }?.paneId
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            SidebarDrawer(
+                tree = tree,
+                collapsed = collapsed,
+                focusedPaneId = focusedPaneId,
+                lastOpenedPaneId = lastOpened,
+                onToggle = vm::toggleExpanded,
+                onSelectPane = { p ->
+                    scope.launch { drawerState.close() }
+                    selected = p
+                },
+            )
+        },
+    ) {
+        Scaffold(
+            containerColor = MaterialTheme.colorScheme.background,
+            topBar = { HerdrTopBar(connected, panes.size) { scope.launch { drawerState.open() } } },
+        ) { pad ->
+            Column(Modifier.padding(pad).fillMaxSize()) {
+                if (!connected) ReconnectingBanner()
+                if (panes.isEmpty()) {
+                    EmptyState(connected)
+                } else {
+                    LazyColumn(contentPadding = PaddingValues(vertical = 8.dp), modifier = Modifier.fillMaxSize()) {
+                        items(panes, key = { it.paneId }) { pane ->
+                            PaneRow(pane) { p -> if (p.agent != null) selected = p }
+                        }
                     }
                 }
             }
@@ -53,13 +80,18 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun HerdrTopBar(connected: Boolean, count: Int) {
+private fun HerdrTopBar(connected: Boolean, count: Int, onMenu: () -> Unit) {
     val dark = isSystemInDarkTheme()
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             titleContentColor = MaterialTheme.colorScheme.onSurface,
         ),
+        navigationIcon = {
+            IconButton(onClick = onMenu) {
+                Icon(Icons.Filled.Menu, contentDescription = "workspaces", tint = MaterialTheme.colorScheme.onSurface)
+            }
+        },
         title = {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
