@@ -60,6 +60,8 @@ class CompanionClient(private val http: OkHttpClient = OkHttpClient()) {
                     is ServerFrame.TermOpened -> pending.remove(frame.reqId)?.complete(frame)
                     is ServerFrame.TermError -> if (frame.reqId.isNotEmpty()) pending.remove(frame.reqId)?.complete(frame)
                     is ServerFrame.ActionResult -> pending.remove(frame.reqId)?.complete(frame)
+                    is ServerFrame.Created -> pending.remove(frame.reqId)?.complete(frame)
+                    is ServerFrame.Agents -> pending.remove(frame.reqId)?.complete(frame)
                     else -> {}
                 }
                 _frames.tryEmit(frame)
@@ -135,6 +137,37 @@ class CompanionClient(private val http: OkHttpClient = OkHttpClient()) {
             is ServerFrame.ActionResult -> if (!f.ok) throw RuntimeException(f.error ?: "action failed")
             is ServerFrame.ErrorFrame -> throw RuntimeException(f.message)
             else -> throw RuntimeException("unexpected reply to action")
+        }
+    }
+
+    /** Returns the new pane's terminalId (for auto-open); throws on failure. */
+    suspend fun sendCreate(
+        what: String, workspaceId: String? = null, tabId: String? = null, paneId: String? = null,
+        direction: String? = null, agentName: String? = null, argv: List<String>? = null,
+    ): String {
+        val reqId = "n${seq.incrementAndGet()}"
+        val raw = ClientMsg.create(reqId, what, workspaceId, tabId, paneId, direction, agentName, argv)
+        return when (val f = request(reqId, raw)) {
+            is ServerFrame.Created -> if (f.ok) (f.terminalId ?: "") else throw RuntimeException(f.error ?: "create failed")
+            is ServerFrame.ErrorFrame -> throw RuntimeException(f.message)
+            else -> throw RuntimeException("unexpected reply to create")
+        }
+    }
+
+    suspend fun sendMove(paneId: String, dest: String, tabId: String? = null, direction: String? = null) {
+        val reqId = "v${seq.incrementAndGet()}"
+        when (val f = request(reqId, ClientMsg.move(reqId, paneId, dest, tabId, direction))) {
+            is ServerFrame.ActionResult -> if (!f.ok) throw RuntimeException(f.error ?: "move failed")
+            is ServerFrame.ErrorFrame -> throw RuntimeException(f.message)
+            else -> throw RuntimeException("unexpected reply to move")
+        }
+    }
+
+    suspend fun listAgents(): List<String> {
+        val reqId = "g${seq.incrementAndGet()}"
+        return when (val f = request(reqId, ClientMsg.listAgents(reqId))) {
+            is ServerFrame.Agents -> f.agents
+            else -> emptyList()
         }
     }
 

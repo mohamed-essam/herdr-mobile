@@ -57,6 +57,8 @@ sealed interface ServerFrame {
     data class Ack(val reqId: String) : ServerFrame
     data class ErrorFrame(val reqId: String, val code: String, val message: String) : ServerFrame
     data class ActionResult(val reqId: String, val ok: Boolean, val error: String?) : ServerFrame
+    data class Created(val reqId: String, val ok: Boolean, val paneId: String?, val terminalId: String?, val error: String?) : ServerFrame
+    data class Agents(val reqId: String, val agents: List<String>) : ServerFrame
     data object Pong : ServerFrame
     data object Unknown : ServerFrame
     data class TermOpened(val reqId: String, val termId: String) : ServerFrame
@@ -85,6 +87,15 @@ fun parseServerFrame(text: String): ServerFrame {
             obj["reqId"]?.jsonPrimitive?.content ?: "",
             obj["ok"]?.jsonPrimitive?.boolean ?: false,
             obj["error"]?.jsonPrimitive?.content)
+        "created" -> ServerFrame.Created(
+            obj["reqId"]?.jsonPrimitive?.content ?: "",
+            obj["ok"]?.jsonPrimitive?.boolean ?: false,
+            obj["paneId"]?.jsonPrimitive?.content,
+            obj["terminalId"]?.jsonPrimitive?.content,
+            obj["error"]?.jsonPrimitive?.content)
+        "agents" -> ServerFrame.Agents(
+            obj["reqId"]?.jsonPrimitive?.content ?: "",
+            obj["agents"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList())
         "pong" -> ServerFrame.Pong
         "term_opened" -> ServerFrame.TermOpened(
             obj["reqId"]!!.jsonPrimitive.content, obj["termId"]!!.jsonPrimitive.content)
@@ -122,6 +133,39 @@ object ClientMsg {
         if (label != null) pairs.add("label" to JsonPrimitive(label))
         return JsonObject(pairs.toMap()).toString()
     }
+    fun create(
+        reqId: String, what: String, workspaceId: String?, tabId: String?, paneId: String?,
+        direction: String?, agentName: String?, argv: List<String>?,
+    ): String {
+        val pairs = mutableListOf<Pair<String, JsonElement>>(
+            "t" to JsonPrimitive("create"),
+            "reqId" to JsonPrimitive(reqId),
+            "what" to JsonPrimitive(what),
+        )
+        if (workspaceId != null) pairs.add("workspaceId" to JsonPrimitive(workspaceId))
+        if (tabId != null) pairs.add("tabId" to JsonPrimitive(tabId))
+        if (paneId != null) pairs.add("paneId" to JsonPrimitive(paneId))
+        if (direction != null) pairs.add("direction" to JsonPrimitive(direction))
+        if (agentName != null) pairs.add("agentName" to JsonPrimitive(agentName))
+        if (argv != null) pairs.add("argv" to JsonArray(argv.map { JsonPrimitive(it) }))
+        return JsonObject(pairs.toMap()).toString()
+    }
+
+    fun move(reqId: String, paneId: String, dest: String, tabId: String?, direction: String?): String {
+        val pairs = mutableListOf(
+            "t" to JsonPrimitive("move"),
+            "reqId" to JsonPrimitive(reqId),
+            "paneId" to JsonPrimitive(paneId),
+            "dest" to JsonPrimitive(dest),
+        )
+        if (tabId != null) pairs.add("tabId" to JsonPrimitive(tabId))
+        if (direction != null) pairs.add("direction" to JsonPrimitive(direction))
+        return JsonObject(pairs.toMap()).toString()
+    }
+
+    fun listAgents(reqId: String): String =
+        JsonObject(mapOf("t" to JsonPrimitive("list_agents"), "reqId" to JsonPrimitive(reqId))).toString()
+
     fun ping() = obj("t" to JsonPrimitive("ping"))
     fun termOpen(reqId: String, target: String, cols: Int, rows: Int) =
         obj("t" to JsonPrimitive("term_open"), "reqId" to JsonPrimitive(reqId), "target" to JsonPrimitive(target), "cols" to JsonPrimitive(cols), "rows" to JsonPrimitive(rows))

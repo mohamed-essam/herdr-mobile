@@ -132,4 +132,47 @@ class DashboardViewModelTest {
 
         server.shutdown()
     }
+
+    @Test fun createNodeEmitsAutoOpenAndMoveSurfacesErrors() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
+            override fun onOpen(ws: WebSocket, response: Response) { ws.send("""{"t":"welcome"}""") }
+            override fun onMessage(ws: WebSocket, text: String) {
+                if (!text.contains("\"reqId\"")) return
+                val reqId = Regex("\"reqId\":\"(.*?)\"").find(text)!!.groupValues[1]
+                when {
+                    text.contains("\"t\":\"create\"") ->
+                        ws.send("""{"t":"created","reqId":"$reqId","ok":true,"paneId":"w7:pA","terminalId":"term_new"}""")
+                    text.contains("\"t\":\"move\"") ->
+                        ws.send("""{"t":"action_result","reqId":"$reqId","ok":false,"error":"cannot move"}""")
+                    text.contains("\"t\":\"list_agents\"") ->
+                        ws.send("""{"t":"agents","reqId":"$reqId","agents":["claude","codex"]}""")
+                }
+            }
+        }))
+        server.start()
+        val client = CompanionClient()
+        val vm = DashboardViewModel(client, PaneRepository())
+        vm.start(server.url("/").toString().replace("http", "ws"))
+        withTimeout(3000) { while (!vm.connected.value) delay(20) }
+
+        val opened = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val errs = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val j1 = launch { vm.autoOpen.collect { opened.add(it) } }
+        val j2 = launch { vm.actionErrors.collect { errs.add(it) } }
+
+        vm.createNode(what = "agent", tabId = "w7:t1", agentName = "claude", argv = listOf("claude"))
+        withTimeout(3000) { while (opened.isEmpty()) delay(20) }
+        assertEquals("term_new", opened.first())
+
+        vm.moveNode(paneId = "w7:p2", dest = "new_tab")
+        withTimeout(3000) { while (errs.isEmpty()) delay(20) }
+        assertEquals("cannot move", errs.first())
+
+        vm.refreshAgents()
+        withTimeout(3000) { while (vm.agents.value.isEmpty()) delay(20) }
+        assertEquals(listOf("claude", "codex"), vm.agents.value)
+
+        j1.cancel(); j2.cancel(); server.shutdown()
+    }
 }

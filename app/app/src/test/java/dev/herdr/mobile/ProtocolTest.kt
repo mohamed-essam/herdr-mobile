@@ -103,4 +103,33 @@ class ProtocolTest {
         assertTrue(cl.contains("\"op\":\"close\""))
         assertFalse(cl.contains("\"label\""))
     }
+
+    @Test fun parsesCreatedAndAgents() {
+        val ok = parseServerFrame("""{"t":"created","reqId":"c1","ok":true,"paneId":"w7:pA","terminalId":"term_agent"}""")
+        assertTrue(ok is ServerFrame.Created)
+        ok as ServerFrame.Created
+        assertTrue(ok.ok); assertEquals("term_agent", ok.terminalId); assertEquals("w7:pA", ok.paneId)
+        val bad = parseServerFrame("""{"t":"created","reqId":"c2","ok":false,"error":"nope"}""") as ServerFrame.Created
+        assertFalse(bad.ok); assertEquals("nope", bad.error); assertNull(bad.terminalId)
+        val ag = parseServerFrame("""{"t":"agents","reqId":"a1","agents":["claude","codex"]}""") as ServerFrame.Agents
+        assertEquals(listOf("claude", "codex"), ag.agents)
+    }
+
+    @Test fun buildsCreateAndMove() {
+        val cr = ClientMsg.create("c1", "agent", workspaceId = "w7", tabId = "w7:t1", paneId = null,
+            direction = "down", agentName = "claude", argv = listOf("claude"))
+        assertTrue(cr.contains("\"t\":\"create\""))
+        assertTrue(cr.contains("\"what\":\"agent\""))
+        assertTrue(cr.contains("\"agentName\":\"claude\""))
+        assertTrue(cr.contains("\"argv\":[\"claude\"]"))
+        assertTrue(cr.contains("\"tabId\":\"w7:t1\""))
+        val shell = ClientMsg.create("c2", "shell", workspaceId = null, tabId = null, paneId = "w7:p2",
+            direction = "right", agentName = null, argv = null)
+        assertTrue(shell.contains("\"paneId\":\"w7:p2\""))
+        assertFalse(shell.contains("\"agentName\""))
+        assertFalse(shell.contains("\"argv\""))
+        val mv = ClientMsg.move("m1", "w7:p2", "tab", tabId = "w7:t1", direction = "down")
+        assertTrue(mv.contains("\"t\":\"move\"") && mv.contains("\"dest\":\"tab\"") && mv.contains("\"tabId\":\"w7:t1\""))
+        assertTrue(ClientMsg.listAgents("a1").contains("\"list_agents\""))
+    }
 }
