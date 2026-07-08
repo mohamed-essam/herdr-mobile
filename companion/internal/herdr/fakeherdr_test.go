@@ -123,6 +123,27 @@ func (f *fakeHerdr) handle(c net.Conn) {
 		"workspace.close", "tab.close", "pane.close":
 		f.lastCall <- recordedCall{Method: req.Method, Params: req.Params}
 		enc.Encode(map[string]any{"id": req.ID, "result": map[string]any{"type": "ok"}})
+	case "workspace.create":
+		enc.Encode(map[string]any{"id": req.ID, "result": map[string]any{
+			"type": "workspace_created", "root_pane": map[string]any{"pane_id": "wZ:p1", "terminal_id": "term_ws"}}})
+	case "tab.create":
+		enc.Encode(map[string]any{"id": req.ID, "result": map[string]any{
+			"type": "tab_created", "root_pane": map[string]any{"pane_id": "w7:pT", "terminal_id": "term_tab"}}})
+	case "pane.split":
+		f.lastCall <- recordedCall{Method: req.Method, Params: req.Params}
+		enc.Encode(map[string]any{"id": req.ID, "result": map[string]any{
+			"type": "pane_info", "pane": map[string]any{"pane_id": "w7:pS", "terminal_id": "term_split"}}})
+	case "agent.start":
+		f.lastCall <- recordedCall{Method: req.Method, Params: req.Params}
+		enc.Encode(map[string]any{"id": req.ID, "result": map[string]any{
+			"type": "agent_started", "agent": map[string]any{"pane_id": "w7:pA", "terminal_id": "term_agent"}}})
+	case "pane.move":
+		f.lastCall <- recordedCall{Method: req.Method, Params: req.Params}
+		enc.Encode(map[string]any{"id": req.ID, "result": map[string]any{
+			"type": "pane_move", "move_result": map[string]any{"changed": true}}})
+	case "server.agent_manifests":
+		enc.Encode(map[string]any{"id": req.ID, "result": map[string]any{
+			"type": "agent_manifest_status", "manifests": []map[string]any{{"agent": "claude"}, {"agent": "codex"}}}})
 	case "events.subscribe":
 		ch := make(chan Event, 16)
 		f.mu.Lock()

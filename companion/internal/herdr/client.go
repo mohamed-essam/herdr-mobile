@@ -144,6 +144,111 @@ func (c *Client) ClosePane(ctx context.Context, id string) error {
 	return err
 }
 
+func (c *Client) CreateWorkspace(ctx context.Context) (string, string, error) {
+	raw, err := c.Call(ctx, "workspace.create", map[string]any{"focus": true})
+	if err != nil {
+		return "", "", err
+	}
+	var res rootPaneResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return "", "", err
+	}
+	return res.RootPane.PaneID, res.RootPane.TerminalID, nil
+}
+
+func (c *Client) CreateTab(ctx context.Context, workspaceID string) (string, string, error) {
+	params := map[string]any{"focus": true}
+	if workspaceID != "" {
+		params["workspace_id"] = workspaceID
+	}
+	raw, err := c.Call(ctx, "tab.create", params)
+	if err != nil {
+		return "", "", err
+	}
+	var res rootPaneResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return "", "", err
+	}
+	return res.RootPane.PaneID, res.RootPane.TerminalID, nil
+}
+
+func (c *Client) SplitPane(ctx context.Context, targetPaneID, workspaceID, direction string) (string, string, error) {
+	params := map[string]any{"direction": direction, "focus": true}
+	if targetPaneID != "" {
+		params["target_pane_id"] = targetPaneID
+	}
+	if workspaceID != "" {
+		params["workspace_id"] = workspaceID
+	}
+	raw, err := c.Call(ctx, "pane.split", params)
+	if err != nil {
+		return "", "", err
+	}
+	var res paneInfoResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return "", "", err
+	}
+	return res.Pane.PaneID, res.Pane.TerminalID, nil
+}
+
+func (c *Client) StartAgent(ctx context.Context, name string, argv []string, workspaceID, tabID, split string) (string, string, error) {
+	params := map[string]any{"name": name, "argv": argv, "focus": true}
+	if workspaceID != "" {
+		params["workspace_id"] = workspaceID
+	}
+	if tabID != "" {
+		params["tab_id"] = tabID
+	}
+	if split != "" {
+		params["split"] = split
+	}
+	raw, err := c.Call(ctx, "agent.start", params)
+	if err != nil {
+		return "", "", err
+	}
+	var res agentStartedResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return "", "", err
+	}
+	return res.Agent.PaneID, res.Agent.TerminalID, nil
+}
+
+func (c *Client) MovePane(ctx context.Context, paneID, dest, tabID, direction string) error {
+	var destination map[string]any
+	switch dest {
+	case "tab":
+		d := direction
+		if d == "" {
+			d = "down"
+		}
+		destination = map[string]any{"type": "tab", "tab_id": tabID, "split": d}
+	case "new_tab":
+		destination = map[string]any{"type": "new_tab"}
+	case "new_workspace":
+		destination = map[string]any{"type": "new_workspace"}
+	default:
+		return &RPCError{Code: "bad_dest", Message: "unknown move destination: " + dest}
+	}
+	_, err := c.Call(ctx, "pane.move", map[string]any{"pane_id": paneID, "destination": destination, "focus": false})
+	return err
+}
+
+func (c *Client) ListAgentNames(ctx context.Context) ([]string, error) {
+	raw, err := c.Call(ctx, "server.agent_manifests", nil)
+	if err != nil {
+		return nil, err
+	}
+	var res agentManifestsResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(res.Manifests))
+	for _, m := range res.Manifests {
+		names = append(names, m.Agent)
+	}
+	return names, nil
+}
+
 func (c *Client) Subscribe(ctx context.Context, paneID, eventType string) (<-chan Event, error) {
 	conn, err := c.dial(ctx)
 	if err != nil {
