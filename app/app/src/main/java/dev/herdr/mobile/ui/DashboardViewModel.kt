@@ -6,9 +6,12 @@ import dev.herdr.mobile.data.PaneRepository
 import dev.herdr.mobile.net.CompanionClient
 import dev.herdr.mobile.net.Pane
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -45,6 +48,23 @@ class DashboardViewModel(
     }
 
     fun registerPush(endpoint: String) = client.registerPush(endpoint)
+
+    private val _actionErrors = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val actionErrors: SharedFlow<String> = _actionErrors.asSharedFlow()
+
+    fun renameNode(kind: String, id: String, label: String) {
+        viewModelScope.launch {
+            runCatching { client.sendAction("rename", kind, id, label) }
+                .onFailure { _actionErrors.tryEmit(it.message ?: "rename failed") }
+        }
+    }
+
+    fun closeNode(kind: String, id: String) {
+        viewModelScope.launch {
+            runCatching { client.sendAction("close", kind, id) }
+                .onFailure { _actionErrors.tryEmit(it.message ?: "close failed") }
+        }
+    }
 
     suspend fun openTerminal(pane: Pane, cols: Int, rows: Int): String {
         _lastOpenedPaneId.value = pane.paneId

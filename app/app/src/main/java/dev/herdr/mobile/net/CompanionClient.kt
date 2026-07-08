@@ -59,6 +59,7 @@ class CompanionClient(private val http: OkHttpClient = OkHttpClient()) {
                     is ServerFrame.ErrorFrame -> pending.remove(frame.reqId)?.complete(frame)
                     is ServerFrame.TermOpened -> pending.remove(frame.reqId)?.complete(frame)
                     is ServerFrame.TermError -> if (frame.reqId.isNotEmpty()) pending.remove(frame.reqId)?.complete(frame)
+                    is ServerFrame.ActionResult -> pending.remove(frame.reqId)?.complete(frame)
                     else -> {}
                 }
                 _frames.tryEmit(frame)
@@ -126,6 +127,15 @@ class CompanionClient(private val http: OkHttpClient = OkHttpClient()) {
         val id = "r${seq.incrementAndGet()}"
         val f = request(id, ClientMsg.sendKeys(id, paneId, keys))
         if (f is ServerFrame.ErrorFrame) throw RuntimeException(f.message)
+    }
+
+    suspend fun sendAction(op: String, kind: String, id: String, label: String? = null) {
+        val reqId = "a${seq.incrementAndGet()}"
+        when (val f = request(reqId, ClientMsg.action(reqId, op, kind, id, label))) {
+            is ServerFrame.ActionResult -> if (!f.ok) throw RuntimeException(f.error ?: "action failed")
+            is ServerFrame.ErrorFrame -> throw RuntimeException(f.message)
+            else -> throw RuntimeException("unexpected reply to action")
+        }
     }
 
     suspend fun openTerminal(target: String, cols: Int, rows: Int): String {

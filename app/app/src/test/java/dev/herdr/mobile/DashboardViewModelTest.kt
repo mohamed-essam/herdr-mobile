@@ -64,4 +64,43 @@ class DashboardViewModelTest {
         vm.setTerminalFontSize(44)
         assertEquals(44, persisted)
     }
+
+    @Test fun renameNodeSendsActionAndSurfacesError() = runBlocking {
+        val server = MockWebServer()
+        val seenOps = java.util.concurrent.CopyOnWriteArrayList<String>()
+        server.enqueue(MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
+            override fun onOpen(ws: WebSocket, response: Response) { ws.send("""{"t":"welcome"}""") }
+            override fun onMessage(ws: WebSocket, text: String) {
+                if (text.contains("\"action\"")) {
+                    seenOps.add(text)
+                    val reqId = Regex("\"reqId\":\"(.*?)\"").find(text)!!.groupValues[1]
+                    // rename -> ok; close -> failure, to exercise both paths
+                    if (text.contains("\"op\":\"close\"")) {
+                        ws.send("""{"t":"action_result","reqId":"$reqId","ok":false,"error":"cannot close"}""")
+                    } else {
+                        ws.send("""{"t":"action_result","reqId":"$reqId","ok":true}""")
+                    }
+                }
+            }
+        }))
+        server.start()
+        val client = CompanionClient()
+        val vm = DashboardViewModel(client, PaneRepository())
+        vm.start(server.url("/").toString().replace("http", "ws"))
+        withTimeout(3000) { while (!vm.connected.value) delay(20) }
+
+        val errors = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val job = launch { vm.actionErrors.collect { errors.add(it) } }
+
+        vm.renameNode("workspace", "w7", "omega3")
+        withTimeout(3000) { while (seenOps.none { it.contains("\"op\":\"rename\"") }) delay(20) }
+        assertTrue(seenOps.first { it.contains("rename") }.contains("\"label\":\"omega3\""))
+
+        vm.closeNode("pane", "w7:p2")
+        withTimeout(3000) { while (errors.isEmpty()) delay(20) }
+        assertEquals("cannot close", errors.first())
+
+        job.cancel()
+        server.shutdown()
+    }
 }
