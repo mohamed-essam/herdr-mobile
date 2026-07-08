@@ -22,6 +22,10 @@ type ClientMsg struct {
 	Cols          int    `json:"cols"`
 	Rows          int    `json:"rows"`
 	Data          string `json:"data"`
+	Op            string `json:"op"`
+	Kind          string `json:"kind"`
+	ID            string `json:"id"`
+	Label         string `json:"label"`
 }
 
 func ParseClient(b []byte) (ClientMsg, error) {
@@ -52,6 +56,13 @@ func PaneRead(reqID, paneID, source, text string) []byte {
 func Ack(reqID string) []byte { return must(map[string]any{"t": "ack", "reqId": reqID}) }
 func ErrorFrame(reqID, code, message string) []byte {
 	return must(map[string]any{"t": "error", "reqId": reqID, "code": code, "message": message})
+}
+func ActionResult(reqID string, ok bool, message string) []byte {
+	m := map[string]any{"t": "action_result", "reqId": reqID, "ok": ok}
+	if message != "" {
+		m["error"] = message
+	}
+	return must(m)
 }
 func Pong() []byte { return must(map[string]any{"t": "pong"}) }
 func TermOpened(reqID, termID string) []byte {

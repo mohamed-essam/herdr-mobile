@@ -114,6 +114,36 @@ func (c *Client) SendKeys(ctx context.Context, paneID, keys string) error {
 	return err
 }
 
+func (c *Client) RenameWorkspace(ctx context.Context, id, label string) error {
+	_, err := c.Call(ctx, "workspace.rename", map[string]any{"workspace_id": id, "label": label})
+	return err
+}
+
+func (c *Client) RenameTab(ctx context.Context, id, label string) error {
+	_, err := c.Call(ctx, "tab.rename", map[string]any{"tab_id": id, "label": label})
+	return err
+}
+
+func (c *Client) RenamePane(ctx context.Context, id, label string) error {
+	_, err := c.Call(ctx, "pane.rename", map[string]any{"pane_id": id, "label": label})
+	return err
+}
+
+func (c *Client) CloseWorkspace(ctx context.Context, id string) error {
+	_, err := c.Call(ctx, "workspace.close", map[string]any{"workspace_id": id})
+	return err
+}
+
+func (c *Client) CloseTab(ctx context.Context, id string) error {
+	_, err := c.Call(ctx, "tab.close", map[string]any{"tab_id": id})
+	return err
+}
+
+func (c *Client) ClosePane(ctx context.Context, id string) error {
+	_, err := c.Call(ctx, "pane.close", map[string]any{"pane_id": id})
+	return err
+}
+
 func (c *Client) Subscribe(ctx context.Context, paneID, eventType string) (<-chan Event, error) {
 	conn, err := c.dial(ctx)
 	if err != nil {

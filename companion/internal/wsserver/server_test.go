@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,12 +15,32 @@ import (
 	"github.com/messam/herdr-mobile/companion/internal/state"
 )
 
-// stubRPC satisfies HerdrRPC without touching herdr.
-type stubRPC struct{}
+// stubRPC satisfies HerdrRPC without touching herdr, and records action calls.
+type stubRPC struct {
+	mu     sync.Mutex
+	calls  []string // "method:id" for each rename/close
+	failOn string   // method name that should return an error
+}
 
-func (stubRPC) ReadPane(context.Context, string, string, int) (string, error) { return "", nil }
-func (stubRPC) SendText(context.Context, string, string) error                { return nil }
-func (stubRPC) SendKeys(context.Context, string, string) error                { return nil }
+func (s *stubRPC) ReadPane(context.Context, string, string, int) (string, error) { return "", nil }
+func (s *stubRPC) SendText(context.Context, string, string) error                { return nil }
+func (s *stubRPC) SendKeys(context.Context, string, string) error                { return nil }
+
+func (s *stubRPC) record(method, id string) error {
+	s.mu.Lock()
+	s.calls = append(s.calls, method+":"+id)
+	s.mu.Unlock()
+	if s.failOn == method {
+		return errors.New("boom")
+	}
+	return nil
+}
+func (s *stubRPC) RenameWorkspace(_ context.Context, id, _ string) error { return s.record("workspace.rename", id) }
+func (s *stubRPC) RenameTab(_ context.Context, id, _ string) error       { return s.record("tab.rename", id) }
+func (s *stubRPC) RenamePane(_ context.Context, id, _ string) error      { return s.record("pane.rename", id) }
+func (s *stubRPC) CloseWorkspace(_ context.Context, id string) error     { return s.record("workspace.close", id) }
+func (s *stubRPC) CloseTab(_ context.Context, id string) error           { return s.record("tab.close", id) }
+func (s *stubRPC) ClosePane(_ context.Context, id string) error          { return s.record("pane.close", id) }
 
 // readUntil reads frames until one with t==want is seen (or timeout).
 func readUntil(t *testing.T, ctx context.Context, c *websocket.Conn, want string) map[string]any {
@@ -42,7 +64,7 @@ func readUntil(t *testing.T, ctx context.Context, c *websocket.Conn, want string
 }
 
 func TestTermOpenEchoBridge(t *testing.T) {
-	s := NewServer(AllowAll{}, stubRPC{})
+	s := NewServer(AllowAll{}, &stubRPC{})
 	// Bridge to `cat` instead of herdr: echoes input straight back as term_data.
 	s.attachArgv = func(target string) []string { return []string{"cat"} }
 
@@ -74,7 +96,7 @@ func TestTermOpenEchoBridge(t *testing.T) {
 }
 
 func TestTermExitOnProcessEnd(t *testing.T) {
-	s := NewServer(AllowAll{}, stubRPC{})
+	s := NewServer(AllowAll{}, &stubRPC{})
 	s.attachArgv = func(target string) []string { return []string{"sh", "-c", "exit 0"} }
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
@@ -107,7 +129,7 @@ func readNoneUntil(t *testing.T, ctx context.Context, c *websocket.Conn, unwante
 }
 
 func TestTermOpenRejectsInvalidTarget(t *testing.T) {
-	s := NewServer(AllowAll{}, stubRPC{})
+	s := NewServer(AllowAll{}, &stubRPC{})
 	// Would blow up if a session were ever started with this target.
 	s.attachArgv = func(target string) []string { return []string{"herdr", "agent", "attach", target} }
 
@@ -131,7 +153,7 @@ func TestTermOpenRejectsInvalidTarget(t *testing.T) {
 }
 
 func TestTermOpenMaxTermsCap(t *testing.T) {
-	s := NewServer(AllowAll{}, stubRPC{})
+	s := NewServer(AllowAll{}, &stubRPC{})
 	// Long-lived process so sessions stay open for the duration of the test.
 	s.attachArgv = func(target string) []string { return []string{"sh", "-c", "sleep 30"} }
 
@@ -177,7 +199,7 @@ func TestTermOpenMaxTermsCap(t *testing.T) {
 }
 
 func TestDefaultAttachArgvUsesTerminalAttach(t *testing.T) {
-	s := NewServer(AllowAll{}, stubRPC{})
+	s := NewServer(AllowAll{}, &stubRPC{})
 	got := s.attachArgv("term_abc")
 	want := []string{"herdr", "terminal", "attach", "term_abc", "--takeover"}
 	if len(got) != len(want) {
@@ -191,7 +213,7 @@ func TestDefaultAttachArgvUsesTerminalAttach(t *testing.T) {
 }
 
 func TestInitialSnapshotIncludesWorkspacesAndTabs(t *testing.T) {
-	s := NewServer(AllowAll{}, stubRPC{})
+	s := NewServer(AllowAll{}, &stubRPC{})
 	s.SetWorkspaceSnapshot(func() []state.Workspace {
 		return []state.Workspace{{WorkspaceID: "w7", Label: "omega3", Number: 4, PaneCount: 2, TabCount: 2}}
 	})
@@ -220,5 +242,83 @@ func TestInitialSnapshotIncludesWorkspacesAndTabs(t *testing.T) {
 	tabs := readUntil(t, ctx, c, "tabs")
 	if len(tabs["tabs"].([]any)) != 1 {
 		t.Fatalf("bad tabs frame: %+v", tabs)
+	}
+}
+
+func TestActionDispatchesAndPokes(t *testing.T) {
+	rpc := &stubRPC{}
+	s := NewServer(AllowAll{}, rpc)
+	poked := make(chan struct{}, 1)
+	s.SetPoke(func() { poked <- struct{}{} })
+
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	ctx := context.Background()
+	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close(websocket.StatusNormalClosure, "")
+
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"action","reqId":"a1","op":"rename","kind":"workspace","id":"w7","label":"omega3"}`))
+	res := readUntil(t, ctx, c, "action_result")
+	if res["ok"] != true || res["reqId"] != "a1" {
+		t.Fatalf("bad action_result: %+v", res)
+	}
+	select {
+	case <-poked:
+	case <-time.After(time.Second):
+		t.Fatal("successful action did not poke a re-poll")
+	}
+	rpc.mu.Lock()
+	defer rpc.mu.Unlock()
+	if len(rpc.calls) != 1 || rpc.calls[0] != "workspace.rename:w7" {
+		t.Fatalf("bad recorded calls: %v", rpc.calls)
+	}
+}
+
+func TestActionFailureReturnsErrorAndNoPoke(t *testing.T) {
+	rpc := &stubRPC{failOn: "pane.close"}
+	s := NewServer(AllowAll{}, rpc)
+	poked := make(chan struct{}, 1)
+	s.SetPoke(func() { poked <- struct{}{} })
+
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	ctx := context.Background()
+	c, _, _ := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	defer c.Close(websocket.StatusNormalClosure, "")
+
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"action","reqId":"a2","op":"close","kind":"pane","id":"w7:p2"}`))
+	res := readUntil(t, ctx, c, "action_result")
+	if res["ok"] != false || res["error"] == nil || res["error"] == "" {
+		t.Fatalf("expected ok=false with error, got %+v", res)
+	}
+	select {
+	case <-poked:
+		t.Fatal("failed action must not poke a re-poll")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestActionRejectsUnknownAndEmpty(t *testing.T) {
+	s := NewServer(AllowAll{}, &stubRPC{})
+	s.SetPoke(func() {})
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	ctx := context.Background()
+	c, _, _ := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	defer c.Close(websocket.StatusNormalClosure, "")
+
+	for _, frame := range []string{
+		`{"t":"action","reqId":"e1","op":"rename","kind":"bogus","id":"x","label":"y"}`,
+		`{"t":"action","reqId":"e2","op":"bogus","kind":"pane","id":"x"}`,
+		`{"t":"action","reqId":"e3","op":"close","kind":"pane","id":""}`,
+	} {
+		c.Write(ctx, websocket.MessageText, []byte(frame))
+		res := readUntil(t, ctx, c, "action_result")
+		if res["ok"] != false {
+			t.Fatalf("expected ok=false for %s, got %+v", frame, res)
+		}
 	}
 }

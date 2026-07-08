@@ -101,3 +101,43 @@ func TestListWorkspacesAndTabs(t *testing.T) {
 		t.Fatalf("bad tabs: %+v", tabs)
 	}
 }
+
+func TestClientRenameAndCloseReachHerdr(t *testing.T) {
+	f := newFakeHerdr(t)
+	c := New(f.SocketPath())
+	ctx := context.Background()
+
+	cases := []struct {
+		call   func() error
+		method string
+		key    string // param key carrying the id
+		id     string
+		label  string // "" for close
+	}{
+		{func() error { return c.RenameWorkspace(ctx, "w7", "omega3") }, "workspace.rename", "workspace_id", "w7", "omega3"},
+		{func() error { return c.RenameTab(ctx, "w7:t1", "build") }, "tab.rename", "tab_id", "w7:t1", "build"},
+		{func() error { return c.RenamePane(ctx, "w7:p2", "logs") }, "pane.rename", "pane_id", "w7:p2", "logs"},
+		{func() error { return c.CloseWorkspace(ctx, "w7") }, "workspace.close", "workspace_id", "w7", ""},
+		{func() error { return c.CloseTab(ctx, "w7:t1") }, "tab.close", "tab_id", "w7:t1", ""},
+		{func() error { return c.ClosePane(ctx, "w7:p2") }, "pane.close", "pane_id", "w7:p2", ""},
+	}
+	for _, tc := range cases {
+		if err := tc.call(); err != nil {
+			t.Fatalf("%s: %v", tc.method, err)
+		}
+		select {
+		case rec := <-f.lastCall:
+			if rec.Method != tc.method {
+				t.Fatalf("want method %s, got %s", tc.method, rec.Method)
+			}
+			if rec.Params[tc.key] != tc.id {
+				t.Fatalf("%s: want %s=%s, got %v", tc.method, tc.key, tc.id, rec.Params[tc.key])
+			}
+			if tc.label != "" && rec.Params["label"] != tc.label {
+				t.Fatalf("%s: want label=%s, got %v", tc.method, tc.label, rec.Params["label"])
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("%s never reached herdr", tc.method)
+		}
+	}
+}

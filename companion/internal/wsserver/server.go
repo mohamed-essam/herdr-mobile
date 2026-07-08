@@ -19,6 +19,12 @@ type HerdrRPC interface {
 	ReadPane(ctx context.Context, paneID, source string, lines int) (string, error)
 	SendText(ctx context.Context, paneID, text string) error
 	SendKeys(ctx context.Context, paneID, keys string) error
+	RenameWorkspace(ctx context.Context, id, label string) error
+	RenameTab(ctx context.Context, id, label string) error
+	RenamePane(ctx context.Context, id, label string) error
+	CloseWorkspace(ctx context.Context, id string) error
+	CloseTab(ctx context.Context, id string) error
+	ClosePane(ctx context.Context, id string) error
 }
 
 type Server struct {
@@ -30,6 +36,7 @@ type Server struct {
 	onPush      func(endpoint string)
 	herdrVer    string
 	herdrProt   int
+	poke        func()
 
 	termSeq    atomic.Uint64
 	attachArgv func(target string) []string
@@ -49,7 +56,7 @@ func NewServer(auth Authorizer, rpc HerdrRPC) *Server {
 	srv := &Server{auth: auth, rpc: rpc, clients: map[*client]struct{}{},
 		snapshot: func() []state.Pane { return nil }, onPush: func(string) {},
 		wsSnapshot: func() []state.Workspace { return nil }, tabSnapshot: func() []state.Tab { return nil },
-		herdrVer: "unknown", herdrProt: 0}
+		herdrVer: "unknown", herdrProt: 0, poke: func() {}}
 	// --takeover: the phone seizes the pane's attachment even if a client (e.g. the
 	// desktop herdr TUI or a stale attach) already holds it. --takeover is a fixed
 	// literal we control, not client input, so it can't be a flag-injection vector.
@@ -66,6 +73,7 @@ func (s *Server) SetWorkspaceSnapshot(fn func() []state.Workspace) { s.wsSnapsho
 func (s *Server) SetTabSnapshot(fn func() []state.Tab)             { s.tabSnapshot = fn }
 func (s *Server) SetPushEndpoint(fn func(string))                  { s.onPush = fn }
 func (s *Server) SetHerdrInfo(ver string, prot int)                { s.herdrVer, s.herdrProt = ver, prot }
+func (s *Server) SetPoke(fn func())                                { s.poke = fn }
 
 func (s *Server) Broadcast(frame []byte) {
 	s.mu.Lock()
@@ -185,8 +193,57 @@ func (s *Server) readLoop(ctx context.Context, c *client) {
 			}
 		case "term_close":
 			c.closeTerm(m.TermID)
+		case "action":
+			s.handleAction(ctx, c, m)
 		}
 	}
+}
+
+// handleAction routes a structural rename/close to the matching herdr socket
+// method. On success it pokes an immediate re-poll so the tree refreshes
+// without waiting for the poll tick; the change itself reaches the app through
+// the existing snapshot broadcast. action_result carries only ok/error.
+func (s *Server) handleAction(ctx context.Context, c *client, m proto.ClientMsg) {
+	if m.ID == "" {
+		c.send <- proto.ActionResult(m.ReqID, false, "invalid id")
+		return
+	}
+	var err error
+	switch m.Op {
+	case "rename":
+		switch m.Kind {
+		case "workspace":
+			err = s.rpc.RenameWorkspace(ctx, m.ID, m.Label)
+		case "tab":
+			err = s.rpc.RenameTab(ctx, m.ID, m.Label)
+		case "pane":
+			err = s.rpc.RenamePane(ctx, m.ID, m.Label)
+		default:
+			c.send <- proto.ActionResult(m.ReqID, false, "unknown kind: "+m.Kind)
+			return
+		}
+	case "close":
+		switch m.Kind {
+		case "workspace":
+			err = s.rpc.CloseWorkspace(ctx, m.ID)
+		case "tab":
+			err = s.rpc.CloseTab(ctx, m.ID)
+		case "pane":
+			err = s.rpc.ClosePane(ctx, m.ID)
+		default:
+			c.send <- proto.ActionResult(m.ReqID, false, "unknown kind: "+m.Kind)
+			return
+		}
+	default:
+		c.send <- proto.ActionResult(m.ReqID, false, "unknown op: "+m.Op)
+		return
+	}
+	if err != nil {
+		c.send <- proto.ActionResult(m.ReqID, false, err.Error())
+		return
+	}
+	s.poke()
+	c.send <- proto.ActionResult(m.ReqID, true, "")
 }
 
 // sendBlocking enqueues frame on c.send, blocking until it fits (or ctx is

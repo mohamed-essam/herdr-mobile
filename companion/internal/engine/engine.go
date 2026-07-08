@@ -50,6 +50,7 @@ func New(cfg Config) *Engine {
 	e.srv.SetWorkspaceSnapshot(e.store.Workspaces)
 	e.srv.SetTabSnapshot(e.store.Tabs)
 	e.srv.SetPushEndpoint(e.setEndpoint)
+	e.srv.SetPoke(e.Poke)
 	e.trigger = make(chan struct{}, 1)
 	e.subs = map[string]context.CancelFunc{}
 	return e
@@ -59,6 +60,15 @@ func (e *Engine) setEndpoint(ep string) {
 	e.mu.Lock()
 	e.endpoint = ep
 	e.mu.Unlock()
+}
+
+// Poke requests an immediate poll (coalesced with the ticker). Used by the
+// wsserver after a successful structural action so the tree refreshes fast.
+func (e *Engine) Poke() {
+	select {
+	case e.trigger <- struct{}{}:
+	default:
+	}
 }
 
 func (e *Engine) Run(ctx context.Context) error {

@@ -24,6 +24,12 @@ type fakeHerdr struct {
 	readText   map[string]string   // pane_id -> text for pane.read
 	subs       []chan Event        // active subscription channels
 	lastSend   chan map[string]any // records last send_text/send_keys params
+	lastCall   chan recordedCall   // records rename/close method+params
+}
+
+type recordedCall struct {
+	Method string
+	Params map[string]any
 }
 
 func newFakeHerdr(t *testing.T) *fakeHerdr {
@@ -35,7 +41,7 @@ func newFakeHerdr(t *testing.T) *fakeHerdr {
 		t.Fatal(err)
 	}
 	f := &fakeHerdr{t: t, ln: ln, path: path, readText: map[string]string{},
-		lastSend: make(chan map[string]any, 8)}
+		lastSend: make(chan map[string]any, 8), lastCall: make(chan recordedCall, 8)}
 	go f.serve()
 	t.Cleanup(func() { ln.Close(); os.Remove(path) })
 	return f
@@ -112,6 +118,10 @@ func (f *fakeHerdr) handle(c net.Conn) {
 			"read": map[string]any{"pane_id": pid, "source": req.Params["source"], "text": txt}}})
 	case "pane.send_text", "pane.send_keys":
 		f.lastSend <- req.Params
+		enc.Encode(map[string]any{"id": req.ID, "result": map[string]any{"type": "ok"}})
+	case "workspace.rename", "tab.rename", "pane.rename",
+		"workspace.close", "tab.close", "pane.close":
+		f.lastCall <- recordedCall{Method: req.Method, Params: req.Params}
 		enc.Encode(map[string]any{"id": req.ID, "result": map[string]any{"type": "ok"}})
 	case "events.subscribe":
 		ch := make(chan Event, 16)
