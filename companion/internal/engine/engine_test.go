@@ -88,11 +88,13 @@ func (fakeRPC) SendKeys(context.Context, string, string) error                { 
 // engine package's tests. It intentionally does not touch the internal/herdr
 // package's own A2 test fake.
 type fakeHerdr struct {
-	ln    net.Listener
-	path  string
-	mu    sync.Mutex
-	panes []herdr.PaneInfo
-	subs  []chan map[string]any
+	ln         net.Listener
+	path       string
+	mu         sync.Mutex
+	panes      []herdr.PaneInfo
+	workspaces []herdr.WorkspaceInfo
+	tabs       []herdr.TabInfo
+	subs       []chan map[string]any
 }
 
 func newFakeHerdr(t *testing.T) *fakeHerdr {
@@ -120,6 +122,14 @@ func newFakeHerdr(t *testing.T) *fakeHerdr {
 func (f *fakeHerdr) SocketPath() string { return f.path }
 
 func (f *fakeHerdr) SetPanes(p []herdr.PaneInfo) { f.mu.Lock(); f.panes = p; f.mu.Unlock() }
+
+func (f *fakeHerdr) SetWorkspaces(w []herdr.WorkspaceInfo) {
+	f.mu.Lock()
+	f.workspaces = w
+	f.mu.Unlock()
+}
+
+func (f *fakeHerdr) SetTabs(t []herdr.TabInfo) { f.mu.Lock(); f.tabs = t; f.mu.Unlock() }
 
 func (f *fakeHerdr) serve() {
 	for {
@@ -156,6 +166,16 @@ func (f *fakeHerdr) handle(c net.Conn) {
 		enc.Encode(map[string]any{"id": req.ID, "result": map[string]any{"type": "pane_list", "panes": panes}})
 	case "pane.read":
 		enc.Encode(map[string]any{"id": req.ID, "result": map[string]any{"type": "pane_read", "read": map[string]any{"pane_id": req.Params["pane_id"], "source": req.Params["source"], "text": ""}}})
+	case "workspace.list":
+		f.mu.Lock()
+		workspaces := f.workspaces
+		f.mu.Unlock()
+		enc.Encode(map[string]any{"id": req.ID, "result": map[string]any{"type": "workspace_list", "workspaces": workspaces}})
+	case "tab.list":
+		f.mu.Lock()
+		tabs := f.tabs
+		f.mu.Unlock()
+		enc.Encode(map[string]any{"id": req.ID, "result": map[string]any{"type": "tab_list", "tabs": tabs}})
 	case "events.subscribe":
 		ch := make(chan map[string]any, 16)
 		f.mu.Lock()
@@ -252,5 +272,27 @@ func TestEngineSubscriptionTriggersFastPoll(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("subscription did not trigger a fast poll/push within 2s (ticker is 5s)")
+	}
+}
+
+func TestPollOncePopulatesWorkspacesAndTabs(t *testing.T) {
+	f := newFakeHerdr(t)
+	f.SetWorkspaces([]herdr.WorkspaceInfo{
+		{WorkspaceID: "w7", Label: "omega3", Number: 4, PaneCount: 2, TabCount: 2},
+	})
+	f.SetTabs([]herdr.TabInfo{
+		{TabID: "w7:t1", Label: "1", Number: 1, WorkspaceID: "w7"},
+	})
+
+	e := New(Config{SocketPath: f.SocketPath(), ListenAddr: "127.0.0.1:0"})
+	e.pollOnce(context.Background())
+
+	ws := e.store.Workspaces()
+	if len(ws) != 1 || ws[0].Label != "omega3" {
+		t.Fatalf("workspaces not populated: %+v", ws)
+	}
+	tabs := e.store.Tabs()
+	if len(tabs) != 1 || tabs[0].TabID != "w7:t1" {
+		t.Fatalf("tabs not populated: %+v", tabs)
 	}
 }

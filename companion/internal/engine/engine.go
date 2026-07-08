@@ -47,6 +47,8 @@ func New(cfg Config) *Engine {
 	e := &Engine{cfg: cfg, client: c, store: state.NewStore()}
 	e.srv = wsserver.NewServer(wsserver.AllowAll{}, c)
 	e.srv.SetInitialSnapshot(e.store.Snapshot)
+	e.srv.SetWorkspaceSnapshot(e.store.Workspaces)
+	e.srv.SetTabSnapshot(e.store.Tabs)
 	e.srv.SetPushEndpoint(e.setEndpoint)
 	e.trigger = make(chan struct{}, 1)
 	e.subs = map[string]context.CancelFunc{}
@@ -166,6 +168,17 @@ func (e *Engine) pollOnce(ctx context.Context) {
 	}
 	for _, tr := range transitions {
 		e.handleTransition(ctx, tr)
+	}
+
+	if ws, err := e.client.ListWorkspaces(ctx); err == nil {
+		if e.store.ApplyWorkspaces(ws) {
+			e.srv.Broadcast(proto.WorkspacesSnapshot(e.store.Workspaces()))
+		}
+	}
+	if tabs, err := e.client.ListTabs(ctx); err == nil {
+		if e.store.ApplyTabs(tabs) {
+			e.srv.Broadcast(proto.TabsSnapshot(e.store.Tabs()))
+		}
 	}
 }
 
