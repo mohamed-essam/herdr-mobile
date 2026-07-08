@@ -67,6 +67,13 @@ class ProtocolTest {
         assertTrue(w.worktree?.isLinkedWorktree == true)
     }
 
+    @Test fun parsesPaneTerminalId() {
+        val f = parseServerFrame("""{"t":"panes","panes":[{"paneId":"w7:p2","workspaceId":"w7","tabId":"w7:t2","terminalId":"term_abc","agent":null,"agentStatus":"unknown"}]}""")
+        val p = (f as ServerFrame.Panes).panes.single()
+        assertEquals("term_abc", p.terminalId)
+        assertNull(p.agent)
+    }
+
     @Test fun parsesWorkspaceWithoutWorktreeAndTabsFrame() {
         val w = (parseServerFrame("""{"t":"workspaces","workspaces":[{"workspaceId":"w3","label":"apollo","number":1,"paneCount":1,"tabCount":1}]}""") as ServerFrame.Workspaces).workspaces.single()
         assertNull(w.worktree)

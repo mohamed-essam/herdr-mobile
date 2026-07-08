@@ -46,9 +46,9 @@ class DashboardViewModel(
 
     fun registerPush(endpoint: String) = client.registerPush(endpoint)
 
-    suspend fun openTerminal(target: String, cols: Int, rows: Int): String {
-        _lastOpenedPaneId.value = target
-        return client.openTerminal(target, cols, rows)
+    suspend fun openTerminal(pane: Pane, cols: Int, rows: Int): String {
+        _lastOpenedPaneId.value = pane.paneId
+        return client.openTerminal(pane.terminalId, cols, rows)
     }
     fun termInput(termId: String, data: ByteArray) = client.sendTermInput(termId, data)
     fun termResize(termId: String, cols: Int, rows: Int) = client.sendTermResize(termId, cols, rows)

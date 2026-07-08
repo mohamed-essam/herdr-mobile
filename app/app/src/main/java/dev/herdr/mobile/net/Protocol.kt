@@ -10,6 +10,7 @@ data class Pane(
     val paneId: String,
     val workspaceId: String = "",
     val tabId: String = "",
+    val terminalId: String = "",
     val cwd: String = "",
     val focused: Boolean = false,
     val agent: String? = null,
