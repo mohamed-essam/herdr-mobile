@@ -25,12 +25,14 @@ private val HerdrTypography = Typography(
 )
 
 // Sharp corners — herdr's panes are rectangular TUI blocks, not pills.
+// Truly square (0dp): rounded corners read as soft Material cards and undercut
+// the terminal-first identity.
 private val HerdrShapes = Shapes(
-    extraSmall = RoundedCornerShape(2.dp),
-    small = RoundedCornerShape(3.dp),
-    medium = RoundedCornerShape(4.dp),
-    large = RoundedCornerShape(6.dp),
-    extraLarge = RoundedCornerShape(8.dp),
+    extraSmall = RoundedCornerShape(0.dp),
+    small = RoundedCornerShape(0.dp),
+    medium = RoundedCornerShape(0.dp),
+    large = RoundedCornerShape(0.dp),
+    extraLarge = RoundedCornerShape(0.dp),
 )
 
 @Composable

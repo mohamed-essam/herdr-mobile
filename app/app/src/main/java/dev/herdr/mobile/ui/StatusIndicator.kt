@@ -23,7 +23,7 @@ import dev.herdr.mobile.ui.theme.statusGlyph
 
 /**
  * A herdr-style status readout: a colored glyph + the status word in mono.
- * A working agent gets the animated braille spinner (⠋⠙⠹…) herdr shows.
+ * A working agent gets the animated ASCII spinner (| / - \) — braille tofus on device.
  */
 @Composable
 fun StatusIndicator(status: String?, modifier: Modifier = Modifier) {

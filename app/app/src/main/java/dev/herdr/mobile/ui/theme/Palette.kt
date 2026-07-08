@@ -110,11 +110,16 @@ fun statusColor(status: String?, dark: Boolean): Color = when (status) {
 /** Static status glyph in herdr's terminal vocabulary (working spins separately). */
 fun statusGlyph(status: String?): String = when (status) {
     "blocked" -> "●"   // ● solid — needs attention
-    "working" -> "⣋"   // ⣋ braille (overridden by the animated spinner)
+    "working" -> "*"   // static fallback (overridden by the animated spinner)
     "done" -> "✓"      // ✓ check
     "idle" -> "○"      // ○ hollow
     else -> "·"        // · dot — unknown / shell
 }
 
-/** Frames of the classic braille spinner herdr shows for a working agent. */
-val SpinnerFrames = listOf("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+/**
+ * Frames of the classic ASCII terminal spinner for a working agent. herdr's TUI
+ * uses a braille spinner, but braille (U+2800 block) is absent from the system
+ * monospace font AND the bundled JetBrains Mono, so it renders as tofu on device;
+ * the ASCII "| / - \" spinner renders identically everywhere.
+ */
+val SpinnerFrames = listOf("|", "/", "-", "\\")
