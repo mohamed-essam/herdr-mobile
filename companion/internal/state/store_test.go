@@ -41,6 +41,42 @@ func TestApplyDetectsNewChangedRemoved(t *testing.T) {
 	}
 }
 
+func TestApplyWorkspacesAndTabsChangeDetection(t *testing.T) {
+	s := NewStore()
+
+	ws := []herdr.WorkspaceInfo{{WorkspaceID: "w7", Label: "omega3", Number: 4, AgentStatus: "idle", PaneCount: 2, TabCount: 2}}
+	if !s.ApplyWorkspaces(ws) {
+		t.Fatal("first ApplyWorkspaces should report changed")
+	}
+	if s.ApplyWorkspaces(ws) {
+		t.Fatal("unchanged ApplyWorkspaces should report not-changed")
+	}
+	if got := s.Workspaces(); len(got) != 1 || got[0].Label != "omega3" {
+		t.Fatalf("bad workspaces snapshot: %+v", got)
+	}
+
+	// worktree pointer is carried through only when linked
+	ws2 := []herdr.WorkspaceInfo{{WorkspaceID: "w5", Label: "wt", Number: 2,
+		Worktree: &herdr.WorktreeInfo{RepoName: "ops", IsLinkedWorktree: true}}}
+	if !s.ApplyWorkspaces(ws2) {
+		t.Fatal("changed workspace list should report changed")
+	}
+	if got := s.Workspaces(); got[0].Worktree == nil || got[0].Worktree.RepoName != "ops" {
+		t.Fatalf("worktree not carried: %+v", got[0])
+	}
+
+	tabs := []herdr.TabInfo{{TabID: "w7:t1", Label: "1", Number: 1, WorkspaceID: "w7"}}
+	if !s.ApplyTabs(tabs) {
+		t.Fatal("first ApplyTabs should report changed")
+	}
+	if s.ApplyTabs(tabs) {
+		t.Fatal("unchanged ApplyTabs should report not-changed")
+	}
+	if got := s.Tabs(); len(got) != 1 || got[0].TabID != "w7:t1" {
+		t.Fatalf("bad tabs snapshot: %+v", got)
+	}
+}
+
 func TestStoreConcurrentApplyAndSnapshot(t *testing.T) {
 	s := NewStore()
 	done := make(chan struct{})
