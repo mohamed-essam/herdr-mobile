@@ -3,6 +3,7 @@ package dev.herdr.mobile
 import dev.herdr.mobile.ui.NodeKind
 import dev.herdr.mobile.ui.RowAction
 import dev.herdr.mobile.ui.closeConfirmMessage
+import dev.herdr.mobile.ui.closeConfirmMessageWith
 import dev.herdr.mobile.ui.needsCloseConfirm
 import org.junit.Assert.*
 import org.junit.Test
@@ -37,5 +38,18 @@ class RowActionTest {
         assertEquals("workspace", NodeKind.WORKSPACE.wire)
         assertEquals("tab", NodeKind.TAB.wire)
         assertEquals("pane", NodeKind.PANE.wire)
+    }
+
+    @Test fun closeConfirmMessageWithNoSiblingsIsBaseCopy() {
+        val a = RowAction(NodeKind.WORKSPACE, "w1", "main", paneCount = 2, tabCount = 1)
+        assertEquals(closeConfirmMessage(a), closeConfirmMessageWith(a, emptyList()))
+    }
+
+    @Test fun closeConfirmMessageWithSiblingsAppendsLine() {
+        val a = RowAction(NodeKind.WORKSPACE, "w1", "main", paneCount = 2, tabCount = 1)
+        val msg = closeConfirmMessageWith(a, listOf("ops", "feat/a"))
+        assertTrue(msg.startsWith(closeConfirmMessage(a)))
+        assertTrue(msg.contains("ops"))
+        assertTrue(msg.contains("feat/a"))
     }
 }

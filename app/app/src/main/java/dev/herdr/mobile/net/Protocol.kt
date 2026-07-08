@@ -46,6 +46,12 @@ data class Tab(
     val paneCount: Int = 0,
 )
 
+@Serializable
+data class AlsoClose(
+    val workspaceId: String,
+    val label: String = "",
+)
+
 sealed interface ServerFrame {
     data object Welcome : ServerFrame
     data class Panes(val panes: List<Pane>) : ServerFrame
@@ -59,6 +65,7 @@ sealed interface ServerFrame {
     data class ActionResult(val reqId: String, val ok: Boolean, val error: String?) : ServerFrame
     data class Created(val reqId: String, val ok: Boolean, val paneId: String?, val terminalId: String?, val error: String?) : ServerFrame
     data class Agents(val reqId: String, val agents: List<String>) : ServerFrame
+    data class CloseImpact(val reqId: String, val workspaceId: String, val alsoCloses: List<AlsoClose>) : ServerFrame
     data object Pong : ServerFrame
     data object Unknown : ServerFrame
     data class TermOpened(val reqId: String, val termId: String) : ServerFrame
@@ -96,6 +103,10 @@ fun parseServerFrame(text: String): ServerFrame {
         "agents" -> ServerFrame.Agents(
             obj["reqId"]?.jsonPrimitive?.content ?: "",
             (obj["agents"] as? JsonArray)?.map { it.jsonPrimitive.content } ?: emptyList())
+        "close_impact" -> ServerFrame.CloseImpact(
+            obj["reqId"]?.jsonPrimitive?.content ?: "",
+            obj["workspaceId"]?.jsonPrimitive?.content ?: "",
+            (obj["alsoCloses"] as? JsonArray)?.map { json.decodeFromJsonElement<AlsoClose>(it) } ?: emptyList())
         "pong" -> ServerFrame.Pong
         "term_opened" -> ServerFrame.TermOpened(
             obj["reqId"]!!.jsonPrimitive.content, obj["termId"]!!.jsonPrimitive.content)
@@ -165,6 +176,9 @@ object ClientMsg {
 
     fun listAgents(reqId: String): String =
         JsonObject(mapOf("t" to JsonPrimitive("list_agents"), "reqId" to JsonPrimitive(reqId))).toString()
+
+    fun closeImpact(reqId: String, workspaceId: String): String =
+        JsonObject(mapOf("t" to JsonPrimitive("close_impact"), "reqId" to JsonPrimitive(reqId), "workspaceId" to JsonPrimitive(workspaceId))).toString()
 
     fun ping() = obj("t" to JsonPrimitive("ping"))
     fun termOpen(reqId: String, target: String, cols: Int, rows: Int) =

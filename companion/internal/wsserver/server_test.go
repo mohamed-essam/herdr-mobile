@@ -12,14 +12,16 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/messam/herdr-mobile/companion/internal/herdr"
 	"github.com/messam/herdr-mobile/companion/internal/state"
 )
 
 // stubRPC satisfies HerdrRPC without touching herdr, and records action calls.
 type stubRPC struct {
-	mu     sync.Mutex
-	calls  []string // "method:id" for each rename/close
-	failOn string   // method name that should return an error
+	mu        sync.Mutex
+	calls     []string // "method:id" for each rename/close
+	failOn    string   // method name that should return an error
+	worktrees []herdr.WorktreeEntry
 }
 
 func (s *stubRPC) ReadPane(context.Context, string, string, int) (string, error) { return "", nil }
@@ -76,6 +78,9 @@ func (s *stubRPC) MovePane(_ context.Context, pane, dest, tab, dir string) error
 }
 func (s *stubRPC) ListAgentNames(context.Context) ([]string, error) {
 	return []string{"claude"}, nil
+}
+func (s *stubRPC) ListWorktrees(context.Context, string) ([]herdr.WorktreeEntry, error) {
+	return s.worktrees, nil
 }
 
 // readUntil reads frames until one with t==want is seen (or timeout).
@@ -267,8 +272,8 @@ func TestInitialSnapshotIncludesWorkspacesAndTabs(t *testing.T) {
 	defer c.Close(websocket.StatusNormalClosure, "")
 
 	welcome := readUntil(t, ctx, c, "welcome")
-	if welcome["companionProtocol"].(float64) != 5 {
-		t.Fatalf("want companionProtocol 5, got %v", welcome["companionProtocol"])
+	if welcome["companionProtocol"].(float64) != 6 {
+		t.Fatalf("want companionProtocol 6, got %v", welcome["companionProtocol"])
 	}
 	ws := readUntil(t, ctx, c, "workspaces")
 	arr := ws["workspaces"].([]any)
@@ -334,6 +339,84 @@ func TestActionFailureReturnsErrorAndNoPoke(t *testing.T) {
 	case <-poked:
 		t.Fatal("failed action must not poke a re-poll")
 	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestComputeAlsoClosesBaseCascades(t *testing.T) {
+	entries := []herdr.WorktreeEntry{
+		{Path: "/repo", IsLinkedWorktree: false, OpenWorkspaceID: "w1", Label: "app"},
+		{Path: "/repo-a", Branch: "feat/a", IsLinkedWorktree: true, OpenWorkspaceID: "w2", Label: "app"},
+		{Path: "/repo-b", Branch: "feat/b", IsLinkedWorktree: true, OpenWorkspaceID: "", Label: "app"},
+	}
+	ws := []state.Workspace{{WorkspaceID: "w1", Label: "main"}, {WorkspaceID: "w2", Label: "ops"}}
+	got := computeAlsoCloses("w1", entries, ws)
+	if len(got) != 1 || got[0].WorkspaceID != "w2" || got[0].Label != "ops" {
+		t.Fatalf("expected [w2/ops], got %+v", got)
+	}
+}
+
+func TestComputeAlsoClosesLinkedTargetNoCascade(t *testing.T) {
+	entries := []herdr.WorktreeEntry{
+		{Path: "/repo", IsLinkedWorktree: false, OpenWorkspaceID: "w1", Label: "app"},
+		{Path: "/repo-a", IsLinkedWorktree: true, OpenWorkspaceID: "w2", Label: "app"},
+	}
+	if got := computeAlsoCloses("w2", entries, nil); len(got) != 0 {
+		t.Fatalf("linked target should not cascade, got %+v", got)
+	}
+}
+
+func TestComputeAlsoClosesBaseSingleMemberNoCascade(t *testing.T) {
+	entries := []herdr.WorktreeEntry{
+		{Path: "/repo", IsLinkedWorktree: false, OpenWorkspaceID: "w1", Label: "app"},
+		{Path: "/repo-a", IsLinkedWorktree: true, OpenWorkspaceID: "", Label: "app"},
+	}
+	if got := computeAlsoCloses("w1", entries, nil); len(got) != 0 {
+		t.Fatalf("single open member should not cascade, got %+v", got)
+	}
+}
+
+func TestComputeAlsoClosesLabelFallback(t *testing.T) {
+	entries := []herdr.WorktreeEntry{
+		{Path: "/repo", IsLinkedWorktree: false, OpenWorkspaceID: "w1", Label: "app"},
+		{Path: "/repo-a", Branch: "feat/a", IsLinkedWorktree: true, OpenWorkspaceID: "w2", Label: "app"},
+	}
+	// no workspace snapshot entry for w2 → falls back to branch "feat/a"
+	got := computeAlsoCloses("w1", entries, []state.Workspace{{WorkspaceID: "w1", Label: "main"}})
+	if len(got) != 1 || got[0].Label != "feat/a" {
+		t.Fatalf("expected branch fallback, got %+v", got)
+	}
+}
+
+func TestCloseImpactReturnsSiblings(t *testing.T) {
+	stub := &stubRPC{worktrees: []herdr.WorktreeEntry{
+		{Path: "/repo", IsLinkedWorktree: false, OpenWorkspaceID: "w1", Label: "app"},
+		{Path: "/repo-a", Branch: "feat/a", IsLinkedWorktree: true, OpenWorkspaceID: "w2", Label: "app"},
+	}}
+	s := NewServer(AllowAll{}, stub)
+	s.SetWorkspaceSnapshot(func() []state.Workspace {
+		return []state.Workspace{{WorkspaceID: "w1", Label: "main"}, {WorkspaceID: "w2", Label: "ops"}}
+	})
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	ctx := context.Background()
+	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close(websocket.StatusNormalClosure, "")
+
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"close_impact","reqId":"i1","workspaceId":"w1"}`))
+	got := readUntil(t, ctx, c, "close_impact")
+	if got["reqId"] != "i1" {
+		t.Fatalf("bad reply: %v", got)
+	}
+	arr, ok := got["alsoCloses"].([]any)
+	if !ok || len(arr) != 1 {
+		t.Fatalf("expected 1 alsoCloses, got %v", got["alsoCloses"])
+	}
+	first := arr[0].(map[string]any)
+	if first["workspaceId"] != "w2" || first["label"] != "ops" {
+		t.Fatalf("bad sibling: %v", first)
 	}
 }
 

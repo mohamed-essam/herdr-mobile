@@ -142,6 +142,30 @@ func TestClientRenameAndCloseReachHerdr(t *testing.T) {
 	}
 }
 
+func TestClientListWorktrees(t *testing.T) {
+	f := newFakeHerdr(t)
+	f.SetWorktrees([]WorktreeEntry{
+		{Path: "/repo", IsLinkedWorktree: false, OpenWorkspaceID: "w1", Label: "app"},
+		{Path: "/repo-wt", Branch: "feat/x", IsLinkedWorktree: true, OpenWorkspaceID: "w2", Label: "app"},
+	})
+	c := New(f.SocketPath())
+	wts, err := c.ListWorktrees(context.Background(), "w1")
+	if err != nil {
+		t.Fatalf("ListWorktrees: %v", err)
+	}
+	if len(wts) != 2 || wts[0].OpenWorkspaceID != "w1" || wts[1].Branch != "feat/x" || !wts[1].IsLinkedWorktree {
+		t.Fatalf("unexpected entries: %+v", wts)
+	}
+	select {
+	case rec := <-f.lastCall:
+		if rec.Method != "worktree.list" || rec.Params["workspace_id"] != "w1" {
+			t.Fatalf("bad worktree.list params: %+v", rec)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("worktree.list not recorded")
+	}
+}
+
 func TestClientCreateMoveAndAgents(t *testing.T) {
 	f := newFakeHerdr(t)
 	c := New(f.SocketPath())

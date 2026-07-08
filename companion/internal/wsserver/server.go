@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/coder/websocket"
+	"github.com/messam/herdr-mobile/companion/internal/herdr"
 	"github.com/messam/herdr-mobile/companion/internal/proto"
 	"github.com/messam/herdr-mobile/companion/internal/pty"
 	"github.com/messam/herdr-mobile/companion/internal/state"
@@ -32,6 +33,7 @@ type HerdrRPC interface {
 	StartAgent(ctx context.Context, name string, argv []string, workspaceID, tabID, split string) (paneID, terminalID string, err error)
 	MovePane(ctx context.Context, paneID, dest, tabID, direction string) error
 	ListAgentNames(ctx context.Context) ([]string, error)
+	ListWorktrees(ctx context.Context, workspaceID string) ([]herdr.WorktreeEntry, error)
 }
 
 type Server struct {
@@ -215,6 +217,8 @@ func (s *Server) readLoop(ctx context.Context, c *client) {
 				names = []string{}
 			}
 			c.send <- proto.Agents(m.ReqID, names)
+		case "close_impact":
+			s.handleCloseImpact(ctx, c, m)
 		}
 	}
 }
@@ -303,6 +307,64 @@ func (s *Server) handleMove(ctx context.Context, c *client, m proto.ClientMsg) {
 	}
 	s.poke()
 	c.send <- proto.ActionResult(m.ReqID, true, "")
+}
+
+// handleCloseImpact answers a close_impact query: it runs worktree.list for the
+// target workspace's repo and returns the sibling workspaces herdr would also
+// close. Any error yields an error frame; the app falls back to the plain
+// confirm. This is read-only — it never mutates herdr and never pokes.
+func (s *Server) handleCloseImpact(ctx context.Context, c *client, m proto.ClientMsg) {
+	if m.WorkspaceID == "" {
+		c.send <- proto.ErrorFrame(m.ReqID, "close_impact_failed", "invalid workspace id")
+		return
+	}
+	entries, err := s.rpc.ListWorktrees(ctx, m.WorkspaceID)
+	if err != nil {
+		c.send <- proto.ErrorFrame(m.ReqID, "close_impact_failed", err.Error())
+		return
+	}
+	also := computeAlsoCloses(m.WorkspaceID, entries, s.wsSnapshot())
+	c.send <- proto.CloseImpact(m.ReqID, m.WorkspaceID, also)
+}
+
+// computeAlsoCloses reproduces herdr's close_selected_workspace cascade rule:
+// closing a repo's BASE (non-linked) workspace closes the whole worktree group
+// when ≥2 of its worktrees have an open workspace. Returns the OTHER open
+// members, labeled from the workspace snapshot (fallback: branch, then id).
+// Returns an empty (non-nil) slice when there is no cascade.
+func computeAlsoCloses(target string, entries []herdr.WorktreeEntry, workspaces []state.Workspace) []proto.AlsoClose {
+	var targetEntry *herdr.WorktreeEntry
+	openMembers := 0
+	for i := range entries {
+		if entries[i].OpenWorkspaceID != "" {
+			openMembers++
+		}
+		if entries[i].OpenWorkspaceID == target {
+			targetEntry = &entries[i]
+		}
+	}
+	if targetEntry == nil || targetEntry.IsLinkedWorktree || openMembers < 2 {
+		return []proto.AlsoClose{}
+	}
+	labels := make(map[string]string, len(workspaces))
+	for _, w := range workspaces {
+		labels[w.WorkspaceID] = w.Label
+	}
+	out := []proto.AlsoClose{}
+	for _, e := range entries {
+		if e.OpenWorkspaceID == "" || e.OpenWorkspaceID == target {
+			continue
+		}
+		label := labels[e.OpenWorkspaceID]
+		if label == "" {
+			label = e.Branch
+		}
+		if label == "" {
+			label = e.OpenWorkspaceID
+		}
+		out = append(out, proto.AlsoClose{WorkspaceID: e.OpenWorkspaceID, Label: label})
+	}
+	return out
 }
 
 func dirOrDown(d string) string {

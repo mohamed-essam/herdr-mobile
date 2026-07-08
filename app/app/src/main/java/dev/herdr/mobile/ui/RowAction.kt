@@ -39,3 +39,14 @@ fun closeConfirmMessage(a: RowAction): String = when (a.kind) {
     NodeKind.WORKSPACE ->
         "Close workspace '${a.label}'? This ends ${a.paneCount} pane(s) across ${a.tabCount} tab(s)."
 }
+
+/**
+ * Confirm copy augmented with the sibling worktree-workspaces that herdr will
+ * also close (cascade). Falls back to the plain copy when there are none.
+ */
+fun closeConfirmMessageWith(a: RowAction, alsoCloses: List<String>): String {
+    val base = closeConfirmMessage(a)
+    if (alsoCloses.isEmpty()) return base
+    return base +
+        "\n\nAlso closes ${alsoCloses.size} linked worktree workspace(s): ${alsoCloses.joinToString(", ")}."
+}

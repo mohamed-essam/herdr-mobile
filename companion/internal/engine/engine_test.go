@@ -100,6 +100,9 @@ func (fakeRPC) StartAgent(context.Context, string, []string, string, string, str
 }
 func (fakeRPC) MovePane(context.Context, string, string, string, string) error { return nil }
 func (fakeRPC) ListAgentNames(context.Context) ([]string, error)               { return nil, nil }
+func (fakeRPC) ListWorktrees(context.Context, string) ([]herdr.WorktreeEntry, error) {
+	return nil, nil
+}
 
 // fakeHerdr is a minimal in-process herdr daemon stand-in, local to the
 // engine package's tests. It intentionally does not touch the internal/herdr

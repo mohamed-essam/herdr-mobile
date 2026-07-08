@@ -89,6 +89,22 @@ func (c *Client) ListTabs(ctx context.Context) ([]TabInfo, error) {
 	return res.Tabs, nil
 }
 
+func (c *Client) ListWorktrees(ctx context.Context, workspaceID string) ([]WorktreeEntry, error) {
+	params := map[string]any{}
+	if workspaceID != "" {
+		params["workspace_id"] = workspaceID
+	}
+	raw, err := c.Call(ctx, "worktree.list", params)
+	if err != nil {
+		return nil, err
+	}
+	var res worktreeListResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, err
+	}
+	return res.Worktrees, nil
+}
+
 func (c *Client) ReadPane(ctx context.Context, paneID, source string, lines int) (string, error) {
 	raw, err := c.Call(ctx, "pane.read", map[string]any{"pane_id": paneID, "source": source, "lines": lines})
 	if err != nil {

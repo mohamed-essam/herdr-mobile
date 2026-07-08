@@ -105,3 +105,20 @@ type agentManifestsResult struct {
 		Agent string `json:"agent"`
 	} `json:"manifests"`
 }
+
+// WorktreeEntry is one entry from herdr's worktree.list (scoped to one repo).
+// Branch and OpenWorkspaceID are Option in herdr and arrive absent (→ "")
+// when None. Label is the repo name (same for every entry), so it is NOT a
+// per-sibling label — resolve sibling labels from the workspace snapshot.
+type WorktreeEntry struct {
+	Path             string `json:"path"`
+	Branch           string `json:"branch"`
+	IsLinkedWorktree bool   `json:"is_linked_worktree"`
+	OpenWorkspaceID  string `json:"open_workspace_id"`
+	Label            string `json:"label"`
+}
+
+type worktreeListResult struct {
+	Type      string          `json:"type"`
+	Worktrees []WorktreeEntry `json:"worktrees"`
+}

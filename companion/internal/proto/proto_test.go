@@ -77,10 +77,10 @@ func TestTermFrames(t *testing.T) {
 	}
 }
 
-func TestWelcomeAdvertisesProtocol5(t *testing.T) {
+func TestWelcomeAdvertisesProtocol6(t *testing.T) {
 	var got map[string]any
 	json.Unmarshal(Welcome("0.7.1", 14), &got)
-	if got["companionProtocol"].(float64) != 5 {
-		t.Fatalf("want companionProtocol 5, got %v", got["companionProtocol"])
+	if got["companionProtocol"].(float64) != 6 {
+		t.Fatalf("want companionProtocol 6, got %v", got["companionProtocol"])
 	}
 }

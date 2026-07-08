@@ -62,6 +62,7 @@ class CompanionClient(private val http: OkHttpClient = OkHttpClient()) {
                     is ServerFrame.ActionResult -> pending.remove(frame.reqId)?.complete(frame)
                     is ServerFrame.Created -> pending.remove(frame.reqId)?.complete(frame)
                     is ServerFrame.Agents -> pending.remove(frame.reqId)?.complete(frame)
+                    is ServerFrame.CloseImpact -> pending.remove(frame.reqId)?.complete(frame)
                     else -> {}
                 }
                 _frames.tryEmit(frame)
@@ -168,6 +169,19 @@ class CompanionClient(private val http: OkHttpClient = OkHttpClient()) {
         return when (val f = request(reqId, ClientMsg.listAgents(reqId))) {
             is ServerFrame.Agents -> f.agents
             else -> emptyList()
+        }
+    }
+
+    /** Returns the sibling workspaces that will also close; [] on error/timeout. */
+    suspend fun closeImpact(workspaceId: String): List<AlsoClose> {
+        val reqId = "i${seq.incrementAndGet()}"
+        return try {
+            when (val f = request(reqId, ClientMsg.closeImpact(reqId, workspaceId))) {
+                is ServerFrame.CloseImpact -> f.alsoCloses
+                else -> emptyList()
+            }
+        } catch (e: Exception) {
+            emptyList() // timeout or transport failure → fall back to plain confirm
         }
     }
 
