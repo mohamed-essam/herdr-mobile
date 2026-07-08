@@ -45,7 +45,7 @@ func ParseClient(b []byte) (ClientMsg, error) {
 func must(v any) []byte { b, _ := json.Marshal(v); return b }
 
 func Welcome(version string, protocol int) []byte {
-	return must(map[string]any{"t": "welcome", "herdrVersion": version, "herdrProtocol": protocol, "companionProtocol": 5})
+	return must(map[string]any{"t": "welcome", "herdrVersion": version, "herdrProtocol": protocol, "companionProtocol": 6})
 }
 func PanesSnapshot(p []state.Pane) []byte {
 	return must(map[string]any{"t": "panes", "panes": p})
@@ -88,6 +88,20 @@ func Created(reqID string, ok bool, paneID, terminalID, message string) []byte {
 
 func Agents(reqID string, names []string) []byte {
 	return must(map[string]any{"t": "agents", "reqId": reqID, "agents": names})
+}
+
+type AlsoClose struct {
+	WorkspaceID string `json:"workspaceId"`
+	Label       string `json:"label"`
+}
+
+// CloseImpact reports which sibling workspaces herdr will also close when the
+// target workspace is closed. alsoCloses is always a present array (never null).
+func CloseImpact(reqID, workspaceID string, alsoCloses []AlsoClose) []byte {
+	if alsoCloses == nil {
+		alsoCloses = []AlsoClose{}
+	}
+	return must(map[string]any{"t": "close_impact", "reqId": reqID, "workspaceId": workspaceID, "alsoCloses": alsoCloses})
 }
 
 func Pong() []byte { return must(map[string]any{"t": "pong"}) }
