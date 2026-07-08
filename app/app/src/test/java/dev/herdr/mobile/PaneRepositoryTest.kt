@@ -23,4 +23,14 @@ class PaneRepositoryTest {
         assertEquals(1, repo.panes.value.size)
         assertEquals("w6:p1", repo.panes.value.single().paneId)
     }
+
+    @Test fun storesWorkspacesAndTabs() {
+        val repo = PaneRepository()
+        repo.onFrame(ServerFrame.Workspaces(listOf(
+            Workspace(workspaceId = "w7", label = "omega3", number = 4, paneCount = 2, tabCount = 2))))
+        repo.onFrame(ServerFrame.Tabs(listOf(
+            Tab(tabId = "w7:t1", label = "1", number = 1, workspaceId = "w7"))))
+        assertEquals("omega3", repo.workspaces.value.single().label)
+        assertEquals("w7:t1", repo.tabs.value.single().tabId)
+    }
 }
