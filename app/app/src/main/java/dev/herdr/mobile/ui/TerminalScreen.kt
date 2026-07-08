@@ -1,5 +1,6 @@
 package dev.herdr.mobile.ui
 
+import android.graphics.Typeface
 import android.util.Base64
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -134,6 +135,10 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
                             val c = TerminalViewClientImpl(this, initialPx, bounds) { vm.setTerminalFontSize(it) }
                             client = c
                             setTextSize(initialPx)
+                            // Bundled JetBrains Mono (OFL) — the system MONOSPACE on some
+                            // devices (Samsung) renders poorly; set our own for consistency.
+                            runCatching { Typeface.createFromAsset(ctx.assets, "fonts/JetBrainsMono-Regular.ttf") }
+                                .getOrNull()?.let { setTypeface(it) }
                             isFocusable = true
                             isFocusableInTouchMode = true
                             setTerminalViewClient(c)
