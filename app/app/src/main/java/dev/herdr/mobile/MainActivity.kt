@@ -54,7 +54,12 @@ class MainActivity : ComponentActivity() {
         }
 
         val settings = Settings(applicationContext)
-        val vm = DashboardViewModel(CompanionClient(), PaneRepository())
+        val vm = DashboardViewModel(
+            CompanionClient(),
+            PaneRepository(),
+            fontSizeStore = settings.terminalFontSize,
+            persistFontSize = { px -> lifecycleScope.launch { settings.setTerminalFontSize(px) } },
+        )
         val initialPane = intent.getStringExtra("paneId")
 
         setContent {

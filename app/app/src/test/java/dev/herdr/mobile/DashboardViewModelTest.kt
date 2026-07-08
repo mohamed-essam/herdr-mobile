@@ -4,6 +4,7 @@ import dev.herdr.mobile.data.PaneRepository
 import dev.herdr.mobile.net.CompanionClient
 import dev.herdr.mobile.ui.DashboardViewModel
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import okhttp3.*
@@ -49,5 +50,18 @@ class DashboardViewModelTest {
         assertTrue(vm.collapsed.value.contains("w7")) // now collapsed
         vm.toggleExpanded("w7")
         assertFalse(vm.collapsed.value.contains("w7")) // expanded again
+    }
+
+    @Test fun terminalFontSizeReflectsStoreAndPersistCallsBack() = runBlocking {
+        var persisted: Int? = null
+        val vm = DashboardViewModel(
+            CompanionClient(), PaneRepository(),
+            fontSizeStore = MutableStateFlow(28),
+            persistFontSize = { persisted = it },
+        )
+        withTimeout(1000) { while (vm.terminalFontSize.value == null) delay(10) }
+        assertEquals(28, vm.terminalFontSize.value)
+        vm.setTerminalFontSize(44)
+        assertEquals(44, persisted)
     }
 }

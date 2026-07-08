@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dev.herdr.mobile.data.PaneRepository
 import dev.herdr.mobile.net.CompanionClient
 import dev.herdr.mobile.net.Pane
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -16,9 +17,15 @@ import kotlinx.coroutines.launch
 class DashboardViewModel(
     private val client: CompanionClient,
     private val repo: PaneRepository,
+    fontSizeStore: Flow<Int?> = MutableStateFlow(null),
+    private val persistFontSize: (Int) -> Unit = {},
 ) : ViewModel() {
     val panes: StateFlow<List<Pane>> = repo.panes
     val connected: StateFlow<Boolean> = client.connected
+
+    val terminalFontSize: StateFlow<Int?> =
+        fontSizeStore.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    fun setTerminalFontSize(px: Int) = persistFontSize(px)
 
     val tree: StateFlow<List<WorkspaceNode>> =
         combine(repo.workspaces, repo.tabs, repo.panes) { ws, tabs, panes -> buildTree(ws, tabs, panes) }
