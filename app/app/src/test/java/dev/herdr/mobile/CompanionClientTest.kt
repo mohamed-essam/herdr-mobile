@@ -58,4 +58,43 @@ class CompanionClientTest {
         assertTrue(collected.any { it is ServerFrame.Welcome })
         job.cancel(); client.close(); server.shutdown()
     }
+
+    @Test fun closeImpactReturnsSiblings() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                if (!text.contains("\"reqId\"")) return
+                val reqId = Regex("\"reqId\":\"([^\"]+)\"").find(text)!!.groupValues[1]
+                if (text.contains("\"close_impact\"")) {
+                    webSocket.send("""{"t":"close_impact","reqId":"$reqId","workspaceId":"w1","alsoCloses":[{"workspaceId":"w2","label":"ops"}]}""")
+                }
+            }
+        }))
+        server.start()
+        val client = CompanionClient()
+        client.connect(server.url("/").toString().replace("http", "ws"))
+        val result = withTimeout(3000) { client.closeImpact("w1") }
+        assertEquals(1, result.size)
+        assertEquals("ops", result.single().label)
+        client.close(); server.shutdown()
+    }
+
+    @Test fun closeImpactReturnsEmptyOnError() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                if (!text.contains("\"reqId\"")) return
+                val reqId = Regex("\"reqId\":\"([^\"]+)\"").find(text)!!.groupValues[1]
+                if (text.contains("\"close_impact\"")) {
+                    webSocket.send("""{"t":"error","reqId":"$reqId","code":"close_impact_failed","message":"boom"}""")
+                }
+            }
+        }))
+        server.start()
+        val client = CompanionClient()
+        client.connect(server.url("/").toString().replace("http", "ws"))
+        val result = withTimeout(3000) { client.closeImpact("w1") }
+        assertTrue(result.isEmpty())
+        client.close(); server.shutdown()
+    }
 }
