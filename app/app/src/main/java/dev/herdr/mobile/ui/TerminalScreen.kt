@@ -1,5 +1,8 @@
 package dev.herdr.mobile.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.Typeface
 import android.util.Base64
 import androidx.compose.foundation.background
@@ -196,8 +199,24 @@ private fun terminalSessionClient(view: TerminalView): TerminalSessionClient =
         override fun onTextChanged(changedSession: TerminalSession) { view.onScreenUpdated() }
         override fun onTitleChanged(changedSession: TerminalSession) {}
         override fun onSessionFinished(finishedSession: TerminalSession) {}
-        override fun onCopyTextToClipboard(session: TerminalSession, text: String?) {}
-        override fun onPasteTextFromClipboard(session: TerminalSession?) {}
+        // Select text → "Copy" routes here (via TerminalSession.onCopyTextToClipboard).
+        // Put the selected text on the system clipboard so it can be pasted anywhere.
+        override fun onCopyTextToClipboard(session: TerminalSession, text: String?) {
+            if (text.isNullOrEmpty()) return
+            val cm = view.context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+            cm.setPrimaryClip(ClipData.newPlainText("herdr terminal", text))
+        }
+        // Long-press → "Paste" routes here (via TerminalSession.onPasteTextFromClipboard).
+        // Read the system clipboard and hand it to the emulator, whose paste()
+        // normalizes the text (bracketed-paste, newline→CR) and write()s it out —
+        // for a RemoteTerminalSession that goes to Io.sendInput → the remote PTY.
+        override fun onPasteTextFromClipboard(session: TerminalSession?) {
+            val clip = (view.context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager)
+                ?.primaryClip ?: return
+            if (clip.itemCount == 0) return
+            val text = clip.getItemAt(0)?.coerceToText(view.context)?.toString()
+            if (!text.isNullOrEmpty()) view.mEmulator?.paste(text)
+        }
         override fun onBell(session: TerminalSession) {}
         override fun onColorsChanged(session: TerminalSession) {}
         override fun onTerminalCursorStateChange(state: Boolean) {}
