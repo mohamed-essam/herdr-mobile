@@ -1,6 +1,8 @@
 package dev.herdr.mobile.ui
 
 import android.util.Base64
+import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
@@ -9,8 +11,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.doOnLayout
@@ -20,6 +24,8 @@ import com.termux.terminal.TerminalSession
 import com.termux.view.TerminalView
 import dev.herdr.mobile.net.Pane
 import dev.herdr.mobile.net.ServerFrame
+import dev.herdr.mobile.ui.theme.statusColor
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -32,7 +38,19 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
     val storedFont by vm.terminalFontSize.collectAsState()
     var emulatorReady by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("connecting…") }
+    var takenOver by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val title = pane.cwd.substringAfterLast('/').ifBlank { pane.workspaceId.ifBlank { pane.paneId } }
+
+    suspend fun attachOnce() {
+        val emu = view?.mEmulator
+        val cols = emu?.mColumns ?: 80
+        val rows = emu?.mRows ?: 24
+        status = "connecting…"
+        runCatching { vm.openTerminal(pane.paneId, cols, rows) }
+            .onSuccess { termId = it; status = "connected"; takenOver = false }
+            .onFailure { status = "failed: ${it.message}" }
+    }
 
     // Feed incoming term_data for the ACTIVE termId into the emulator; react to exit.
     // Re-subscribes automatically when termId changes (e.g. after a reconnect re-attach).
@@ -44,7 +62,11 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
                     val bytes = Base64.decode(f.data, Base64.NO_WRAP)
                     session?.feed(bytes, bytes.size)
                 }
-                is ServerFrame.TermExit -> if (f.termId == id) status = "session ended (${f.code})"
+                is ServerFrame.TermExit -> if (f.termId == id) {
+                    status = "taken over elsewhere"
+                    termId = null
+                    takenOver = true
+                }
                 else -> {}
             }
         }
@@ -63,13 +85,7 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
             return@LaunchedEffect
         }
         if (!emulatorReady || termId != null) return@LaunchedEffect
-        val emu = view?.mEmulator
-        val cols = emu?.mColumns ?: 80
-        val rows = emu?.mRows ?: 24
-        status = "connecting…"
-        runCatching { vm.openTerminal(pane.paneId, cols, rows) }
-            .onSuccess { termId = it; status = "connected" }
-            .onFailure { status = "failed: ${it.message}" }
+        attachOnce()
     }
 
     // Apply a stored font size that arrives after the view was created.
@@ -100,40 +116,63 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
         },
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize().imePadding()) {
-            AndroidView(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                factory = { ctx ->
-                    TerminalView(ctx, null).apply {
-                        val density = ctx.resources.displayMetrics.density
-                        val bounds = fontBounds(density)
-                        val initialPx = storedFont ?: bounds.default
-                        val c = TerminalViewClientImpl(this, initialPx, bounds) { vm.setTerminalFontSize(it) }
-                        client = c
-                        setTextSize(initialPx)
-                        isFocusable = true
-                        isFocusableInTouchMode = true
-                        setTerminalViewClient(c)
-                        val sess = RemoteTerminalSession(terminalSessionClient(this), object : RemoteTerminalSession.Io {
-                            override fun sendInput(data: ByteArray) { termId?.let { vm.termInput(it, data) } }
-                            override fun sendResize(cols: Int, rows: Int) { termId?.let { vm.termResize(it, cols, rows) } }
-                        })
-                        session = sess
-                        view = this
-                        attachSession(sess)
-                        // The emulator is created lazily during layout (onSizeChanged ->
-                        // updateSize). Signal readiness once it exists (retry if the first
-                        // layout produced a zero size) so the (re)attach effect opens with
-                        // real cols/rows and never before the emulator can accept bytes.
-                        fun markReadyWhenEmulatorExists() {
-                            if (mEmulator != null) emulatorReady = true else post { markReadyWhenEmulatorExists() }
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { ctx ->
+                        TerminalView(ctx, null).apply {
+                            val density = ctx.resources.displayMetrics.density
+                            val bounds = fontBounds(density)
+                            val initialPx = storedFont ?: bounds.default
+                            val c = TerminalViewClientImpl(this, initialPx, bounds) { vm.setTerminalFontSize(it) }
+                            client = c
+                            setTextSize(initialPx)
+                            isFocusable = true
+                            isFocusableInTouchMode = true
+                            setTerminalViewClient(c)
+                            val sess = RemoteTerminalSession(terminalSessionClient(this), object : RemoteTerminalSession.Io {
+                                override fun sendInput(data: ByteArray) { termId?.let { vm.termInput(it, data) } }
+                                override fun sendResize(cols: Int, rows: Int) { termId?.let { vm.termResize(it, cols, rows) } }
+                            })
+                            session = sess
+                            view = this
+                            attachSession(sess)
+                            // The emulator is created lazily during layout (onSizeChanged ->
+                            // updateSize). Signal readiness once it exists (retry if the first
+                            // layout produced a zero size) so the (re)attach effect opens with
+                            // real cols/rows and never before the emulator can accept bytes.
+                            fun markReadyWhenEmulatorExists() {
+                                if (mEmulator != null) emulatorReady = true else post { markReadyWhenEmulatorExists() }
+                            }
+                            doOnLayout {
+                                requestFocus()
+                                markReadyWhenEmulatorExists()
+                            }
                         }
-                        doOnLayout {
-                            requestFocus()
-                            markReadyWhenEmulatorExists()
+                    },
+                )
+                if (takenOver) {
+                    Column(
+                        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Text("⚠", style = MaterialTheme.typography.headlineMedium, color = statusColor("blocked", isSystemInDarkTheme()))
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "terminal ended or was taken over elsewhere",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 24.dp),
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Button(onClick = { scope.launch { attachOnce() } }, shape = MaterialTheme.shapes.small) {
+                            Text("Reattach")
                         }
                     }
-                },
-            )
+                }
+            }
             session?.let { KeyToolbar(it) }
         }
     }
