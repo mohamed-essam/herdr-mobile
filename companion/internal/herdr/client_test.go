@@ -71,3 +71,33 @@ func TestClientCallPropagatesRPCError(t *testing.T) {
 		t.Fatalf("want code unknown_method, got %q", rpcErr.Code)
 	}
 }
+
+func TestListWorkspacesAndTabs(t *testing.T) {
+	f := newFakeHerdr(t)
+	f.SetWorkspaces([]WorkspaceInfo{
+		{WorkspaceID: "w3", Label: "apollo", Number: 1, AgentStatus: "idle", PaneCount: 1, TabCount: 1},
+		{WorkspaceID: "w5", Label: "wt-cost-dashboards", Number: 2, Focused: true, PaneCount: 1, TabCount: 1,
+			Worktree: &WorktreeInfo{RepoName: "ops", IsLinkedWorktree: true}},
+	})
+	f.SetTabs([]TabInfo{
+		{TabID: "w7:t1", Label: "1", Number: 1, WorkspaceID: "w7", AgentStatus: "idle", PaneCount: 1},
+		{TabID: "w7:t2", Label: "2", Number: 2, WorkspaceID: "w7", AgentStatus: "unknown", PaneCount: 1},
+	})
+	c := New(f.SocketPath())
+
+	ws, err := c.ListWorkspaces(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ws) != 2 || ws[0].Label != "apollo" || ws[1].Worktree == nil || ws[1].Worktree.RepoName != "ops" {
+		t.Fatalf("bad workspaces: %+v", ws)
+	}
+
+	tabs, err := c.ListTabs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tabs) != 2 || tabs[1].Label != "2" || tabs[1].WorkspaceID != "w7" {
+		t.Fatalf("bad tabs: %+v", tabs)
+	}
+}

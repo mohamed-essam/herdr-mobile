@@ -14,14 +14,16 @@ import (
 // One request per connection (matching real herdr). For events.subscribe it
 // sends subscription_started then streams any events pushed via PushEvent.
 type fakeHerdr struct {
-	t        *testing.T
-	ln       net.Listener
-	path     string
-	mu       sync.Mutex
-	panes    []PaneInfo         // returned for pane.list
-	readText map[string]string  // pane_id -> text for pane.read
-	subs     []chan Event       // active subscription channels
-	lastSend chan map[string]any // records last send_text/send_keys params
+	t          *testing.T
+	ln         net.Listener
+	path       string
+	mu         sync.Mutex
+	panes      []PaneInfo // returned for pane.list
+	workspaces []WorkspaceInfo
+	tabs       []TabInfo
+	readText   map[string]string   // pane_id -> text for pane.read
+	subs       []chan Event        // active subscription channels
+	lastSend   chan map[string]any // records last send_text/send_keys params
 }
 
 func newFakeHerdr(t *testing.T) *fakeHerdr {
@@ -42,6 +44,9 @@ func newFakeHerdr(t *testing.T) *fakeHerdr {
 func (f *fakeHerdr) SocketPath() string { return f.path }
 
 func (f *fakeHerdr) SetPanes(p []PaneInfo) { f.mu.Lock(); f.panes = p; f.mu.Unlock() }
+
+func (f *fakeHerdr) SetWorkspaces(w []WorkspaceInfo) { f.mu.Lock(); f.workspaces = w; f.mu.Unlock() }
+func (f *fakeHerdr) SetTabs(t []TabInfo)             { f.mu.Lock(); f.tabs = t; f.mu.Unlock() }
 
 func (f *fakeHerdr) PushEvent(e Event) {
 	f.mu.Lock()
@@ -88,6 +93,16 @@ func (f *fakeHerdr) handle(c net.Conn) {
 		panes := f.panes
 		f.mu.Unlock()
 		enc.Encode(map[string]any{"id": req.ID, "result": map[string]any{"type": "pane_list", "panes": panes}})
+	case "workspace.list":
+		f.mu.Lock()
+		ws := f.workspaces
+		f.mu.Unlock()
+		enc.Encode(map[string]any{"id": req.ID, "result": map[string]any{"type": "workspace_list", "workspaces": ws}})
+	case "tab.list":
+		f.mu.Lock()
+		tabs := f.tabs
+		f.mu.Unlock()
+		enc.Encode(map[string]any{"id": req.ID, "result": map[string]any{"type": "tab_list", "tabs": tabs}})
 	case "pane.read":
 		pid, _ := req.Params["pane_id"].(string)
 		f.mu.Lock()

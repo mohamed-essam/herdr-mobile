@@ -65,6 +65,30 @@ func (c *Client) ListPanes(ctx context.Context) ([]PaneInfo, error) {
 	return res.Panes, nil
 }
 
+func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
+	raw, err := c.Call(ctx, "workspace.list", nil)
+	if err != nil {
+		return nil, err
+	}
+	var res workspaceListResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, err
+	}
+	return res.Workspaces, nil
+}
+
+func (c *Client) ListTabs(ctx context.Context) ([]TabInfo, error) {
+	raw, err := c.Call(ctx, "tab.list", nil)
+	if err != nil {
+		return nil, err
+	}
+	var res tabListResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, err
+	}
+	return res.Tabs, nil
+}
+
 func (c *Client) ReadPane(ctx context.Context, paneID, source string, lines int) (string, error) {
 	raw, err := c.Call(ctx, "pane.read", map[string]any{"pane_id": paneID, "source": source, "lines": lines})
 	if err != nil {
