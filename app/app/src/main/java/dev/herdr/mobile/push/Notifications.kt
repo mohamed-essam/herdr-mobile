@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
 import dev.herdr.mobile.MainActivity
+import dev.herdr.mobile.R
 
 object Notifications {
     private const val CH_BLOCKED = "blocked"
@@ -28,7 +29,7 @@ object Notifications {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val channel = if (p.kind == "blocked") CH_BLOCKED else CH_FINISHED
         val n = NotificationCompat.Builder(ctx, channel)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(p.title)
             .setContentText(p.body)
             .setAutoCancel(true)
