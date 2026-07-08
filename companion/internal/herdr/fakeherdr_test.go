@@ -21,6 +21,7 @@ type fakeHerdr struct {
 	panes      []PaneInfo // returned for pane.list
 	workspaces []WorkspaceInfo
 	tabs       []TabInfo
+	worktrees  []WorktreeEntry
 	readText   map[string]string   // pane_id -> text for pane.read
 	subs       []chan Event        // active subscription channels
 	lastSend   chan map[string]any // records last send_text/send_keys params
@@ -53,6 +54,7 @@ func (f *fakeHerdr) SetPanes(p []PaneInfo) { f.mu.Lock(); f.panes = p; f.mu.Unlo
 
 func (f *fakeHerdr) SetWorkspaces(w []WorkspaceInfo) { f.mu.Lock(); f.workspaces = w; f.mu.Unlock() }
 func (f *fakeHerdr) SetTabs(t []TabInfo)             { f.mu.Lock(); f.tabs = t; f.mu.Unlock() }
+func (f *fakeHerdr) SetWorktrees(w []WorktreeEntry)  { f.mu.Lock(); f.worktrees = w; f.mu.Unlock() }
 
 func (f *fakeHerdr) PushEvent(e Event) {
 	f.mu.Lock()
@@ -109,6 +111,12 @@ func (f *fakeHerdr) handle(c net.Conn) {
 		tabs := f.tabs
 		f.mu.Unlock()
 		enc.Encode(map[string]any{"id": req.ID, "result": map[string]any{"type": "tab_list", "tabs": tabs}})
+	case "worktree.list":
+		f.lastCall <- recordedCall{Method: req.Method, Params: req.Params}
+		f.mu.Lock()
+		wts := f.worktrees
+		f.mu.Unlock()
+		enc.Encode(map[string]any{"id": req.ID, "result": map[string]any{"type": "worktree_list", "worktrees": wts}})
 	case "pane.read":
 		pid, _ := req.Params["pane_id"].(string)
 		f.mu.Lock()
