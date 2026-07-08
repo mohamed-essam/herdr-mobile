@@ -98,42 +98,44 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
                 },
             )
         },
-        bottomBar = { session?.let { KeyToolbar(it) } },
     ) { pad ->
-        AndroidView(
-            modifier = Modifier.padding(pad).fillMaxSize(),
-            factory = { ctx ->
-                TerminalView(ctx, null).apply {
-                    val density = ctx.resources.displayMetrics.density
-                    val bounds = fontBounds(density)
-                    val initialPx = storedFont ?: bounds.default
-                    val c = TerminalViewClientImpl(this, initialPx, bounds) { vm.setTerminalFontSize(it) }
-                    client = c
-                    setTextSize(initialPx)
-                    isFocusable = true
-                    isFocusableInTouchMode = true
-                    setTerminalViewClient(c)
-                    val sess = RemoteTerminalSession(terminalSessionClient(this), object : RemoteTerminalSession.Io {
-                        override fun sendInput(data: ByteArray) { termId?.let { vm.termInput(it, data) } }
-                        override fun sendResize(cols: Int, rows: Int) { termId?.let { vm.termResize(it, cols, rows) } }
-                    })
-                    session = sess
-                    view = this
-                    attachSession(sess)
-                    // The emulator is created lazily during layout (onSizeChanged ->
-                    // updateSize). Signal readiness once it exists (retry if the first
-                    // layout produced a zero size) so the (re)attach effect opens with
-                    // real cols/rows and never before the emulator can accept bytes.
-                    fun markReadyWhenEmulatorExists() {
-                        if (mEmulator != null) emulatorReady = true else post { markReadyWhenEmulatorExists() }
+        Column(Modifier.padding(pad).fillMaxSize().imePadding()) {
+            AndroidView(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                factory = { ctx ->
+                    TerminalView(ctx, null).apply {
+                        val density = ctx.resources.displayMetrics.density
+                        val bounds = fontBounds(density)
+                        val initialPx = storedFont ?: bounds.default
+                        val c = TerminalViewClientImpl(this, initialPx, bounds) { vm.setTerminalFontSize(it) }
+                        client = c
+                        setTextSize(initialPx)
+                        isFocusable = true
+                        isFocusableInTouchMode = true
+                        setTerminalViewClient(c)
+                        val sess = RemoteTerminalSession(terminalSessionClient(this), object : RemoteTerminalSession.Io {
+                            override fun sendInput(data: ByteArray) { termId?.let { vm.termInput(it, data) } }
+                            override fun sendResize(cols: Int, rows: Int) { termId?.let { vm.termResize(it, cols, rows) } }
+                        })
+                        session = sess
+                        view = this
+                        attachSession(sess)
+                        // The emulator is created lazily during layout (onSizeChanged ->
+                        // updateSize). Signal readiness once it exists (retry if the first
+                        // layout produced a zero size) so the (re)attach effect opens with
+                        // real cols/rows and never before the emulator can accept bytes.
+                        fun markReadyWhenEmulatorExists() {
+                            if (mEmulator != null) emulatorReady = true else post { markReadyWhenEmulatorExists() }
+                        }
+                        doOnLayout {
+                            requestFocus()
+                            markReadyWhenEmulatorExists()
+                        }
                     }
-                    doOnLayout {
-                        requestFocus()
-                        markReadyWhenEmulatorExists()
-                    }
-                }
-            },
-        )
+                },
+            )
+            session?.let { KeyToolbar(it) }
+        }
     }
 }
 
