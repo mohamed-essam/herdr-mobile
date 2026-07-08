@@ -155,9 +155,17 @@ private fun PaneTreeRow(
     val isAgent = pane.agent != null
     val marked = pane.focused || pane.paneId == focusedPaneId || pane.paneId == lastOpenedPaneId
     // Shell panes are now attachable too (herdr terminal attach by terminal_id);
-    // keep the dimmed styling as a cue but allow the tap.
+    // keep the dimmed styling as a cue but allow the tap. A pane with no
+    // terminal_id is not attachable, so it stays non-clickable.
+    val attachable = pane.terminalId.isNotBlank()
     val clickable = Modifier.fillMaxWidth()
-        .combinedClickable(onClick = { onSelectPane(pane) }, onLongClick = { onRowAction(paneAction(pane)) })
+        .let {
+            if (attachable) {
+                it.combinedClickable(onClick = { onSelectPane(pane) }, onLongClick = { onRowAction(paneAction(pane)) })
+            } else {
+                it
+            }
+        }
     Row(
         clickable
             .then(if (marked) Modifier.background(MaterialTheme.colorScheme.surfaceVariant) else Modifier)

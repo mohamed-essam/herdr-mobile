@@ -77,7 +77,7 @@ func TestTermFrames(t *testing.T) {
 	}
 }
 
-func TestWelcomeAdvertisesProtocol3(t *testing.T) {
+func TestWelcomeAdvertisesProtocol4(t *testing.T) {
 	var got map[string]any
 	json.Unmarshal(Welcome("0.7.1", 14), &got)
 	if got["companionProtocol"].(float64) != 4 {
