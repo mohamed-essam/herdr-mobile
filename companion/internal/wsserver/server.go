@@ -53,8 +53,10 @@ func NewServer(auth Authorizer, rpc HerdrRPC) *Server {
 	// --takeover: the phone seizes the pane's attachment even if a client (e.g. the
 	// desktop herdr TUI or a stale attach) already holds it. --takeover is a fixed
 	// literal we control, not client input, so it can't be a flag-injection vector.
+	// `terminal attach` streams ANY pane's PTY by terminal_id (agent or shell),
+	// unlike `agent attach` which only resolves agent panes.
 	srv.attachArgv = func(target string) []string {
-		return []string{"herdr", "agent", "attach", target, "--takeover"}
+		return []string{"herdr", "terminal", "attach", target, "--takeover"}
 	}
 	return srv
 }
@@ -229,7 +231,7 @@ func (c *client) closeAll() {
 }
 
 func (s *Server) openTerm(ctx context.Context, c *client, reqID, target string, cols, rows int) {
-	// target flows unauthenticated-WS-client -> argv for `herdr agent attach`;
+	// target flows unauthenticated-WS-client -> argv for `herdr terminal attach`;
 	// reject anything that could be smuggled in as a flag rather than a pane/agent id.
 	if target == "" || strings.HasPrefix(target, "-") {
 		c.send <- proto.TermError(reqID, "", "invalid target")

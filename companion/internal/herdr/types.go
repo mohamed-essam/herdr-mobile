@@ -23,6 +23,7 @@ type PaneInfo struct {
 	Focused     bool   `json:"focused"`
 	Agent       string `json:"agent"`
 	AgentStatus string `json:"agent_status"`
+	TerminalID  string `json:"terminal_id"`
 }
 
 type paneListResult struct {

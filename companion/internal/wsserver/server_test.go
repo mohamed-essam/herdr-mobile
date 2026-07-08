@@ -176,6 +176,20 @@ func TestTermOpenMaxTermsCap(t *testing.T) {
 	}
 }
 
+func TestDefaultAttachArgvUsesTerminalAttach(t *testing.T) {
+	s := NewServer(AllowAll{}, stubRPC{})
+	got := s.attachArgv("term_abc")
+	want := []string{"herdr", "terminal", "attach", "term_abc", "--takeover"}
+	if len(got) != len(want) {
+		t.Fatalf("argv len: got %v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("argv[%d]: got %q want %q (full %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
 func TestInitialSnapshotIncludesWorkspacesAndTabs(t *testing.T) {
 	s := NewServer(AllowAll{}, stubRPC{})
 	s.SetWorkspaceSnapshot(func() []state.Workspace {
@@ -195,8 +209,8 @@ func TestInitialSnapshotIncludesWorkspacesAndTabs(t *testing.T) {
 	defer c.Close(websocket.StatusNormalClosure, "")
 
 	welcome := readUntil(t, ctx, c, "welcome")
-	if welcome["companionProtocol"].(float64) != 3 {
-		t.Fatalf("want companionProtocol 3, got %v", welcome["companionProtocol"])
+	if welcome["companionProtocol"].(float64) != 4 {
+		t.Fatalf("want companionProtocol 4, got %v", welcome["companionProtocol"])
 	}
 	ws := readUntil(t, ctx, c, "workspaces")
 	arr := ws["workspaces"].([]any)
