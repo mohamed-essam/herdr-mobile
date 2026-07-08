@@ -58,6 +58,7 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
     var actionTarget by remember { mutableStateOf<RowAction?>(null) }   // action sheet open for
     var renameTarget by remember { mutableStateOf<RowAction?>(null) }   // rename dialog open for
     var confirmTarget by remember { mutableStateOf<RowAction?>(null) }  // close-confirm open for
+    var alsoCloses by remember { mutableStateOf<List<String>>(emptyList()) }
     var agentPickerFor by remember { mutableStateOf<RowAction?>(null) } // agent picker open for (Task 5)
     var moveTargetPaneId by remember { mutableStateOf<String?>(null) }  // move sheet open for (Task 5)
     var showOtherDialog by remember { mutableStateOf<RowAction?>(null) }
@@ -115,8 +116,17 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
                 onRename = { renameTarget = target; actionTarget = null },
                 onClose = {
                     actionTarget = null
-                    if (needsCloseConfirm(target)) confirmTarget = target
-                    else vm.closeNode(target.kind.wire, target.id)
+                    if (needsCloseConfirm(target)) {
+                        if (target.kind == NodeKind.WORKSPACE) {
+                            scope.launch {
+                                alsoCloses = vm.closeImpact(target.id)
+                                confirmTarget = target
+                            }
+                        } else {
+                            alsoCloses = emptyList()
+                            confirmTarget = target
+                        }
+                    } else vm.closeNode(target.kind.wire, target.id)
                 },
                 onDismiss = { actionTarget = null },
             )
@@ -135,16 +145,19 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
 
         confirmTarget?.let { target ->
             AlertDialog(
-                onDismissRequest = { confirmTarget = null },
+                onDismissRequest = { confirmTarget = null; alsoCloses = emptyList() },
                 title = { Text("Close ${target.label}") },
-                text = { Text(closeConfirmMessage(target)) },
+                text = { Text(closeConfirmMessageWith(target, alsoCloses)) },
                 confirmButton = {
                     TextButton(onClick = {
                         vm.closeNode(target.kind.wire, target.id)
                         confirmTarget = null
+                        alsoCloses = emptyList()
                     }) { Text("Close") }
                 },
-                dismissButton = { TextButton(onClick = { confirmTarget = null }) { Text("Cancel") } },
+                dismissButton = {
+                    TextButton(onClick = { confirmTarget = null; alsoCloses = emptyList() }) { Text("Cancel") }
+                },
             )
         }
 

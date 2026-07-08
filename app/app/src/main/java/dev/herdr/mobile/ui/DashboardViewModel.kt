@@ -95,6 +95,10 @@ class DashboardViewModel(
         }
     }
 
+    /** Sibling labels that will also close with this workspace; [] on error. */
+    suspend fun closeImpact(workspaceId: String): List<String> =
+        runCatching { client.closeImpact(workspaceId).map { it.label } }.getOrDefault(emptyList())
+
     suspend fun openTerminal(pane: Pane, cols: Int, rows: Int): String {
         _lastOpenedPaneId.value = pane.paneId
         return client.openTerminal(pane.terminalId, cols, rows)
