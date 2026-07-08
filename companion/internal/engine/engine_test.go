@@ -90,6 +90,17 @@ func (fakeRPC) CloseWorkspace(context.Context, string) error                  { 
 func (fakeRPC) CloseTab(context.Context, string) error                        { return nil }
 func (fakeRPC) ClosePane(context.Context, string) error                       { return nil }
 
+func (fakeRPC) CreateWorkspace(context.Context) (string, string, error)   { return "", "", nil }
+func (fakeRPC) CreateTab(context.Context, string) (string, string, error) { return "", "", nil }
+func (fakeRPC) SplitPane(context.Context, string, string, string) (string, string, error) {
+	return "", "", nil
+}
+func (fakeRPC) StartAgent(context.Context, string, []string, string, string, string) (string, string, error) {
+	return "", "", nil
+}
+func (fakeRPC) MovePane(context.Context, string, string, string, string) error { return nil }
+func (fakeRPC) ListAgentNames(context.Context) ([]string, error)               { return nil, nil }
+
 // fakeHerdr is a minimal in-process herdr daemon stand-in, local to the
 // engine package's tests. It intentionally does not touch the internal/herdr
 // package's own A2 test fake.

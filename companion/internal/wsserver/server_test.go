@@ -48,6 +48,36 @@ func (s *stubRPC) CloseWorkspace(_ context.Context, id string) error {
 func (s *stubRPC) CloseTab(_ context.Context, id string) error  { return s.record("tab.close", id) }
 func (s *stubRPC) ClosePane(_ context.Context, id string) error { return s.record("pane.close", id) }
 
+func (s *stubRPC) recordErr(tag string) error {
+	s.mu.Lock()
+	s.calls = append(s.calls, tag)
+	fail := s.failOn == tag
+	s.mu.Unlock()
+	if fail {
+		return errors.New("boom")
+	}
+	return nil
+}
+
+func (s *stubRPC) CreateWorkspace(context.Context) (string, string, error) {
+	return "wZ:p1", "term_ws", s.recordErr("workspace.create")
+}
+func (s *stubRPC) CreateTab(_ context.Context, ws string) (string, string, error) {
+	return "w7:pT", "term_tab", s.recordErr("tab.create:" + ws)
+}
+func (s *stubRPC) SplitPane(_ context.Context, target, ws, dir string) (string, string, error) {
+	return "w7:pS", "term_split", s.recordErr("pane.split:" + dir)
+}
+func (s *stubRPC) StartAgent(_ context.Context, name string, _ []string, ws, tab, split string) (string, string, error) {
+	return "w7:pA", "term_agent", s.recordErr("agent.start:" + name)
+}
+func (s *stubRPC) MovePane(_ context.Context, pane, dest, tab, dir string) error {
+	return s.recordErr("pane.move:" + dest)
+}
+func (s *stubRPC) ListAgentNames(context.Context) ([]string, error) {
+	return []string{"claude"}, nil
+}
+
 // readUntil reads frames until one with t==want is seen (or timeout).
 func readUntil(t *testing.T, ctx context.Context, c *websocket.Conn, want string) map[string]any {
 	t.Helper()
@@ -237,8 +267,8 @@ func TestInitialSnapshotIncludesWorkspacesAndTabs(t *testing.T) {
 	defer c.Close(websocket.StatusNormalClosure, "")
 
 	welcome := readUntil(t, ctx, c, "welcome")
-	if welcome["companionProtocol"].(float64) != 4 {
-		t.Fatalf("want companionProtocol 4, got %v", welcome["companionProtocol"])
+	if welcome["companionProtocol"].(float64) != 5 {
+		t.Fatalf("want companionProtocol 5, got %v", welcome["companionProtocol"])
 	}
 	ws := readUntil(t, ctx, c, "workspaces")
 	arr := ws["workspaces"].([]any)
@@ -326,5 +356,74 @@ func TestActionRejectsUnknownAndEmpty(t *testing.T) {
 		if res["ok"] != false {
 			t.Fatalf("expected ok=false for %s, got %+v", frame, res)
 		}
+	}
+}
+
+func TestCreateReturnsPaneAndPokes(t *testing.T) {
+	rpc := &stubRPC{}
+	s := NewServer(AllowAll{}, rpc)
+	poked := make(chan struct{}, 1)
+	s.SetPoke(func() { poked <- struct{}{} })
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	ctx := context.Background()
+	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close(websocket.StatusNormalClosure, "")
+
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"create","reqId":"c1","what":"agent","tabId":"w7:t1","agentName":"claude","argv":["claude"]}`))
+	res := readUntil(t, ctx, c, "created")
+	if res["ok"] != true || res["paneId"] != "w7:pA" || res["terminalId"] != "term_agent" {
+		t.Fatalf("bad created: %+v", res)
+	}
+	select {
+	case <-poked:
+	case <-time.After(time.Second):
+		t.Fatal("create did not poke re-poll")
+	}
+	rpc.mu.Lock()
+	defer rpc.mu.Unlock()
+	if len(rpc.calls) != 1 || rpc.calls[0] != "agent.start:claude" {
+		t.Fatalf("calls: %v", rpc.calls)
+	}
+}
+
+func TestMoveAndListAgents(t *testing.T) {
+	rpc := &stubRPC{}
+	s := NewServer(AllowAll{}, rpc)
+	s.SetPoke(func() {})
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	ctx := context.Background()
+	c, _, _ := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	defer c.Close(websocket.StatusNormalClosure, "")
+
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"move","reqId":"m1","paneId":"w7:p2","dest":"new_tab"}`))
+	res := readUntil(t, ctx, c, "action_result")
+	if res["ok"] != true || res["reqId"] != "m1" {
+		t.Fatalf("bad move result: %+v", res)
+	}
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"list_agents","reqId":"a1"}`))
+	ag := readUntil(t, ctx, c, "agents")
+	names := ag["agents"].([]any)
+	if len(names) != 1 || names[0] != "claude" {
+		t.Fatalf("bad agents: %+v", ag)
+	}
+}
+
+func TestCreateRejectsUnknownWhat(t *testing.T) {
+	s := NewServer(AllowAll{}, &stubRPC{})
+	s.SetPoke(func() {})
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	ctx := context.Background()
+	c, _, _ := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	defer c.Close(websocket.StatusNormalClosure, "")
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"create","reqId":"c9","what":"bogus"}`))
+	res := readUntil(t, ctx, c, "created")
+	if res["ok"] != false {
+		t.Fatalf("expected ok=false for unknown what, got %+v", res)
 	}
 }
