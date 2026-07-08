@@ -85,3 +85,23 @@ type Event struct {
 	PaneID      string `json:"pane_id"`
 	AgentStatus string `json:"agent_status"`
 }
+
+// paneRef is the {pane_id, terminal_id} carried by create/split/start results.
+type paneRef struct {
+	PaneID     string `json:"pane_id"`
+	TerminalID string `json:"terminal_id"`
+}
+type paneInfoResult struct {
+	Pane paneRef `json:"pane"`
+}
+type rootPaneResult struct {
+	RootPane paneRef `json:"root_pane"`
+}
+type agentStartedResult struct {
+	Agent paneRef `json:"agent"`
+}
+type agentManifestsResult struct {
+	Manifests []struct {
+		Agent string `json:"agent"`
+	} `json:"manifests"`
+}

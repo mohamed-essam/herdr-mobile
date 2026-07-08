@@ -26,6 +26,14 @@ type ClientMsg struct {
 	Kind          string `json:"kind"`
 	ID            string `json:"id"`
 	Label         string `json:"label"`
+
+	What        string   `json:"what"`
+	AgentName   string   `json:"agentName"`
+	Argv        []string `json:"argv"`
+	Direction   string   `json:"direction"`
+	Dest        string   `json:"dest"`
+	WorkspaceID string   `json:"workspaceId"`
+	TabID       string   `json:"tabId"`
 }
 
 func ParseClient(b []byte) (ClientMsg, error) {
@@ -37,7 +45,7 @@ func ParseClient(b []byte) (ClientMsg, error) {
 func must(v any) []byte { b, _ := json.Marshal(v); return b }
 
 func Welcome(version string, protocol int) []byte {
-	return must(map[string]any{"t": "welcome", "herdrVersion": version, "herdrProtocol": protocol, "companionProtocol": 4})
+	return must(map[string]any{"t": "welcome", "herdrVersion": version, "herdrProtocol": protocol, "companionProtocol": 5})
 }
 func PanesSnapshot(p []state.Pane) []byte {
 	return must(map[string]any{"t": "panes", "panes": p})
@@ -64,6 +72,24 @@ func ActionResult(reqID string, ok bool, message string) []byte {
 	}
 	return must(m)
 }
+func Created(reqID string, ok bool, paneID, terminalID, message string) []byte {
+	m := map[string]any{"t": "created", "reqId": reqID, "ok": ok}
+	if paneID != "" {
+		m["paneId"] = paneID
+	}
+	if terminalID != "" {
+		m["terminalId"] = terminalID
+	}
+	if message != "" {
+		m["error"] = message
+	}
+	return must(m)
+}
+
+func Agents(reqID string, names []string) []byte {
+	return must(map[string]any{"t": "agents", "reqId": reqID, "agents": names})
+}
+
 func Pong() []byte { return must(map[string]any{"t": "pong"}) }
 func TermOpened(reqID, termID string) []byte {
 	return must(map[string]any{"t": "term_opened", "reqId": reqID, "termId": termID})

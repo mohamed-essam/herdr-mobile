@@ -25,6 +25,13 @@ type HerdrRPC interface {
 	CloseWorkspace(ctx context.Context, id string) error
 	CloseTab(ctx context.Context, id string) error
 	ClosePane(ctx context.Context, id string) error
+
+	CreateWorkspace(ctx context.Context) (paneID, terminalID string, err error)
+	CreateTab(ctx context.Context, workspaceID string) (paneID, terminalID string, err error)
+	SplitPane(ctx context.Context, targetPaneID, workspaceID, direction string) (paneID, terminalID string, err error)
+	StartAgent(ctx context.Context, name string, argv []string, workspaceID, tabID, split string) (paneID, terminalID string, err error)
+	MovePane(ctx context.Context, paneID, dest, tabID, direction string) error
+	ListAgentNames(ctx context.Context) ([]string, error)
 }
 
 type Server struct {
@@ -195,6 +202,19 @@ func (s *Server) readLoop(ctx context.Context, c *client) {
 			c.closeTerm(m.TermID)
 		case "action":
 			s.handleAction(ctx, c, m)
+		case "create":
+			s.handleCreate(ctx, c, m)
+		case "move":
+			s.handleMove(ctx, c, m)
+		case "list_agents":
+			names, err := s.rpc.ListAgentNames(ctx)
+			if err != nil {
+				names = nil // app still shows the "Other…" option
+			}
+			if names == nil {
+				names = []string{}
+			}
+			c.send <- proto.Agents(m.ReqID, names)
 		}
 	}
 }
@@ -244,6 +264,52 @@ func (s *Server) handleAction(ctx context.Context, c *client, m proto.ClientMsg)
 	}
 	s.poke()
 	c.send <- proto.ActionResult(m.ReqID, true, "")
+}
+
+// handleCreate maps a create frame to the right herdr method, returns the new
+// pane's ids for the app to auto-open, and pokes a re-poll on success.
+func (s *Server) handleCreate(ctx context.Context, c *client, m proto.ClientMsg) {
+	var paneID, termID string
+	var err error
+	switch m.What {
+	case "workspace":
+		paneID, termID, err = s.rpc.CreateWorkspace(ctx)
+	case "tab":
+		paneID, termID, err = s.rpc.CreateTab(ctx, m.WorkspaceID)
+	case "shell":
+		paneID, termID, err = s.rpc.SplitPane(ctx, m.PaneID, m.WorkspaceID, dirOrDown(m.Direction))
+	case "agent":
+		paneID, termID, err = s.rpc.StartAgent(ctx, m.AgentName, m.Argv, m.WorkspaceID, m.TabID, m.Direction)
+	default:
+		c.send <- proto.Created(m.ReqID, false, "", "", "unknown what: "+m.What)
+		return
+	}
+	if err != nil {
+		c.send <- proto.Created(m.ReqID, false, "", "", err.Error())
+		return
+	}
+	s.poke()
+	c.send <- proto.Created(m.ReqID, true, paneID, termID, "")
+}
+
+func (s *Server) handleMove(ctx context.Context, c *client, m proto.ClientMsg) {
+	if m.PaneID == "" {
+		c.send <- proto.ActionResult(m.ReqID, false, "invalid pane id")
+		return
+	}
+	if err := s.rpc.MovePane(ctx, m.PaneID, m.Dest, m.TabID, m.Direction); err != nil {
+		c.send <- proto.ActionResult(m.ReqID, false, err.Error())
+		return
+	}
+	s.poke()
+	c.send <- proto.ActionResult(m.ReqID, true, "")
+}
+
+func dirOrDown(d string) string {
+	if d == "" {
+		return "down"
+	}
+	return d
 }
 
 // sendBlocking enqueues frame on c.send, blocking until it fits (or ctx is

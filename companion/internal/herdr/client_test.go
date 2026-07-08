@@ -141,3 +141,55 @@ func TestClientRenameAndCloseReachHerdr(t *testing.T) {
 		}
 	}
 }
+
+func TestClientCreateMoveAndAgents(t *testing.T) {
+	f := newFakeHerdr(t)
+	c := New(f.SocketPath())
+	ctx := context.Background()
+
+	// create methods return the new pane's ids parsed from each result envelope
+	pid, tid, err := c.CreateWorkspace(ctx)
+	if err != nil || pid != "wZ:p1" || tid != "term_ws" {
+		t.Fatalf("CreateWorkspace: %q %q %v", pid, tid, err)
+	}
+	pid, tid, err = c.CreateTab(ctx, "w7")
+	if err != nil || pid != "w7:pT" || tid != "term_tab" {
+		t.Fatalf("CreateTab: %q %q %v", pid, tid, err)
+	}
+	pid, tid, err = c.SplitPane(ctx, "w7:p2", "", "down")
+	if err != nil || pid != "w7:pS" || tid != "term_split" {
+		t.Fatalf("SplitPane: %q %q %v", pid, tid, err)
+	}
+	pid, tid, err = c.StartAgent(ctx, "claude", []string{"claude"}, "w7", "", "down")
+	if err != nil || pid != "w7:pA" || tid != "term_agent" {
+		t.Fatalf("StartAgent: %q %q %v", pid, tid, err)
+	}
+	if err := c.MovePane(ctx, "w7:p2", "new_tab", "", ""); err != nil {
+		t.Fatalf("MovePane: %v", err)
+	}
+	names, err := c.ListAgentNames(ctx)
+	if err != nil || len(names) != 2 || names[0] != "claude" || names[1] != "codex" {
+		t.Fatalf("ListAgentNames: %v %v", names, err)
+	}
+
+	// verify the params the split/agent/move calls sent
+	got := map[string]map[string]any{}
+	for i := 0; i < 3; i++ {
+		select {
+		case rec := <-f.lastCall:
+			got[rec.Method] = rec.Params
+		case <-time.After(time.Second):
+			t.Fatal("missing recorded call")
+		}
+	}
+	if got["pane.split"]["direction"] != "down" || got["pane.split"]["target_pane_id"] != "w7:p2" {
+		t.Fatalf("pane.split params: %v", got["pane.split"])
+	}
+	if got["agent.start"]["name"] != "claude" || got["agent.start"]["split"] != "down" {
+		t.Fatalf("agent.start params: %v", got["agent.start"])
+	}
+	dest, _ := got["pane.move"]["destination"].(map[string]any)
+	if dest["type"] != "new_tab" {
+		t.Fatalf("pane.move destination: %v", got["pane.move"])
+	}
+}

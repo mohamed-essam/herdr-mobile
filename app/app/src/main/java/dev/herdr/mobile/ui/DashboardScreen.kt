@@ -37,6 +37,13 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
         if (open != null && panes.none { it.paneId == open.paneId }) selected = null
     }
 
+    var pendingOpenTerminalId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { vm.autoOpen.collect { pendingOpenTerminalId = it } }
+    LaunchedEffect(panes, pendingOpenTerminalId) {
+        val tid = pendingOpenTerminalId ?: return@LaunchedEffect
+        panes.firstOrNull { it.terminalId == tid }?.let { selected = it; pendingOpenTerminalId = null }
+    }
+
     selected?.let { pane ->
         TerminalScreen(vm, pane) { selected = null }
         return   // full-screen terminal replaces the dashboard while open
@@ -51,6 +58,9 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
     var actionTarget by remember { mutableStateOf<RowAction?>(null) }   // action sheet open for
     var renameTarget by remember { mutableStateOf<RowAction?>(null) }   // rename dialog open for
     var confirmTarget by remember { mutableStateOf<RowAction?>(null) }  // close-confirm open for
+    var agentPickerFor by remember { mutableStateOf<RowAction?>(null) } // agent picker open for (Task 5)
+    var moveTargetPaneId by remember { mutableStateOf<String?>(null) }  // move sheet open for (Task 5)
+    var showOtherDialog by remember { mutableStateOf<RowAction?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(Unit) {
@@ -71,6 +81,7 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
                     selected = p
                 },
                 onRowAction = { a -> if (a.id.isNotBlank()) actionTarget = a },
+                onNewWorkspace = { vm.createNode(what = "workspace") },
             )
         },
     ) {
@@ -96,6 +107,11 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
         actionTarget?.let { target ->
             RowActionSheet(
                 target = target,
+                onNewTab = { vm.createNode(what = "tab", workspaceId = target.id); actionTarget = null },
+                onNewAgent = { agentPickerFor = target; actionTarget = null },
+                onNewShell = { vm.createNode(what = "shell", workspaceId = target.workspaceId); actionTarget = null },
+                onSplit = { dir -> vm.createNode(what = "shell", paneId = target.id, direction = dir); actionTarget = null },
+                onMove = { moveTargetPaneId = target.id; actionTarget = null },
                 onRename = { renameTarget = target; actionTarget = null },
                 onClose = {
                     actionTarget = null
@@ -129,6 +145,55 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
                     }) { Text("Close") }
                 },
                 dismissButton = { TextButton(onClick = { confirmTarget = null }) { Text("Cancel") } },
+            )
+        }
+
+        agentPickerFor?.let { target ->
+            LaunchedEffect(target) { vm.refreshAgents() }
+            val agents by vm.agents.collectAsState()
+            AgentPickerSheet(
+                agents = agents,
+                onPick = { name ->
+                    val ctx = target
+                    if (ctx.kind == NodeKind.TAB) {
+                        vm.createNode(what = "agent", tabId = ctx.id, direction = "down", agentName = name, argv = listOf(name))
+                    } else {
+                        vm.createNode(what = "agent", workspaceId = ctx.id, agentName = name, argv = listOf(name))
+                    }
+                    agentPickerFor = null
+                },
+                onOther = { showOtherDialog = target; agentPickerFor = null },
+                onDismiss = { agentPickerFor = null },
+            )
+        }
+
+        showOtherDialog?.let { target ->
+            OtherAgentDialog(
+                onConfirm = { input ->
+                    val cmd = parseAgentCommand(input)
+                    if (cmd.argv.isNotEmpty()) {
+                        if (target.kind == NodeKind.TAB) {
+                            vm.createNode(what = "agent", tabId = target.id, direction = "down", agentName = cmd.name, argv = cmd.argv)
+                        } else {
+                            vm.createNode(what = "agent", workspaceId = target.id, agentName = cmd.name, argv = cmd.argv)
+                        }
+                    }
+                    showOtherDialog = null
+                },
+                onDismiss = { showOtherDialog = null },
+            )
+        }
+
+        moveTargetPaneId?.let { paneId ->
+            val moveTree by vm.tree.collectAsState()
+            val currentTab = panes.firstOrNull { it.paneId == paneId }?.tabId ?: ""
+            MoveDestinationSheet(
+                tree = moveTree,
+                currentTabId = currentTab,
+                onExistingTab = { tabId -> vm.moveNode(paneId, "tab", tabId = tabId, direction = "down"); moveTargetPaneId = null },
+                onNewTab = { vm.moveNode(paneId, "new_tab"); moveTargetPaneId = null },
+                onNewWorkspace = { vm.moveNode(paneId, "new_workspace"); moveTargetPaneId = null },
+                onDismiss = { moveTargetPaneId = null },
             )
         }
     }
@@ -258,6 +323,23 @@ private fun RenameDialog(target: RowAction, onConfirm: (String) -> Unit, onDismi
                 enabled = text.isNotBlank() && text.trim() != target.label,
             ) { Text("Save") }
         },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun OtherAgentDialog(onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Run command") },
+        text = {
+            OutlinedTextField(
+                value = text, onValueChange = { text = it }, singleLine = true,
+                placeholder = { Text("e.g. claude --model opus") }, shape = MaterialTheme.shapes.small,
+            )
+        },
+        confirmButton = { TextButton(onClick = { onConfirm(text) }, enabled = text.isNotBlank()) { Text("Start") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -63,6 +64,34 @@ class DashboardViewModel(
         viewModelScope.launch {
             runCatching { client.sendAction("close", kind, id) }
                 .onFailure { _actionErrors.tryEmit(it.message ?: "close failed") }
+        }
+    }
+
+    private val _autoOpen = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val autoOpen: SharedFlow<String> = _autoOpen.asSharedFlow()
+
+    private val _agents = MutableStateFlow<List<String>>(emptyList())
+    val agents: StateFlow<List<String>> = _agents.asStateFlow()
+
+    fun refreshAgents() {
+        viewModelScope.launch { runCatching { client.listAgents() }.onSuccess { _agents.value = it } }
+    }
+
+    fun createNode(
+        what: String, workspaceId: String? = null, tabId: String? = null, paneId: String? = null,
+        direction: String? = null, agentName: String? = null, argv: List<String>? = null,
+    ) {
+        viewModelScope.launch {
+            runCatching { client.sendCreate(what, workspaceId, tabId, paneId, direction, agentName, argv) }
+                .onSuccess { terminalId -> if (terminalId.isNotEmpty()) _autoOpen.tryEmit(terminalId) }
+                .onFailure { _actionErrors.tryEmit(it.message ?: "create failed") }
+        }
+    }
+
+    fun moveNode(paneId: String, dest: String, tabId: String? = null, direction: String? = null) {
+        viewModelScope.launch {
+            runCatching { client.sendMove(paneId, dest, tabId, direction) }
+                .onFailure { _actionErrors.tryEmit(it.message ?: "move failed") }
         }
     }
 

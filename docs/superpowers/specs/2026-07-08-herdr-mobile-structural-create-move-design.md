@@ -148,7 +148,7 @@ pane:
   `{ "t":"created", "reqId", "ok":bool, "error"?, "paneId"?, "terminalId"? }`.
   On `ok`, the app auto-opens `terminalId`.
 - **`move`**:
-  `{ "t":"move", "reqId", "paneId", "dest":"tab"|"newTab"|"newWorkspace", "tabId"?, "direction"?:"down" }`
+  `{ "t":"move", "reqId", "paneId", "dest":"tab"|"new_tab"|"new_workspace", "tabId"?, "direction"?:"down" }`
   → companion replies with the existing **`action_result`** `{ ok, error? }`.
 
 Also, so the app can populate the agent picker:

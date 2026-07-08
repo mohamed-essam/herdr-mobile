@@ -19,6 +19,7 @@ data class RowAction(
     val tabCount: Int = 0,
     val isAgent: Boolean = false,
     val hasAgent: Boolean = false,
+    val workspaceId: String = "",
 )
 
 /**
