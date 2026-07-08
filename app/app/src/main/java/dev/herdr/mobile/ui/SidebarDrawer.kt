@@ -8,11 +8,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
@@ -21,6 +17,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.herdr.mobile.net.Pane
@@ -118,9 +116,7 @@ private fun WorkspaceRow(row: Row.Ws, dark: Boolean, onToggle: (String) -> Unit,
             Spacer(Modifier.width(8.dp))
         }
         if (ws.paneCount > 0) Text("${ws.paneCount}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-        IconButton(onClick = { onRowAction(wsAction(row.node)) }) {
-            Icon(Icons.Filled.MoreVert, contentDescription = "workspace actions", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+        RowActionDots("workspace actions") { onRowAction(wsAction(row.node)) }
     }
 }
 
@@ -140,9 +136,7 @@ private fun TabRowView(row: Row.TabRow, dark: Boolean, onToggle: (String) -> Uni
         Spacer(Modifier.width(8.dp))
         Text(if (tab.label.isEmpty()) "—" else "tab ${tab.label}", style = MaterialTheme.typography.bodySmall)
         Spacer(Modifier.weight(1f))
-        IconButton(onClick = { onRowAction(tabAction(row.node)) }) {
-            Icon(Icons.Filled.MoreVert, contentDescription = "tab actions", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+        RowActionDots("tab actions") { onRowAction(tabAction(row.node)) }
     }
 }
 
@@ -190,10 +184,23 @@ private fun PaneTreeRow(
             Text(base, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall, modifier = Modifier.alpha(if (isAgent) 0.8f else 0.4f))
         }
         Spacer(Modifier.weight(1f))
-        IconButton(onClick = { onRowAction(paneAction(pane)) }) {
-            Icon(Icons.Filled.MoreVert, contentDescription = "pane actions", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+        RowActionDots("pane actions") { onRowAction(paneAction(pane)) }
     }
+}
+
+/** Compact "⋯" affordance — a small clickable glyph, not a 48dp IconButton,
+ *  so it doesn't inflate row height. Long-press on the row is the alternate. */
+@Composable
+private fun RowActionDots(contentDescription: String, onClick: () -> Unit) {
+    Text(
+        "⋯",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.titleMedium,
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .semantics { this.contentDescription = contentDescription }
+            .padding(horizontal = 10.dp, vertical = 2.dp),
+    )
 }
 
 @Composable
