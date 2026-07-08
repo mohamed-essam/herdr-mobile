@@ -41,4 +41,13 @@ class DashboardViewModelTest {
         assertEquals("Proceed? (y/n)", text)
         server.shutdown()
     }
+
+    @Test fun toggleExpandedFlipsCollapsedMembership() {
+        val vm = DashboardViewModel(CompanionClient(), PaneRepository())
+        assertFalse(vm.collapsed.value.contains("w7"))
+        vm.toggleExpanded("w7")
+        assertTrue(vm.collapsed.value.contains("w7")) // now collapsed
+        vm.toggleExpanded("w7")
+        assertFalse(vm.collapsed.value.contains("w7")) // expanded again
+    }
 }
