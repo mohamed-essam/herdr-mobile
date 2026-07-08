@@ -10,6 +10,7 @@ data class Pane(
     val paneId: String,
     val workspaceId: String = "",
     val tabId: String = "",
+    val terminalId: String = "",
     val cwd: String = "",
     val focused: Boolean = false,
     val agent: String? = null,
@@ -55,6 +56,7 @@ sealed interface ServerFrame {
     data class PaneRead(val reqId: String, val paneId: String, val source: String, val text: String) : ServerFrame
     data class Ack(val reqId: String) : ServerFrame
     data class ErrorFrame(val reqId: String, val code: String, val message: String) : ServerFrame
+    data class ActionResult(val reqId: String, val ok: Boolean, val error: String?) : ServerFrame
     data object Pong : ServerFrame
     data object Unknown : ServerFrame
     data class TermOpened(val reqId: String, val termId: String) : ServerFrame
@@ -79,6 +81,10 @@ fun parseServerFrame(text: String): ServerFrame {
         "error" -> ServerFrame.ErrorFrame(
             obj["reqId"]?.jsonPrimitive?.content ?: "", obj["code"]!!.jsonPrimitive.content,
             obj["message"]!!.jsonPrimitive.content)
+        "action_result" -> ServerFrame.ActionResult(
+            obj["reqId"]?.jsonPrimitive?.content ?: "",
+            obj["ok"]?.jsonPrimitive?.boolean ?: false,
+            obj["error"]?.jsonPrimitive?.content)
         "pong" -> ServerFrame.Pong
         "term_opened" -> ServerFrame.TermOpened(
             obj["reqId"]!!.jsonPrimitive.content, obj["termId"]!!.jsonPrimitive.content)
@@ -105,6 +111,17 @@ object ClientMsg {
         obj("t" to JsonPrimitive("send_text"), "reqId" to JsonPrimitive(reqId), "paneId" to JsonPrimitive(paneId), "text" to JsonPrimitive(text))
     fun sendKeys(reqId: String, paneId: String, keys: String) =
         obj("t" to JsonPrimitive("send_keys"), "reqId" to JsonPrimitive(reqId), "paneId" to JsonPrimitive(paneId), "keys" to JsonPrimitive(keys))
+    fun action(reqId: String, op: String, kind: String, id: String, label: String?): String {
+        val pairs = mutableListOf(
+            "t" to JsonPrimitive("action"),
+            "reqId" to JsonPrimitive(reqId),
+            "op" to JsonPrimitive(op),
+            "kind" to JsonPrimitive(kind),
+            "id" to JsonPrimitive(id),
+        )
+        if (label != null) pairs.add("label" to JsonPrimitive(label))
+        return JsonObject(pairs.toMap()).toString()
+    }
     fun ping() = obj("t" to JsonPrimitive("ping"))
     fun termOpen(reqId: String, target: String, cols: Int, rows: Int) =
         obj("t" to JsonPrimitive("term_open"), "reqId" to JsonPrimitive(reqId), "target" to JsonPrimitive(target), "cols" to JsonPrimitive(cols), "rows" to JsonPrimitive(rows))

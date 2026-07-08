@@ -30,6 +30,13 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
         }
     }
 
+    // Pop back to the dashboard when the pane we're viewing disappears (closed
+    // from the sidebar, or taken over / closed elsewhere).
+    LaunchedEffect(panes) {
+        val open = selected
+        if (open != null && panes.none { it.paneId == open.paneId }) selected = null
+    }
+
     selected?.let { pane ->
         TerminalScreen(vm, pane) { selected = null }
         return   // full-screen terminal replaces the dashboard while open
@@ -41,6 +48,14 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
     val focusedPaneId = panes.firstOrNull { it.focused }?.paneId
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    var actionTarget by remember { mutableStateOf<RowAction?>(null) }   // action sheet open for
+    var renameTarget by remember { mutableStateOf<RowAction?>(null) }   // rename dialog open for
+    var confirmTarget by remember { mutableStateOf<RowAction?>(null) }  // close-confirm open for
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(Unit) {
+        vm.actionErrors.collect { snackbarHostState.showSnackbar(it) }
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -55,12 +70,14 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
                     scope.launch { drawerState.close() }
                     selected = p
                 },
+                onRowAction = { a -> if (a.id.isNotBlank()) actionTarget = a },
             )
         },
     ) {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
             topBar = { HerdrTopBar(connected, panes.size) { scope.launch { drawerState.open() } } },
+            snackbarHost = { SnackbarHost(snackbarHostState) },
         ) { pad ->
             Column(Modifier.padding(pad).fillMaxSize()) {
                 if (!connected) ReconnectingBanner()
@@ -74,6 +91,45 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
                     }
                 }
             }
+        }
+
+        actionTarget?.let { target ->
+            RowActionSheet(
+                target = target,
+                onRename = { renameTarget = target; actionTarget = null },
+                onClose = {
+                    actionTarget = null
+                    if (needsCloseConfirm(target)) confirmTarget = target
+                    else vm.closeNode(target.kind.wire, target.id)
+                },
+                onDismiss = { actionTarget = null },
+            )
+        }
+
+        renameTarget?.let { target ->
+            RenameDialog(
+                target = target,
+                onConfirm = { newLabel ->
+                    vm.renameNode(target.kind.wire, target.id, newLabel)
+                    renameTarget = null
+                },
+                onDismiss = { renameTarget = null },
+            )
+        }
+
+        confirmTarget?.let { target ->
+            AlertDialog(
+                onDismissRequest = { confirmTarget = null },
+                title = { Text("Close ${target.label}") },
+                text = { Text(closeConfirmMessage(target)) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        vm.closeNode(target.kind.wire, target.id)
+                        confirmTarget = null
+                    }) { Text("Close") }
+                },
+                dismissButton = { TextButton(onClick = { confirmTarget = null }) { Text("Cancel") } },
+            )
         }
     }
 }
@@ -180,4 +236,28 @@ private fun EmptyState(connected: Boolean) {
             }
         }
     }
+}
+
+@Composable
+private fun RenameDialog(target: RowAction, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
+    var text by remember(target.id) { mutableStateOf(target.label) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rename") },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true,
+                shape = MaterialTheme.shapes.small,
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(text.trim()) },
+                enabled = text.isNotBlank() && text.trim() != target.label,
+            ) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }

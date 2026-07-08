@@ -1,5 +1,5 @@
 // Package pty runs a subprocess on a pseudo-terminal and streams its bytes.
-// Used to bridge `herdr agent attach <pane>` to the app over the WebSocket.
+// Used to bridge `herdr terminal attach <pane>` to the app over the WebSocket.
 package pty
 
 import (
@@ -65,7 +65,7 @@ func (s *Session) Resize(cols, rows uint16) error {
 	return creackpty.Setsize(s.ptmx, &creackpty.Winsize{Rows: rows, Cols: cols})
 }
 
-// Close kills the process and closes the PTY. Killing the `herdr agent attach`
+// Close kills the process and closes the PTY. Killing the `herdr terminal attach`
 // client detaches without harming the pane.
 func (s *Session) Close() error {
 	s.closeOnce.Do(func() {

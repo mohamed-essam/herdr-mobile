@@ -41,6 +41,15 @@ func TestApplyDetectsNewChangedRemoved(t *testing.T) {
 	}
 }
 
+func TestToPaneCarriesTerminalID(t *testing.T) {
+	s := NewStore()
+	s.Apply([]herdr.PaneInfo{{PaneID: "w7:p2", TerminalID: "term_abc"}})
+	got := s.Snapshot()
+	if len(got) != 1 || got[0].TerminalID != "term_abc" {
+		t.Fatalf("terminalId not carried into state.Pane: %+v", got)
+	}
+}
+
 func TestApplyWorkspacesAndTabsChangeDetection(t *testing.T) {
 	s := NewStore()
 

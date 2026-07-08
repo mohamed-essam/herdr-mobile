@@ -67,11 +67,40 @@ class ProtocolTest {
         assertTrue(w.worktree?.isLinkedWorktree == true)
     }
 
+    @Test fun parsesPaneTerminalId() {
+        val f = parseServerFrame("""{"t":"panes","panes":[{"paneId":"w7:p2","workspaceId":"w7","tabId":"w7:t2","terminalId":"term_abc","agent":null,"agentStatus":"unknown"}]}""")
+        val p = (f as ServerFrame.Panes).panes.single()
+        assertEquals("term_abc", p.terminalId)
+        assertNull(p.agent)
+    }
+
     @Test fun parsesWorkspaceWithoutWorktreeAndTabsFrame() {
         val w = (parseServerFrame("""{"t":"workspaces","workspaces":[{"workspaceId":"w3","label":"apollo","number":1,"paneCount":1,"tabCount":1}]}""") as ServerFrame.Workspaces).workspaces.single()
         assertNull(w.worktree)
         val tabs = (parseServerFrame("""{"t":"tabs","tabs":[{"tabId":"w7:t2","label":"2","number":2,"workspaceId":"w7","agentStatus":"unknown","paneCount":1}]}""") as ServerFrame.Tabs).tabs.single()
         assertEquals("w7:t2", tabs.tabId)
         assertEquals("w7", tabs.workspaceId)
+    }
+
+    @Test fun parsesActionResult() {
+        val ok = parseServerFrame("""{"t":"action_result","reqId":"a1","ok":true}""")
+        assertTrue(ok is ServerFrame.ActionResult)
+        assertTrue((ok as ServerFrame.ActionResult).ok)
+        assertNull(ok.error)
+        val bad = parseServerFrame("""{"t":"action_result","reqId":"a2","ok":false,"error":"nope"}""")
+        assertFalse((bad as ServerFrame.ActionResult).ok)
+        assertEquals("nope", bad.error)
+    }
+
+    @Test fun buildsActionMessages() {
+        val rn = ClientMsg.action("a1", "rename", "workspace", "w7", "omega3")
+        assertTrue(rn.contains("\"t\":\"action\""))
+        assertTrue(rn.contains("\"op\":\"rename\""))
+        assertTrue(rn.contains("\"kind\":\"workspace\""))
+        assertTrue(rn.contains("\"id\":\"w7\""))
+        assertTrue(rn.contains("\"label\":\"omega3\""))
+        val cl = ClientMsg.action("a2", "close", "pane", "w7:p2", null)
+        assertTrue(cl.contains("\"op\":\"close\""))
+        assertFalse(cl.contains("\"label\""))
     }
 }

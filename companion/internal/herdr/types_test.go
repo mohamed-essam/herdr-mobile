@@ -29,6 +29,17 @@ func TestUnmarshalPaneListResult(t *testing.T) {
 	}
 }
 
+func TestPaneInfoParsesTerminalID(t *testing.T) {
+	raw := `{"type":"pane_list","panes":[{"pane_id":"w7:p2","terminal_id":"term_abc","agent_status":"unknown"}]}`
+	var res paneListResult
+	if err := json.Unmarshal([]byte(raw), &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Panes) != 1 || res.Panes[0].TerminalID != "term_abc" {
+		t.Fatalf("terminal_id not parsed: %+v", res.Panes)
+	}
+}
+
 func TestUnmarshalRPCError(t *testing.T) {
 	var resp Response
 	if err := json.Unmarshal([]byte(`{"id":"a","error":{"code":"not_found","message":"pane not found"}}`), &resp); err != nil {

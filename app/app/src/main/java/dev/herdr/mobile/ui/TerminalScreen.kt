@@ -52,7 +52,7 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
             val cols = emu?.mColumns ?: 80
             val rows = emu?.mRows ?: 24
             status = "connecting…"
-            runCatching { vm.openTerminal(pane.paneId, cols, rows) }
+            runCatching { vm.openTerminal(pane, cols, rows) }
                 .onSuccess { termId = it; status = "connected"; takenOver = false }
                 .onFailure { status = "failed: ${it.message}" }
         } finally {

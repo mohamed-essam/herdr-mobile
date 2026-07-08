@@ -11,6 +11,7 @@ type Pane struct {
 	PaneID      string `json:"paneId"`
 	WorkspaceID string `json:"workspaceId"`
 	TabID       string `json:"tabId"`
+	TerminalID  string `json:"terminalId"`
 	CWD         string `json:"cwd"`
 	Focused     bool   `json:"focused"`
 	// omitempty so non-agent panes send no agent/agentStatus at all; the app
@@ -67,7 +68,8 @@ func NewStore() *Store { return &Store{panes: map[string]Pane{}} }
 
 func toPane(i herdr.PaneInfo) Pane {
 	return Pane{PaneID: i.PaneID, WorkspaceID: i.WorkspaceID, TabID: i.TabID,
-		CWD: i.CWD, Focused: i.Focused, Agent: i.Agent, AgentStatus: i.AgentStatus}
+		TerminalID: i.TerminalID, CWD: i.CWD, Focused: i.Focused,
+		Agent: i.Agent, AgentStatus: i.AgentStatus}
 }
 
 func (s *Store) Apply(infos []herdr.PaneInfo) ([]Change, []Transition) {

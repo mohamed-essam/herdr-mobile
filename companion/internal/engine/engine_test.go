@@ -83,6 +83,12 @@ type fakeRPC struct{}
 func (fakeRPC) ReadPane(context.Context, string, string, int) (string, error) { return "", nil }
 func (fakeRPC) SendText(context.Context, string, string) error                { return nil }
 func (fakeRPC) SendKeys(context.Context, string, string) error                { return nil }
+func (fakeRPC) RenameWorkspace(context.Context, string, string) error         { return nil }
+func (fakeRPC) RenameTab(context.Context, string, string) error               { return nil }
+func (fakeRPC) RenamePane(context.Context, string, string) error              { return nil }
+func (fakeRPC) CloseWorkspace(context.Context, string) error                  { return nil }
+func (fakeRPC) CloseTab(context.Context, string) error                        { return nil }
+func (fakeRPC) ClosePane(context.Context, string) error                       { return nil }
 
 // fakeHerdr is a minimal in-process herdr daemon stand-in, local to the
 // engine package's tests. It intentionally does not touch the internal/herdr
