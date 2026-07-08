@@ -35,12 +35,18 @@ func (s *stubRPC) record(method, id string) error {
 	}
 	return nil
 }
-func (s *stubRPC) RenameWorkspace(_ context.Context, id, _ string) error { return s.record("workspace.rename", id) }
-func (s *stubRPC) RenameTab(_ context.Context, id, _ string) error       { return s.record("tab.rename", id) }
-func (s *stubRPC) RenamePane(_ context.Context, id, _ string) error      { return s.record("pane.rename", id) }
-func (s *stubRPC) CloseWorkspace(_ context.Context, id string) error     { return s.record("workspace.close", id) }
-func (s *stubRPC) CloseTab(_ context.Context, id string) error           { return s.record("tab.close", id) }
-func (s *stubRPC) ClosePane(_ context.Context, id string) error          { return s.record("pane.close", id) }
+func (s *stubRPC) RenameWorkspace(_ context.Context, id, _ string) error {
+	return s.record("workspace.rename", id)
+}
+func (s *stubRPC) RenameTab(_ context.Context, id, _ string) error { return s.record("tab.rename", id) }
+func (s *stubRPC) RenamePane(_ context.Context, id, _ string) error {
+	return s.record("pane.rename", id)
+}
+func (s *stubRPC) CloseWorkspace(_ context.Context, id string) error {
+	return s.record("workspace.close", id)
+}
+func (s *stubRPC) CloseTab(_ context.Context, id string) error  { return s.record("tab.close", id) }
+func (s *stubRPC) ClosePane(_ context.Context, id string) error { return s.record("pane.close", id) }
 
 // readUntil reads frames until one with t==want is seen (or timeout).
 func readUntil(t *testing.T, ctx context.Context, c *websocket.Conn, want string) map[string]any {
