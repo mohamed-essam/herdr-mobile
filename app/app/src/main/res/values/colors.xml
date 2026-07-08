@@ -2,4 +2,6 @@
 <resources>
     <!-- Pre-Compose window background. Day = Catppuccin Latte crust. -->
     <color name="herdr_window">#FFDCE0E8</color>
+    <!-- herdr.dev logo field (authentic light grey) -->
+    <color name="ic_launcher_background">#FFD9DAD8</color>
 </resources>
