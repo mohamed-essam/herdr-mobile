@@ -255,6 +255,45 @@ func TestEngineFiresBlockedPushToRegisteredEndpoint(t *testing.T) {
 	}
 }
 
+func TestResumeFiresClearPush(t *testing.T) {
+	f := newFakeHerdr(t)
+	f.SetPanes([]herdr.PaneInfo{{PaneID: "w6:p1", WorkspaceID: "w6", Agent: "claude", AgentStatus: "blocked"}})
+
+	gotPush := make(chan map[string]any, 4)
+	pushSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var m map[string]any
+		json.NewDecoder(r.Body).Decode(&m)
+		gotPush <- m
+	}))
+	defer pushSrv.Close()
+
+	e := New(Config{SocketPath: f.SocketPath(), ListenAddr: "127.0.0.1:0", PollInterval: 100 * time.Millisecond})
+	e.setEndpoint(pushSrv.URL)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go e.pollLoop(ctx)
+
+	time.Sleep(200 * time.Millisecond) // first poll establishes "blocked"
+	f.SetPanes([]herdr.PaneInfo{{PaneID: "w6:p1", WorkspaceID: "w6", Agent: "claude", AgentStatus: "working"}})
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case m := <-gotPush:
+			if m["kind"] == "clear" {
+				if m["paneId"] != "w6:p1" || m["workspaceId"] != "w6" {
+					t.Fatalf("bad clear push: %v", m)
+				}
+				return
+			}
+			// ignore any other push the harness delivers first
+		case <-deadline:
+			t.Fatal("no clear push fired on resume to working")
+		}
+	}
+}
+
 func TestEngineSubscriptionTriggersFastPoll(t *testing.T) {
 	f := newFakeHerdr(t)
 	f.SetPanes([]herdr.PaneInfo{{PaneID: "w6:p1", WorkspaceID: "w6", Agent: "claude", AgentStatus: "working"}})

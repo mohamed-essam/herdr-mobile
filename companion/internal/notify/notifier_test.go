@@ -43,9 +43,20 @@ func TestShouldNotifyFinishedOnlyFromWorking(t *testing.T) {
 	}
 }
 
-func TestShouldNotifyIgnoresOther(t *testing.T) {
-	if _, ok := ShouldNotify(state.Transition{From: "idle", To: "working"}, "", ""); ok {
-		t.Fatal("idle->working should not notify")
+func TestShouldNotifyClearOnResume(t *testing.T) {
+	cases := []state.Transition{
+		{PaneID: "w6:p1", WorkspaceID: "w6", From: "blocked", To: "working"},
+		{PaneID: "w6:p1", WorkspaceID: "w6", From: "done", To: "working"},
+		{PaneID: "w6:p1", WorkspaceID: "w6", From: "idle", To: "working"},
+	}
+	for _, tr := range cases {
+		p, ok := ShouldNotify(tr, "", "")
+		if !ok || p.Kind != "clear" || p.PaneID != "w6:p1" || p.WorkspaceID != "w6" {
+			t.Fatalf("%s->working want clear push, got %+v ok=%v", tr.From, p, ok)
+		}
+		if p.Title != "" || p.Body != "" {
+			t.Fatalf("clear push must have empty title/body, got %+v", p)
+		}
 	}
 }
 

@@ -38,6 +38,8 @@ func ShouldNotify(tr state.Transition, displayName, lastBody string) (Push, bool
 	case tr.From == "working" && (tr.To == "idle" || tr.To == "done"):
 		return Push{Kind: "finished", PaneID: tr.PaneID, WorkspaceID: tr.WorkspaceID,
 			Title: name + " finished", Body: ""}, true
+	case tr.To == "working":
+		return Push{Kind: "clear", PaneID: tr.PaneID, WorkspaceID: tr.WorkspaceID}, true
 	default:
 		return Push{}, false
 	}
