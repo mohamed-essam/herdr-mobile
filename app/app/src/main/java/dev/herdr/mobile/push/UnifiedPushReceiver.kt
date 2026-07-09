@@ -20,7 +20,10 @@ class UnifiedPushReceiver : MessagingReceiver() {
     }
 
     override fun onMessage(context: Context, message: PushMessage, instance: String) {
-        parsePush(message.content)?.let { Notifications.post(context, it) }
+        parsePush(message.content)?.let { p ->
+            if (p.kind == "clear") Notifications.cancel(context, p.paneId)
+            else Notifications.post(context, p)
+        }
     }
 
     override fun onRegistrationFailed(context: Context, reason: FailedReason, instance: String) {}

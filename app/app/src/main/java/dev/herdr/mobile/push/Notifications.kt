@@ -19,7 +19,12 @@ object Notifications {
         nm.createNotificationChannel(NotificationChannel(CH_FINISHED, "Agent finished", NotificationManager.IMPORTANCE_DEFAULT))
     }
 
+    fun cancel(ctx: Context, paneId: String) {
+        ctx.getSystemService(NotificationManager::class.java).cancel(paneId.hashCode())
+    }
+
     fun post(ctx: Context, p: PushPayload) {
+        if (p.kind == "clear") return
         ensureChannels(ctx)
         val intent = Intent(ctx, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
