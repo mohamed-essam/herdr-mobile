@@ -110,7 +110,10 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
                                 // ~60dp, one step deeper than the Tab header chevron (44dp),
                                 // keeping the Repo>Ws>Tab>Pane nesting visually unambiguous.
                                 is DashRow.PaneRowItem -> Box(Modifier.padding(start = 48.dp)) {
-                                    PaneRow(row.pane) { p -> if (p.agent != null) selected = p }
+                                    // Open any pane's terminal, shells included (shells have a
+                                    // terminalId too); the old agent-only guard made shell rows
+                                    // inert to taps.
+                                    PaneRow(row.pane) { p -> selected = p }
                                 }
                             }
                         }

@@ -17,16 +17,26 @@ import dev.herdr.mobile.net.Pane
 import dev.herdr.mobile.ui.theme.statusColor
 
 /**
+ * Status label for a pane: agent panes show their agentStatus; shells (no agent)
+ * show "shell" rather than herdr's "unknown" placeholder (herdr reports
+ * agentStatus="unknown" for non-agent panes).
+ */
+fun paneStatusLabel(pane: Pane): String? = if (pane.agent == null) "shell" else pane.agentStatus
+
+/**
  * A pane rendered as a herdr "pane block": a rectangular card fronted by a
  * status-colored bar, the project name in bold mono, and a dim workspace·agent
- * subline. Tapping opens the quick-reply sheet.
+ * subline. Tapping opens the pane's terminal.
  */
 @Composable
 fun PaneRow(pane: Pane, onClick: (Pane) -> Unit) {
     val dark = isSystemInDarkTheme()
-    val accent = statusColor(pane.agentStatus, dark)
+    val status = paneStatusLabel(pane)
+    val accent = statusColor(status, dark)
     val title = pane.cwd.substringAfterLast('/').ifBlank { pane.workspaceId.ifBlank { pane.paneId } }
-    val subtitle = listOf(pane.workspaceId, pane.agent ?: "shell").filter { it.isNotBlank() }.joinToString(" · ")
+    // agent panes: "workspace · agent"; shells: just the workspace (the status
+    // chip already reads "shell", so don't duplicate it here).
+    val subtitle = listOfNotNull(pane.workspaceId.ifBlank { null }, pane.agent).joinToString(" · ")
 
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -66,7 +76,7 @@ fun PaneRow(pane: Pane, onClick: (Pane) -> Unit) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            StatusIndicator(pane.agentStatus, Modifier.padding(end = 14.dp))
+            StatusIndicator(status, Modifier.padding(end = 14.dp))
         }
     }
 }
