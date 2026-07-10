@@ -6,6 +6,7 @@ import android.content.Context
 import android.graphics.Typeface
 import android.util.Base64
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -17,6 +18,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -187,11 +189,45 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
                         }
                     }
                 }
+                if (showReconnectOverlay(emulatorReady, takenOver, status)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.background.copy(alpha = 0.6f))
+                            // Swallow taps so a dead terminal doesn't pop the soft keyboard.
+                            .pointerInput(Unit) { detectTapGestures {} },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                spinnerFrame(),
+                                color = statusColor("working", isSystemInDarkTheme()),
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                status,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    }
+                }
             }
             session?.let { KeyToolbar(it) }
         }
     }
 }
+
+/**
+ * The reconnect scrim is shown while the terminal exists but is not live: the
+ * WS dropped ("reconnecting…") or we are (re-)attaching ("connecting…"). It is
+ * suppressed before the emulator exists and when the terminal was taken over /
+ * ended (that opaque overlay owns the screen). "connected" is the sole live
+ * status set by attachOnce.
+ */
+fun showReconnectOverlay(emulatorReady: Boolean, takenOver: Boolean, status: String): Boolean =
+    emulatorReady && !takenOver && status != "connected"
 
 /** Minimal TerminalSessionClient (emulator-package callbacks). */
 private fun terminalSessionClient(view: TerminalView): TerminalSessionClient =
