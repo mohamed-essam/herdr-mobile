@@ -193,6 +193,16 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
     }
 }
 
+/**
+ * The reconnect scrim is shown while the terminal exists but is not live: the
+ * WS dropped ("reconnecting…") or we are (re-)attaching ("connecting…"). It is
+ * suppressed before the emulator exists and when the terminal was taken over /
+ * ended (that opaque overlay owns the screen). "connected" is the sole live
+ * status set by attachOnce.
+ */
+fun showReconnectOverlay(emulatorReady: Boolean, takenOver: Boolean, status: String): Boolean =
+    emulatorReady && !takenOver && status != "connected"
+
 /** Minimal TerminalSessionClient (emulator-package callbacks). */
 private fun terminalSessionClient(view: TerminalView): TerminalSessionClient =
     object : TerminalSessionClient {
