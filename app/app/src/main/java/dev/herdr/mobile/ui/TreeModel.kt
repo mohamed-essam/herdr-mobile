@@ -45,3 +45,39 @@ fun buildTree(
     }
     return nodes
 }
+
+data class RepoNode(val repoKey: String, val displayName: String, val workspaces: List<WorkspaceNode>)
+
+/**
+ * Repo key for a workspace: worktree.repoName > first pane's cwd basename >
+ * label > workspaceId. The synthetic orphan workspace (blank workspaceId,
+ * emitted by buildTree) buckets under "(unknown)".
+ */
+fun repoKeyFor(node: WorkspaceNode): String {
+    if (node.ws.workspaceId.isBlank()) return "(unknown)"
+    node.ws.worktree?.repoName?.takeIf { it.isNotBlank() }?.let { return it }
+    node.tabs.asSequence().flatMap { it.panes.asSequence() }
+        .map { it.cwd }.firstOrNull { it.isNotBlank() }
+        ?.substringAfterLast('/')?.takeIf { it.isNotBlank() }?.let { return it }
+    node.ws.label.takeIf { it.isNotBlank() }?.let { return it }
+    return node.ws.workspaceId
+}
+
+/**
+ * Groups workspace nodes by repo key, preserving each group's intra-order.
+ * Repos are ordered by the minimum workspace number in the group; the
+ * "(unknown)" group always sorts last.
+ */
+fun buildRepoTree(nodes: List<WorkspaceNode>): List<RepoNode> {
+    val groups = LinkedHashMap<String, MutableList<WorkspaceNode>>()
+    for (n in nodes) groups.getOrPut(repoKeyFor(n)) { mutableListOf() }.add(n)
+    return groups.entries
+        .map { (key, ws) -> RepoNode(key, key, ws) }
+        .sortedWith(
+            compareBy(
+                { if (it.repoKey == "(unknown)") 1 else 0 },
+                { it.workspaces.minOf { w -> w.ws.number } },
+                { it.displayName },
+            ),
+        )
+}
