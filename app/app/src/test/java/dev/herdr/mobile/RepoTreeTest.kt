@@ -6,8 +6,10 @@ import dev.herdr.mobile.net.Workspace
 import dev.herdr.mobile.net.Worktree
 import dev.herdr.mobile.ui.TabNode
 import dev.herdr.mobile.ui.WorkspaceNode
+import dev.herdr.mobile.ui.attentionTier
 import dev.herdr.mobile.ui.buildRepoTree
 import dev.herdr.mobile.ui.repoKeyFor
+import dev.herdr.mobile.ui.workspaceTier
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -49,5 +51,27 @@ class RepoTreeTest {
         // intra-group order preserved as given (a before b)
         assertEquals(listOf("w1", "w2"), ops.workspaces.map { it.ws.workspaceId })
         assertEquals("ops", ops.displayName)
+    }
+
+    @Test fun attentionTierRanks() {
+        assertEquals(2, attentionTier("blocked"))
+        assertEquals(1, attentionTier("done"))
+        assertEquals(0, attentionTier("working"))
+        assertEquals(0, attentionTier("idle"))
+        assertEquals(0, attentionTier(null))
+        assertEquals(0, attentionTier("unknown"))
+    }
+
+    @Test fun workspaceTierIsMaxOverPanes() {
+        // a workspace with a working pane and a blocked pane → tier 2 (blocked wins)
+        val ws = Workspace(workspaceId = "w1", label = "x", number = 1)
+        val panes = listOf(
+            Pane(paneId = "w1:p1", workspaceId = "w1", tabId = "w1:t1", agent = "claude", agentStatus = "working"),
+            Pane(paneId = "w1:p2", workspaceId = "w1", tabId = "w1:t1", agent = "codex", agentStatus = "blocked"),
+        )
+        val node = WorkspaceNode(ws, listOf(TabNode(Tab(tabId = "w1:t1", workspaceId = "w1"), panes)))
+        assertEquals(2, workspaceTier(node))
+        // no panes → 0
+        assertEquals(0, workspaceTier(WorkspaceNode(ws, emptyList())))
     }
 }

@@ -46,6 +46,17 @@ fun buildTree(
     return nodes
 }
 
+/** Attention rank for sorting: blocked (needs you) > done (finished) > rest. */
+fun attentionTier(status: String?): Int = when (status) {
+    "blocked" -> 2
+    "done" -> 1
+    else -> 0
+}
+
+/** A workspace's attention tier is the max over its panes (robust vs. herdr's aggregate). */
+fun workspaceTier(node: WorkspaceNode): Int =
+    node.tabs.flatMap { it.panes }.maxOfOrNull { attentionTier(it.agentStatus) } ?: 0
+
 data class RepoNode(val repoKey: String, val displayName: String, val workspaces: List<WorkspaceNode>)
 
 /**
