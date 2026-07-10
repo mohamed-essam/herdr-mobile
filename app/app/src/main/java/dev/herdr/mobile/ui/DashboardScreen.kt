@@ -106,7 +106,10 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
                                 is DashRow.Repo -> RepoHeaderRow(row) { vm.toggleExpanded("repo:${row.node.repoKey}") }
                                 is DashRow.Ws -> WsHeaderRow(row) { vm.toggleExpanded(row.node.ws.workspaceId) }
                                 is DashRow.TabRow -> TabHeaderRow(row) { vm.toggleExpanded(row.node.tab.tabId) }
-                                is DashRow.PaneRowItem -> Box(Modifier.padding(start = 24.dp)) {
+                                // start=48 so the card edge (+PaneRow's own 12dp) lands at
+                                // ~60dp, one step deeper than the Tab header chevron (44dp),
+                                // keeping the Repo>Ws>Tab>Pane nesting visually unambiguous.
+                                is DashRow.PaneRowItem -> Box(Modifier.padding(start = 48.dp)) {
                                     PaneRow(row.pane) { p -> if (p.agent != null) selected = p }
                                 }
                             }
