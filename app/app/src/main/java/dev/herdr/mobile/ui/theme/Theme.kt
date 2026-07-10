@@ -12,16 +12,14 @@ import androidx.compose.ui.unit.dp
 
 // Terminal-first: monospace across the board, matching herdr's TUI aesthetic.
 private val base = Typography()
+
+// Headers monospace (terminal identity: the "herdr ❯" wordmark, titles, row
+// headers); body + labels use the system sans default for readability. The
+// embedded terminal has its own font and is unaffected.
 private val HerdrTypography = Typography(
     titleLarge = base.titleLarge.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold),
     titleMedium = base.titleMedium.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold),
     titleSmall = base.titleSmall.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold),
-    bodyLarge = base.bodyLarge.copy(fontFamily = FontFamily.Monospace),
-    bodyMedium = base.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-    bodySmall = base.bodySmall.copy(fontFamily = FontFamily.Monospace),
-    labelLarge = base.labelLarge.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Medium),
-    labelMedium = base.labelMedium.copy(fontFamily = FontFamily.Monospace),
-    labelSmall = base.labelSmall.copy(fontFamily = FontFamily.Monospace),
 )
 
 // Sharp corners — herdr's panes are rectangular TUI blocks, not pills.
