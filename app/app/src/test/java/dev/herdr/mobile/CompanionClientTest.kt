@@ -45,7 +45,10 @@ class CompanionClientTest {
         }))
         server.start()
         client = CompanionClient(http)
-        val collected = mutableListOf<ServerFrame>()
+        // Thread-safe: appended on Dispatchers.Default by the collector while the
+        // runBlocking thread iterates it in the withTimeout poll below — a plain
+        // mutableListOf races (ConcurrentModificationException under load).
+        val collected = java.util.concurrent.CopyOnWriteArrayList<ServerFrame>()
         val job = launch(Dispatchers.Default) { client.frames.collect { collected.add(it) } }
         client.connect(server.url("/").toString().replace("http", "ws"))
         withTimeout(3000) {
@@ -72,7 +75,10 @@ class CompanionClientTest {
         }))
         server.start()
         client = CompanionClient(http)
-        val collected = mutableListOf<ServerFrame>()
+        // Thread-safe: appended on Dispatchers.Default by the collector while the
+        // runBlocking thread iterates it in the withTimeout poll below — a plain
+        // mutableListOf races (ConcurrentModificationException under load).
+        val collected = java.util.concurrent.CopyOnWriteArrayList<ServerFrame>()
         val job = launch(Dispatchers.Default) { client.frames.collect { collected.add(it) } }
         client.connect(server.url("/").toString().replace("http", "ws"))
         // welcome only arrives on the SECOND connection, so seeing it proves reconnect

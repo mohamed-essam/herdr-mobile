@@ -123,3 +123,23 @@ fun statusGlyph(status: String?): String = when (status) {
  * the ASCII "| / - \" spinner renders identically everywhere.
  */
 val SpinnerFrames = listOf("|", "/", "-", "\\")
+
+/** Dark ink for monogram text on a bright avatar accent (both themes). */
+val AvatarInk = Color(0xFF11111B)
+
+/** Stable, non-negative index into a palette of [size] for [seed]. */
+fun colorIndexFor(seed: String, size: Int): Int {
+    if (size <= 0) return 0
+    var h = 0
+    for (c in seed) h = h * 31 + c.code
+    return ((h % size) + size) % size
+}
+
+private val avatarAccentsDark = listOf(Mocha.mauve, Mocha.blue, Mocha.green, Mocha.yellow, Mocha.peach, Mocha.red)
+private val avatarAccentsLight = listOf(Latte.mauve, Latte.blue, Latte.green, Latte.yellow, Latte.peach, Latte.red)
+
+/** Deterministic avatar background color for [seed], theme-aware. */
+fun avatarColor(seed: String, dark: Boolean): Color {
+    val palette = if (dark) avatarAccentsDark else avatarAccentsLight
+    return palette[colorIndexFor(seed, palette.size)]
+}
