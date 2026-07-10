@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Typeface
 import android.util.Base64
+import android.view.inputmethod.InputMethodManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -19,6 +20,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -47,6 +49,15 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
     var takenOver by remember { mutableStateOf(false) }
     var attaching by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val rootView = LocalView.current
+    // The native TerminalView opens the IME when focused; leaving the terminal
+    // (back button, or any disposal) must dismiss it or it lingers over the
+    // dashboard. Compose's keyboard controller doesn't reliably hide an IME a
+    // native view opened, so hide via the window token directly.
+    fun hideKeyboard() {
+        (rootView.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+            ?.hideSoftInputFromWindow(rootView.windowToken, 0)
+    }
     val title = pane.cwd.substringAfterLast('/').ifBlank { pane.workspaceId.ifBlank { pane.paneId } }
 
     suspend fun attachOnce() {
@@ -108,7 +119,7 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
     }
 
     DisposableEffect(Unit) {
-        onDispose { termId?.let { vm.closeTerminal(it) } }
+        onDispose { hideKeyboard(); termId?.let { vm.closeTerminal(it) } }
     }
 
     Scaffold(
@@ -117,7 +128,7 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
                 navigationIcon = {
-                    IconButton(onClick = onExit) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back") }
+                    IconButton(onClick = { hideKeyboard(); onExit() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back") }
                 },
                 title = {
                     Column {
