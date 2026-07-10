@@ -149,10 +149,19 @@ func (s *Store) ApplyWorkspaces(infos []herdr.WorkspaceInfo) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	next := make([]Workspace, 0, len(infos))
+	present := make(map[string]bool, len(infos))
 	for _, i := range infos {
 		w := toWorkspace(i)
 		w.LastActivity = s.lastActivity[w.WorkspaceID]
 		next = append(next, w)
+		present[i.WorkspaceID] = true
+	}
+	// Prune recency for workspaces herdr no longer reports, so lastActivity
+	// doesn't grow unbounded over a long-running companion.
+	for id := range s.lastActivity {
+		if !present[id] {
+			delete(s.lastActivity, id)
+		}
 	}
 	if reflect.DeepEqual(s.workspaces, next) {
 		return false

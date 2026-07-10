@@ -158,3 +158,18 @@ func TestApplyWorkspacesChangesWhenOnlyLastActivityChanges(t *testing.T) {
 		t.Fatal("lastActivity change alone should report changed (so it rebroadcasts)")
 	}
 }
+
+func TestLastActivityPrunedWhenWorkspaceGone(t *testing.T) {
+	s := NewStore()
+	s.now = func() int64 { return 1000 }
+	s.Apply(infos(herdr.PaneInfo{PaneID: "w6:p1", WorkspaceID: "w6", AgentStatus: "working"}))
+	s.ApplyWorkspaces([]herdr.WorkspaceInfo{{WorkspaceID: "w6", Number: 1}})
+	if s.lastActivity["w6"] == 0 {
+		t.Fatal("precondition: w6 should have recorded activity")
+	}
+	// w6 disappears from herdr's workspace list; its recency entry must be pruned.
+	s.ApplyWorkspaces([]herdr.WorkspaceInfo{{WorkspaceID: "w9", Number: 2}})
+	if _, ok := s.lastActivity["w6"]; ok {
+		t.Fatal("lastActivity for a workspace no longer reported should be pruned")
+	}
+}
