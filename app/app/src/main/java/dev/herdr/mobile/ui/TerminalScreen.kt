@@ -6,6 +6,7 @@ import android.content.Context
 import android.graphics.Typeface
 import android.util.Base64
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -17,6 +18,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -184,6 +186,30 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
                         Spacer(Modifier.height(16.dp))
                         Button(onClick = { scope.launch { attachOnce() } }, shape = MaterialTheme.shapes.small) {
                             Text("Reattach")
+                        }
+                    }
+                }
+                if (showReconnectOverlay(emulatorReady, takenOver, status)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.background.copy(alpha = 0.6f))
+                            // Swallow taps so a dead terminal doesn't pop the soft keyboard.
+                            .pointerInput(Unit) { detectTapGestures {} },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                spinnerFrame(),
+                                color = statusColor("working", isSystemInDarkTheme()),
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                status,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
                         }
                     }
                 }
