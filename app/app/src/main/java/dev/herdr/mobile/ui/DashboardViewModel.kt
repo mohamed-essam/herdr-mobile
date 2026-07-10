@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -33,6 +34,10 @@ class DashboardViewModel(
 
     val tree: StateFlow<List<WorkspaceNode>> =
         combine(repo.workspaces, repo.tabs, repo.panes) { ws, tabs, panes -> buildTree(ws, tabs, panes) }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val repoTree: StateFlow<List<RepoNode>> =
+        tree.map { buildRepoTree(it) }
             .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     // ids the user has COLLAPSED; a node is expanded unless its id is here.

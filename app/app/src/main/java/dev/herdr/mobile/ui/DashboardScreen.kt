@@ -1,5 +1,6 @@
 package dev.herdr.mobile.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -12,6 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.herdr.mobile.net.Pane
 import dev.herdr.mobile.ui.theme.statusColor
@@ -50,6 +52,7 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
     }
 
     val tree by vm.tree.collectAsState()
+    val repoTree by vm.repoTree.collectAsState()
     val collapsed by vm.collapsed.collectAsState()
     val lastOpened by vm.lastOpenedPaneId.collectAsState()
     val focusedPaneId = panes.firstOrNull { it.focused }?.paneId
@@ -96,9 +99,17 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
                 if (panes.isEmpty()) {
                     EmptyState(connected)
                 } else {
+                    val rows = flattenRepoTree(repoTree, collapsed)
                     LazyColumn(contentPadding = PaddingValues(vertical = 8.dp), modifier = Modifier.fillMaxSize()) {
-                        items(panes, key = { it.paneId }) { pane ->
-                            PaneRow(pane) { p -> if (p.agent != null) selected = p }
+                        items(rows, key = { dashRowKey(it) }) { row ->
+                            when (row) {
+                                is DashRow.Repo -> RepoHeaderRow(row) { vm.toggleExpanded("repo:${row.node.repoKey}") }
+                                is DashRow.Ws -> WsHeaderRow(row) { vm.toggleExpanded(row.node.ws.workspaceId) }
+                                is DashRow.TabRow -> TabHeaderRow(row) { vm.toggleExpanded(row.node.tab.tabId) }
+                                is DashRow.PaneRowItem -> Box(Modifier.padding(start = 24.dp)) {
+                                    PaneRow(row.pane) { p -> if (p.agent != null) selected = p }
+                                }
+                            }
                         }
                     }
                 }
@@ -355,4 +366,104 @@ private fun OtherAgentDialog(onConfirm: (String) -> Unit, onDismiss: () -> Unit)
         confirmButton = { TextButton(onClick = { onConfirm(text) }, enabled = text.isNotBlank()) { Text("Start") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+private sealed interface DashRow {
+    data class Repo(val node: RepoNode, val expanded: Boolean, val paneCount: Int) : DashRow
+    data class Ws(val node: WorkspaceNode, val expanded: Boolean) : DashRow
+    data class TabRow(val node: TabNode, val expanded: Boolean) : DashRow
+    data class PaneRowItem(val pane: Pane) : DashRow
+}
+
+/** A node is expanded unless its id is in [collapsed]; repos key on "repo:<key>". */
+private fun flattenRepoTree(repos: List<RepoNode>, collapsed: Set<String>): List<DashRow> {
+    val rows = mutableListOf<DashRow>()
+    for (r in repos) {
+        val rOpen = "repo:${r.repoKey}" !in collapsed
+        val count = r.workspaces.sumOf { w -> w.tabs.sumOf { it.panes.size } }
+        rows.add(DashRow.Repo(r, rOpen, count))
+        if (!rOpen) continue
+        for (w in r.workspaces) {
+            val wOpen = w.ws.workspaceId !in collapsed
+            rows.add(DashRow.Ws(w, wOpen))
+            if (!wOpen) continue
+            for (t in w.tabs) {
+                val tOpen = t.tab.tabId !in collapsed
+                rows.add(DashRow.TabRow(t, tOpen))
+                if (!tOpen) continue
+                t.panes.forEach { rows.add(DashRow.PaneRowItem(it)) }
+            }
+        }
+    }
+    return rows
+}
+
+private fun dashRowKey(r: DashRow): String = when (r) {
+    is DashRow.Repo -> "r:" + r.node.repoKey
+    is DashRow.Ws -> "w:" + r.node.ws.workspaceId
+    is DashRow.TabRow -> "t:" + r.node.tab.tabId
+    is DashRow.PaneRowItem -> "p:" + r.pane.paneId
+}
+
+@Composable
+private fun RepoHeaderRow(row: DashRow.Repo, onToggle: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(if (row.expanded) "▾" else "▸", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(8.dp))
+        RepoAvatar(row.node.displayName)
+        Spacer(Modifier.width(10.dp))
+        Text(
+            row.node.displayName,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text("${row.paneCount}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+@Composable
+private fun WsHeaderRow(row: DashRow.Ws, onToggle: () -> Unit) {
+    val ws = row.node.ws
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(start = 28.dp, end = 12.dp).padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(if (row.expanded) "▾" else "▸", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            ws.label.ifEmpty { "(unknown)" },
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (ws.number > 0) {
+            Spacer(Modifier.width(6.dp))
+            Text("#${ws.number}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+@Composable
+private fun TabHeaderRow(row: DashRow.TabRow, onToggle: () -> Unit) {
+    val tab = row.node.tab
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(start = 44.dp, end = 12.dp).padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(if (row.expanded) "▾" else "▸", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            if (tab.label.isEmpty()) "—" else "tab ${tab.label}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
