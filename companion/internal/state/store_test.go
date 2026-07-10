@@ -104,3 +104,57 @@ func TestStoreConcurrentApplyAndSnapshot(t *testing.T) {
 		}
 	}
 }
+
+func TestLastActivityTracking(t *testing.T) {
+	s := NewStore()
+	clock := int64(1000)
+	s.now = func() int64 { return clock }
+
+	// created → bump
+	s.Apply(infos(herdr.PaneInfo{PaneID: "w6:p1", WorkspaceID: "w6", Agent: "claude", AgentStatus: "working"}))
+	s.ApplyWorkspaces([]herdr.WorkspaceInfo{{WorkspaceID: "w6", Label: "herdr-mobile", Number: 2}})
+	if got := s.Workspaces()[0].LastActivity; got != 1000 {
+		t.Fatalf("created should stamp lastActivity=1000, got %d", got)
+	}
+
+	// focus-only change → NO bump
+	clock = 2000
+	s.Apply(infos(herdr.PaneInfo{PaneID: "w6:p1", WorkspaceID: "w6", Agent: "claude", AgentStatus: "working", Focused: true}))
+	s.ApplyWorkspaces([]herdr.WorkspaceInfo{{WorkspaceID: "w6", Label: "herdr-mobile", Number: 2}})
+	if got := s.Workspaces()[0].LastActivity; got != 1000 {
+		t.Fatalf("focus-only change must not bump, want 1000 got %d", got)
+	}
+
+	// agentStatus transition → bump
+	clock = 3000
+	s.Apply(infos(herdr.PaneInfo{PaneID: "w6:p1", WorkspaceID: "w6", Agent: "claude", AgentStatus: "blocked", Focused: true}))
+	s.ApplyWorkspaces([]herdr.WorkspaceInfo{{WorkspaceID: "w6", Label: "herdr-mobile", Number: 2}})
+	if got := s.Workspaces()[0].LastActivity; got != 3000 {
+		t.Fatalf("transition should bump to 3000, got %d", got)
+	}
+
+	// pane removed → bump
+	clock = 4000
+	s.Apply(infos()) // w6:p1 disappears
+	if s.lastActivity["w6"] != 4000 {
+		t.Fatalf("removal should bump to 4000, got %d", s.lastActivity["w6"])
+	}
+}
+
+func TestApplyWorkspacesChangesWhenOnlyLastActivityChanges(t *testing.T) {
+	s := NewStore()
+	clock := int64(1000)
+	s.now = func() int64 { return clock }
+	ws := []herdr.WorkspaceInfo{{WorkspaceID: "w6", Label: "herdr-mobile", Number: 2}}
+
+	s.Apply(infos(herdr.PaneInfo{PaneID: "w6:p1", WorkspaceID: "w6", AgentStatus: "working"}))
+	if !s.ApplyWorkspaces(ws) {
+		t.Fatal("first ApplyWorkspaces should report changed")
+	}
+	// bump activity via a transition, same workspace list from herdr
+	clock = 5000
+	s.Apply(infos(herdr.PaneInfo{PaneID: "w6:p1", WorkspaceID: "w6", AgentStatus: "blocked"}))
+	if !s.ApplyWorkspaces(ws) {
+		t.Fatal("lastActivity change alone should report changed (so it rebroadcasts)")
+	}
+}
