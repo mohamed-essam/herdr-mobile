@@ -32,6 +32,7 @@ data class Workspace(
     val focused: Boolean = false,
     val paneCount: Int = 0,
     val tabCount: Int = 0,
+    val lastActivity: Long = 0,
     val worktree: Worktree? = null,
 )
 

@@ -3,6 +3,7 @@ package state
 import (
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/messam/herdr-mobile/companion/internal/herdr"
 )
@@ -26,14 +27,15 @@ type Worktree struct {
 }
 
 type Workspace struct {
-	WorkspaceID string    `json:"workspaceId"`
-	Label       string    `json:"label"`
-	Number      int       `json:"number"`
-	AgentStatus string    `json:"agentStatus,omitempty"`
-	Focused     bool      `json:"focused"`
-	PaneCount   int       `json:"paneCount"`
-	TabCount    int       `json:"tabCount"`
-	Worktree    *Worktree `json:"worktree,omitempty"`
+	WorkspaceID  string    `json:"workspaceId"`
+	Label        string    `json:"label"`
+	Number       int       `json:"number"`
+	AgentStatus  string    `json:"agentStatus,omitempty"`
+	Focused      bool      `json:"focused"`
+	PaneCount    int       `json:"paneCount"`
+	TabCount     int       `json:"tabCount"`
+	LastActivity int64     `json:"lastActivity,omitempty"`
+	Worktree     *Worktree `json:"worktree,omitempty"`
 }
 
 type Tab struct {
@@ -60,11 +62,19 @@ type Store struct {
 	mu    sync.Mutex
 	panes map[string]Pane
 
-	workspaces []Workspace
-	tabs       []Tab
+	workspaces   []Workspace
+	tabs         []Tab
+	lastActivity map[string]int64
+	now          func() int64
 }
 
-func NewStore() *Store { return &Store{panes: map[string]Pane{}} }
+func NewStore() *Store {
+	return &Store{
+		panes:        map[string]Pane{},
+		lastActivity: map[string]int64{},
+		now:          func() int64 { return time.Now().UnixMilli() },
+	}
+}
 
 func toPane(i herdr.PaneInfo) Pane {
 	return Pane{PaneID: i.PaneID, WorkspaceID: i.WorkspaceID, TabID: i.TabID,
@@ -85,6 +95,7 @@ func (s *Store) Apply(infos []herdr.PaneInfo) ([]Change, []Transition) {
 		if !existed {
 			s.panes[np.PaneID] = np
 			changes = append(changes, Change{Kind: "update", Pane: np})
+			s.lastActivity[np.WorkspaceID] = s.now() // created
 			continue
 		}
 		if old != np {
@@ -94,12 +105,15 @@ func (s *Store) Apply(infos []herdr.PaneInfo) ([]Change, []Transition) {
 		if old.AgentStatus != np.AgentStatus {
 			transitions = append(transitions, Transition{PaneID: np.PaneID,
 				WorkspaceID: np.WorkspaceID, From: old.AgentStatus, To: np.AgentStatus})
+			s.lastActivity[np.WorkspaceID] = s.now() // status transition
 		}
 	}
 	for id := range s.panes {
 		if !seen[id] {
+			ws := s.panes[id].WorkspaceID
 			delete(s.panes, id)
 			changes = append(changes, Change{Kind: "removed", PaneID: id})
+			s.lastActivity[ws] = s.now() // removed
 		}
 	}
 	return changes, transitions
@@ -136,7 +150,9 @@ func (s *Store) ApplyWorkspaces(infos []herdr.WorkspaceInfo) bool {
 	defer s.mu.Unlock()
 	next := make([]Workspace, 0, len(infos))
 	for _, i := range infos {
-		next = append(next, toWorkspace(i))
+		w := toWorkspace(i)
+		w.LastActivity = s.lastActivity[w.WorkspaceID]
+		next = append(next, w)
 	}
 	if reflect.DeepEqual(s.workspaces, next) {
 		return false
