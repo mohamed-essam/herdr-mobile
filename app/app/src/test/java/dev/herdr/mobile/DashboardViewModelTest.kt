@@ -16,8 +16,21 @@ import org.junit.Before
 import org.junit.Test
 
 class DashboardViewModelTest {
+    // Per-test OkHttpClient injected into every CompanionClient so teardown can
+    // force-release it. Without this, each method's client keeps its WebSocket
+    // connection + dispatcher threads alive after server.shutdown(); across the
+    // full suite those leftovers starve later WS round-trips past their 3s
+    // withTimeout deadlines (a cross-test flake — every method passes in
+    // isolation). Mirrors the fix already applied to CompanionClientTest.
+    private val http = OkHttpClient()
+
     @Before fun setUp() { Dispatchers.setMain(Dispatchers.Unconfined) }
-    @After fun tearDown() { Dispatchers.resetMain() }
+    @After fun tearDown() {
+        http.dispatcher.cancelAll()
+        http.dispatcher.executorService.shutdown()
+        http.connectionPool.evictAll()
+        Dispatchers.resetMain()
+    }
 
     @Test fun pumpsFramesIntoRepoAndReadsPaneViaClient() = runBlocking {
         val server = MockWebServer()
@@ -34,7 +47,7 @@ class DashboardViewModelTest {
             }
         }))
         server.start()
-        val client = CompanionClient()
+        val client = CompanionClient(http)
         val vm = DashboardViewModel(client, PaneRepository())
         vm.start(server.url("/").toString().replace("http", "ws"))
         withTimeout(3000) { while (vm.panes.value.isEmpty()) delay(20) }
@@ -45,7 +58,7 @@ class DashboardViewModelTest {
     }
 
     @Test fun toggleExpandedFlipsCollapsedMembership() {
-        val vm = DashboardViewModel(CompanionClient(), PaneRepository())
+        val vm = DashboardViewModel(CompanionClient(http), PaneRepository())
         assertFalse(vm.collapsed.value.contains("w7"))
         vm.toggleExpanded("w7")
         assertTrue(vm.collapsed.value.contains("w7")) // now collapsed
@@ -56,7 +69,7 @@ class DashboardViewModelTest {
     @Test fun terminalFontSizeReflectsStoreAndPersistCallsBack() = runBlocking {
         var persisted: Int? = null
         val vm = DashboardViewModel(
-            CompanionClient(), PaneRepository(),
+            CompanionClient(http), PaneRepository(),
             fontSizeStore = MutableStateFlow(28),
             persistFontSize = { persisted = it },
         )
@@ -85,7 +98,7 @@ class DashboardViewModelTest {
             }
         }))
         server.start()
-        val client = CompanionClient()
+        val client = CompanionClient(http)
         val vm = DashboardViewModel(client, PaneRepository())
         vm.start(server.url("/").toString().replace("http", "ws"))
         withTimeout(3000) { while (!vm.connected.value) delay(20) }
@@ -119,7 +132,7 @@ class DashboardViewModelTest {
             }
         }))
         server.start()
-        val client = CompanionClient()
+        val client = CompanionClient(http)
         val vm = DashboardViewModel(client, PaneRepository())
         vm.start(server.url("/").toString().replace("http", "ws"))
         withTimeout(3000) { while (!vm.connected.value) delay(20) }
@@ -151,7 +164,7 @@ class DashboardViewModelTest {
             }
         }))
         server.start()
-        val client = CompanionClient()
+        val client = CompanionClient(http)
         val vm = DashboardViewModel(client, PaneRepository())
         vm.start(server.url("/").toString().replace("http", "ws"))
         withTimeout(3000) { while (!vm.connected.value) delay(20) }
