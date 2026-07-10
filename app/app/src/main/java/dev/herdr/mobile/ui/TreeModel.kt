@@ -75,20 +75,25 @@ fun repoKeyFor(node: WorkspaceNode): String {
 }
 
 /**
- * Groups workspace nodes by repo key, preserving each group's intra-order.
- * Repos are ordered by the minimum workspace number in the group; the
- * "(unknown)" group always sorts last.
+ * Groups workspace nodes by repo key. Workspaces within a repo, and the repos
+ * themselves, sort by attention tier (blocked > done > rest), then recent
+ * activity, then number. The "(unknown)" group always sorts last.
  */
 fun buildRepoTree(nodes: List<WorkspaceNode>): List<RepoNode> {
     val groups = LinkedHashMap<String, MutableList<WorkspaceNode>>()
     for (n in nodes) groups.getOrPut(repoKeyFor(n)) { mutableListOf() }.add(n)
+
+    val wsOrder = compareByDescending<WorkspaceNode> { workspaceTier(it) }
+        .thenByDescending { it.ws.lastActivity }
+        .thenBy { it.ws.number }
+
     return groups.entries
-        .map { (key, ws) -> RepoNode(key, key, ws) }
+        .map { (key, ws) -> RepoNode(key, key, ws.sortedWith(wsOrder)) }
         .sortedWith(
-            compareBy(
-                { if (it.repoKey == "(unknown)") 1 else 0 },
-                { it.workspaces.minOf { w -> w.ws.number } },
-                { it.displayName },
-            ),
+            compareBy<RepoNode> { if (it.repoKey == "(unknown)") 1 else 0 }
+                .thenByDescending { r -> r.workspaces.maxOf { workspaceTier(it) } }
+                .thenByDescending { r -> r.workspaces.maxOf { it.ws.lastActivity } }
+                .thenBy { r -> r.workspaces.minOf { it.ws.number } }
+                .thenBy { it.displayName },
         )
 }

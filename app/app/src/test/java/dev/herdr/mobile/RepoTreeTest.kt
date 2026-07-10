@@ -48,8 +48,9 @@ class RepoTreeTest {
         assertEquals(listOf("ops", "core", "(unknown)"), repos.map { it.repoKey })
         val ops = repos.first { it.repoKey == "ops" }
         assertEquals(2, ops.workspaces.size)
-        // intra-group order preserved as given (a before b)
-        assertEquals(listOf("w1", "w2"), ops.workspaces.map { it.ws.workspaceId })
+        // intra-group order is now tier→activity→number; a(#4) & b(#2) are equal
+        // tier/activity, so number wins: w2 before w1.
+        assertEquals(listOf("w2", "w1"), ops.workspaces.map { it.ws.workspaceId })
         assertEquals("ops", ops.displayName)
     }
 
@@ -73,5 +74,33 @@ class RepoTreeTest {
         assertEquals(2, workspaceTier(node))
         // no panes → 0
         assertEquals(0, workspaceTier(WorkspaceNode(ws, emptyList())))
+    }
+
+    private fun wsNodeStatus(id: String, number: Int, status: String?, lastActivity: Long = 0, repoName: String? = null): WorkspaceNode {
+        val ws = Workspace(
+            workspaceId = id, label = id, number = number, lastActivity = lastActivity,
+            worktree = repoName?.let { Worktree(repoName = it, isLinkedWorktree = true) },
+        )
+        val pane = Pane(paneId = "$id:p1", workspaceId = id, tabId = "$id:t1", agent = "claude", agentStatus = status)
+        return WorkspaceNode(ws, listOf(TabNode(Tab(tabId = "$id:t1", workspaceId = id), listOf(pane))))
+    }
+
+    @Test fun workspacesSortByTierThenActivity() {
+        val working = wsNodeStatus("w1", number = 1, status = "working", lastActivity = 100, repoName = "r")
+        val done = wsNodeStatus("w2", number = 2, status = "done", lastActivity = 100, repoName = "r")
+        val blocked = wsNodeStatus("w3", number = 3, status = "blocked", lastActivity = 100, repoName = "r")
+        val workingNewer = wsNodeStatus("w4", number = 4, status = "working", lastActivity = 999, repoName = "r")
+
+        val repo = buildRepoTree(listOf(working, done, blocked, workingNewer)).single { it.repoKey == "r" }
+        // blocked > done > (working ordered by activity: w4 newer before w1)
+        assertEquals(listOf("w3", "w2", "w4", "w1"), repo.workspaces.map { it.ws.workspaceId })
+    }
+
+    @Test fun reposSortByBestWorkspace() {
+        val calm = wsNodeStatus("w1", number = 1, status = "working", lastActivity = 100, repoName = "calm")
+        val urgent = wsNodeStatus("w2", number = 2, status = "blocked", lastActivity = 50, repoName = "urgent")
+        val repos = buildRepoTree(listOf(calm, urgent)).map { it.repoKey }
+        // "urgent" has a blocked workspace → sorts above "calm" despite older activity/higher number
+        assertEquals(listOf("urgent", "calm"), repos)
     }
 }
