@@ -175,7 +175,7 @@ private fun PaneTreeRow(
         clickable
             .then(if (marked) Modifier.background(MaterialTheme.colorScheme.surfaceVariant) else Modifier)
             // Promoted panes (elided tab) sit at 40dp — one step shallower than a
-            // tab-nested pane (52dp) — reading as a workspace-direct child.
+            // tab-nested pane (56dp) — reading as a workspace-direct child.
             .padding(start = if (promoted) 40.dp else 56.dp, end = 12.dp).padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
