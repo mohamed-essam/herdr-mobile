@@ -22,14 +22,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -288,14 +289,18 @@ private fun terminalSessionClient(view: TerminalView): TerminalSessionClient =
         override fun logStackTrace(tag: String?, e: Exception?) {}
     }
 
-// Tactile cap fills (the bar is always the dark terminal surface).
-private val CapBrush = Brush.verticalGradient(listOf(Color(0xFF3A3C50), Color(0xFF2A2C3D)))
-private val ArrowBrush = Brush.verticalGradient(listOf(Color(0xFF4A4D63), Color(0xFF363849)))
+// Tactile cap language (the bar is always the dark terminal surface).
+private val CapShape = RoundedCornerShape(9.dp)
+private val CapLip = Color(0xFF15151F)
+private val CapBrush = Brush.verticalGradient(listOf(Color(0xFF3E4056), Color(0xFF2A2C3D)))
+private val ArrowBrush = Brush.verticalGradient(listOf(Color(0xFF4E5168), Color(0xFF363849)))
 private val DpadWell = Color(0xFF11111B)
 
 @Composable
 private fun KeyToolbar(session: RemoteTerminalSession, mods: ModifierKeys) {
     var expanded by rememberSaveable { mutableStateOf(true) }
+    val ctx = LocalContext.current
+    val mono = remember { FontFamily(Font("fonts/JetBrainsMono-Regular.ttf", ctx.assets)) }
     fun send(key: TermKey) {
         val b = bytesFor(key)
         session.write(b, 0, b.size)
@@ -311,23 +316,23 @@ private fun KeyToolbar(session: RemoteTerminalSession, mods: ModifierKeys) {
             ) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        ModifierKey("ctrl", mods.ctrl, Modifier.weight(1f), { mods.tapCtrl() }, { mods.lockCtrl() })
-                        ModifierKey("alt", mods.alt, Modifier.weight(1f), { mods.tapAlt() }, { mods.lockAlt() })
-                        KeyCap("esc", Modifier.weight(1f)) { send(TermKey.ESC) }
-                        KeyCap("tab", Modifier.weight(1f)) { send(TermKey.TAB) }
+                        ModifierKey("ctrl", mods.ctrl, mono, Modifier.weight(1f), { mods.tapCtrl() }, { mods.lockCtrl() })
+                        ModifierKey("alt", mods.alt, mono, Modifier.weight(1f), { mods.tapAlt() }, { mods.lockAlt() })
+                        KeyCap("esc", mono, Modifier.weight(1f)) { send(TermKey.ESC) }
+                        KeyCap("tab", mono, Modifier.weight(1f)) { send(TermKey.TAB) }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        KeyCap("home", Modifier.weight(1f)) { send(TermKey.HOME) }
-                        KeyCap("end", Modifier.weight(1f)) { send(TermKey.END) }
-                        KeyCap("pgup", Modifier.weight(1f)) { send(TermKey.PGUP) }
-                        KeyCap("pgdn", Modifier.weight(1f)) { send(TermKey.PGDN) }
+                        KeyCap("home", mono, Modifier.weight(1f)) { send(TermKey.HOME) }
+                        KeyCap("end", mono, Modifier.weight(1f)) { send(TermKey.END) }
+                        KeyCap("pgup", mono, Modifier.weight(1f)) { send(TermKey.PGUP) }
+                        KeyCap("pgdn", mono, Modifier.weight(1f)) { send(TermKey.PGDN) }
                     }
                 }
                 VerticalDivider(
                     Modifier.height(72.dp).padding(horizontal = 6.dp),
                     color = MaterialTheme.colorScheme.outlineVariant,
                 )
-                DPad { send(it) }
+                DPad(mono) { send(it) }
                 CollapseTab { expanded = false }
             }
         }
@@ -336,17 +341,17 @@ private fun KeyToolbar(session: RemoteTerminalSession, mods: ModifierKeys) {
 
 /** Recessed well holding ↑ over ← ↓ →. */
 @Composable
-private fun DPad(onKey: (TermKey) -> Unit) {
+private fun DPad(mono: FontFamily, onKey: (TermKey) -> Unit) {
     Column(
         Modifier.clip(RoundedCornerShape(12.dp)).background(DpadWell).padding(3.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        ArrowCap("↑") { onKey(TermKey.UP) }
+        ArrowCap("↑", mono) { onKey(TermKey.UP) }
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            ArrowCap("←") { onKey(TermKey.LEFT) }
-            ArrowCap("↓") { onKey(TermKey.DOWN) }
-            ArrowCap("→") { onKey(TermKey.RIGHT) }
+            ArrowCap("←", mono) { onKey(TermKey.LEFT) }
+            ArrowCap("↓", mono) { onKey(TermKey.DOWN) }
+            ArrowCap("→", mono) { onKey(TermKey.RIGHT) }
         }
     }
 }
@@ -380,45 +385,46 @@ private fun ExpandHandle(onClick: () -> Unit) {
     }
 }
 
+/** Raised keycap: dark lip base + gradient face inset 2dp at the bottom.
+ *  [outer] carries the row weight (specials) or fixed width (arrows);
+ *  [click] is the caller's clickable/combinedClickable modifier. */
+@Composable
+private fun Keycap(outer: Modifier, face: Brush, click: Modifier, content: @Composable BoxScope.() -> Unit) {
+    Box(
+        outer.height(34.dp).clip(CapShape).background(CapLip),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Box(
+            Modifier.fillMaxWidth().height(32.dp).clip(CapShape).background(face).then(click),
+            contentAlignment = Alignment.Center,
+            content = content,
+        )
+    }
+}
+
 /** Tactile filled cap with ripple; [modifier] carries the row weight. */
 @Composable
-private fun KeyCap(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Box(
-        modifier
-            .shadow(1.dp, MaterialTheme.shapes.small, clip = false)
-            .clip(MaterialTheme.shapes.small)
-            .background(CapBrush)
-            .defaultMinSize(minHeight = 34.dp)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelMedium,
+private fun KeyCap(label: String, mono: FontFamily, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Keycap(modifier, CapBrush, Modifier.clickable(onClick = onClick)) {
+        Text(label, fontFamily = mono, style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurface, maxLines = 1, modifier = Modifier.padding(horizontal = 4.dp))
     }
 }
 
 /** Fixed-size tactile arrow cap for the d-pad. */
 @Composable
-private fun ArrowCap(label: String, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .shadow(1.dp, MaterialTheme.shapes.small, clip = false)
-            .clip(MaterialTheme.shapes.small)
-            .background(ArrowBrush)
-            .size(width = 30.dp, height = 34.dp)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurface,
+private fun ArrowCap(label: String, mono: FontFamily, onClick: () -> Unit) {
+    Keycap(Modifier.width(30.dp), ArrowBrush, Modifier.clickable(onClick = onClick)) {
+        Text(label, fontFamily = mono, color = MaterialTheme.colorScheme.onSurface,
             style = MaterialTheme.typography.titleSmall)
     }
 }
 
-/** Sticky modifier cap: fill/text reflect [state]; tap arms, long-press locks. */
+/** Sticky modifier cap: face/text reflect [state]; tap arms, long-press locks. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ModifierKey(label: String, state: ModState, modifier: Modifier = Modifier, onTap: () -> Unit, onLock: () -> Unit) {
-    val fill = when (state) {
+private fun ModifierKey(label: String, state: ModState, mono: FontFamily, modifier: Modifier = Modifier, onTap: () -> Unit, onLock: () -> Unit) {
+    val face = when (state) {
         ModState.OFF -> CapBrush
         ModState.ONE_SHOT -> SolidColor(MaterialTheme.colorScheme.primaryContainer)
         ModState.LOCKED -> SolidColor(MaterialTheme.colorScheme.primary)
@@ -428,16 +434,8 @@ private fun ModifierKey(label: String, state: ModState, modifier: Modifier = Mod
         ModState.ONE_SHOT -> MaterialTheme.colorScheme.onPrimaryContainer
         ModState.LOCKED -> MaterialTheme.colorScheme.onPrimary
     }
-    Box(
-        modifier
-            .shadow(1.dp, MaterialTheme.shapes.small, clip = false)
-            .clip(MaterialTheme.shapes.small)
-            .background(fill)
-            .defaultMinSize(minHeight = 34.dp)
-            .combinedClickable(onClick = onTap, onLongClick = onLock),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelMedium,
+    Keycap(modifier, face, Modifier.combinedClickable(onClick = onTap, onLongClick = onLock)) {
+        Text(label, fontFamily = mono, style = MaterialTheme.typography.labelMedium,
             color = fg, maxLines = 1, modifier = Modifier.padding(horizontal = 4.dp))
     }
 }
