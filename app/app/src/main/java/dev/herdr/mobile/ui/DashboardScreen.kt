@@ -113,7 +113,7 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
                                 is TreeRow.PaneItem -> Box(
                                     Modifier.padding(start = if (row.promoted) 32.dp else 48.dp),
                                 ) {
-                                    PaneRow(row.pane) { p -> selected = p }
+                                    PaneRow(row.pane, row.repoLabel) { p -> selected = p }
                                 }
                             }
                         }
