@@ -4,6 +4,15 @@
 **Components:** Go companion (`companion/`) + Android app (`app/`).
 **Source:** UI/UX audit findings #1, #3, #6 (the "destructive-action safety" group).
 
+> **Post-review amendment (2026-07-11):** takeover *detection* was dropped after
+> the whole-branch review showed the marker text-scan produces false positives
+> (a normal exit following any "taken over" bytes in the output was mislabelled).
+> `term_exit` is now classified by exit code only: `closing → "closed"`,
+> `code != 0 → "error"`, else `"ended"` — no `"takeover"` value, no marker scan. A
+> real takeover shows the neutral "session ended". The `reason` field and the
+> protocol 6→7 bump are retained. The takeover prose below is the original design;
+> the shipped code omits it (fix commit `454cbc3`).
+
 ## Goal
 
 Make the app's most destructive and least-reversible moments legible and honest:

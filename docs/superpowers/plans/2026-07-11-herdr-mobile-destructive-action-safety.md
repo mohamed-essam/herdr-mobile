@@ -8,6 +8,18 @@
 
 **Tech Stack:** Go (companion, `coder/websocket`, `creack/pty`), Kotlin/Jetpack Compose (app), JUnit + Go `testing`.
 
+> **Post-review amendment (2026-07-11):** the whole-branch review found the
+> takeover text-scan produces false positives (the `sawTakeover` flag was sticky
+> for the whole session, so any normal exit after the bytes "taken over" appeared
+> in output — e.g. from `cat`-ing a doc — was mislabelled a takeover). Decision:
+> **takeover detection was dropped entirely.** `term_exit` is classified by exit
+> code only — `closing → "closed"`, `code != 0 → "error"`, else `"ended"`. There
+> is no `"takeover"` reason value and no marker scan. The `reason` field, the
+> `companionProtocol` 6→7 bump, and the `termSession`/`closing` wrapper stay. The
+> `terminalExitCopy` `"takeover"` branch was removed; a real takeover now shows the
+> neutral "session ended". The takeover-related steps below are kept for the
+> historical record — the shipped code omits them (fix commit `454cbc3`).
+
 ## Global Constraints
 
 - `companionProtocol`: bump `6 → 7` in the welcome frame (`proto.go`).
