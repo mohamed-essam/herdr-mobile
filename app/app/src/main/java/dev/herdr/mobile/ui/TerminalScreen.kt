@@ -7,6 +7,8 @@ import android.graphics.Typeface
 import android.util.Base64
 import android.view.inputmethod.InputMethodManager
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -295,8 +297,8 @@ private fun KeyToolbar(session: RemoteTerminalSession, mods: ModifierKeys) {
                 Modifier.weight(1f).horizontalScroll(rememberScrollState()),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                ModifierKey("ctrl", mods.ctrl, onTap = { mods.tapCtrl() }, onDoubleTap = { mods.lockCtrl() })
-                ModifierKey("alt", mods.alt, onTap = { mods.tapAlt() }, onDoubleTap = { mods.lockAlt() })
+                ModifierKey("ctrl", mods.ctrl, onTap = { mods.tapCtrl() }, onLock = { mods.lockCtrl() })
+                ModifierKey("alt", mods.alt, onTap = { mods.tapAlt() }, onLock = { mods.lockAlt() })
                 KeyCap("esc") { send(TermKey.ESC) }
                 KeyCap("tab") { send(TermKey.TAB) }
                 KeyCap("^C") { send(TermKey.CTRL_C) }
@@ -349,9 +351,10 @@ private fun KeyCap(label: String, onClick: () -> Unit) {
     }
 }
 
-/** A sticky modifier cap: fill/text color reflects [state]; single vs double tap. */
+/** A sticky modifier cap: fill/text color reflects [state]; tap arms, long-press locks. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ModifierKey(label: String, state: ModState, onTap: () -> Unit, onDoubleTap: () -> Unit) {
+private fun ModifierKey(label: String, state: ModState, onTap: () -> Unit, onLock: () -> Unit) {
     val bg = when (state) {
         ModState.OFF -> MaterialTheme.colorScheme.surfaceContainerHigh
         ModState.ONE_SHOT -> MaterialTheme.colorScheme.primaryContainer
@@ -370,7 +373,7 @@ private fun ModifierKey(label: String, state: ModState, onTap: () -> Unit, onDou
         Box(
             Modifier
                 .defaultMinSize(minWidth = 44.dp, minHeight = 44.dp)
-                .pointerInput(Unit) { detectTapGestures(onTap = { onTap() }, onDoubleTap = { onDoubleTap() }) },
+                .combinedClickable(onClick = onTap, onLongClick = onLock),
             contentAlignment = Alignment.Center,
         ) {
             Text(
