@@ -226,7 +226,7 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
                     }
                 }
             }
-            session?.let { KeyToolbar(it) }
+            session?.let { KeyToolbar(it, mods) }
         }
     }
 }
@@ -280,39 +280,106 @@ private fun terminalSessionClient(view: TerminalView): TerminalSessionClient =
     }
 
 @Composable
-private fun KeyToolbar(session: RemoteTerminalSession) {
-    val esc = byteArrayOf(0x1b)
+private fun KeyToolbar(session: RemoteTerminalSession, mods: ModifierKeys) {
+    fun send(key: TermKey) {
+        val b = bytesFor(key)
+        session.write(b, 0, b.size)
+        mods.consumeOneShot()   // bar keys don't combine with a modifier; drop a lingering one-shot
+    }
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(6.dp)) {
-            KeyChip("esc") { session.write(esc, 0, 1) }
-            KeyChip("tab") { session.write(byteArrayOf(0x09), 0, 1) }
-            KeyChip("^C") { session.write(byteArrayOf(0x03), 0, 1) }
-            KeyChip("↑") { session.write(esc + "[A".toByteArray(), 0, 3) }
-            KeyChip("↓") { session.write(esc + "[B".toByteArray(), 0, 3) }
-            KeyChip("←") { session.write(esc + "[D".toByteArray(), 0, 3) }
-            KeyChip("→") { session.write(esc + "[C".toByteArray(), 0, 3) }
+        Row(
+            Modifier.fillMaxWidth().padding(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ModifierKey("ctrl", mods.ctrl, onTap = { mods.tapCtrl() }, onDoubleTap = { mods.lockCtrl() })
+                ModifierKey("alt", mods.alt, onTap = { mods.tapAlt() }, onDoubleTap = { mods.lockAlt() })
+                KeyCap("esc") { send(TermKey.ESC) }
+                KeyCap("tab") { send(TermKey.TAB) }
+                KeyCap("^C") { send(TermKey.CTRL_C) }
+                KeyCap("home") { send(TermKey.HOME) }
+                KeyCap("end") { send(TermKey.END) }
+                KeyCap("pgup") { send(TermKey.PGUP) }
+                KeyCap("pgdn") { send(TermKey.PGDN) }
+            }
+            VerticalDivider(
+                modifier = Modifier.height(48.dp).padding(horizontal = 4.dp),
+                color = MaterialTheme.colorScheme.outlineVariant,
+            )
+            DPad { send(it) }
         }
     }
 }
 
+/** Centered up arrow above a left/down/right row. */
 @Composable
-private fun KeyChip(label: String, onClick: () -> Unit) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = MaterialTheme.shapes.small,
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-        modifier = Modifier.padding(end = 8.dp),
-    ) {
-        Text(
-            label,
-            fontFamily = FontFamily.Monospace,
-            style = MaterialTheme.typography.labelLarge,
-            modifier = Modifier
-                .clickableNoRipple(onClick)
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-        )
+private fun DPad(onKey: (TermKey) -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        KeyCap("↑") { onKey(TermKey.UP) }
+        Row {
+            KeyCap("←") { onKey(TermKey.LEFT) }
+            KeyCap("↓") { onKey(TermKey.DOWN) }
+            KeyCap("→") { onKey(TermKey.RIGHT) }
+        }
     }
 }
 
-private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier =
-    this.then(Modifier.clickable { onClick() })
+/** Flat filled key-cap with ripple feedback. */
+@Composable
+private fun KeyCap(label: String, onClick: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.padding(3.dp),
+    ) {
+        Box(
+            Modifier.defaultMinSize(minWidth = 44.dp, minHeight = 44.dp).clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                label,
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
+        }
+    }
+}
+
+/** A sticky modifier cap: fill/text color reflects [state]; single vs double tap. */
+@Composable
+private fun ModifierKey(label: String, state: ModState, onTap: () -> Unit, onDoubleTap: () -> Unit) {
+    val bg = when (state) {
+        ModState.OFF -> MaterialTheme.colorScheme.surfaceContainerHigh
+        ModState.ONE_SHOT -> MaterialTheme.colorScheme.primaryContainer
+        ModState.LOCKED -> MaterialTheme.colorScheme.primary
+    }
+    val fg = when (state) {
+        ModState.OFF -> MaterialTheme.colorScheme.onSurface
+        ModState.ONE_SHOT -> MaterialTheme.colorScheme.onPrimaryContainer
+        ModState.LOCKED -> MaterialTheme.colorScheme.onPrimary
+    }
+    Surface(
+        color = bg,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.padding(3.dp),
+    ) {
+        Box(
+            Modifier
+                .defaultMinSize(minWidth = 44.dp, minHeight = 44.dp)
+                .pointerInput(Unit) { detectTapGestures(onTap = { onTap() }, onDoubleTap = { onDoubleTap() }) },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                label,
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.labelLarge,
+                color = fg,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
+        }
+    }
+}
