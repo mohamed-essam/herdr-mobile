@@ -49,6 +49,7 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
     var takenOver by remember { mutableStateOf(false) }
     var attaching by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val mods = remember { ModifierKeys() }
     val rootView = LocalView.current
     // The native TerminalView opens the IME when focused; leaving the terminal
     // (back button, or any disposal) must dismiss it or it lingers over the
@@ -148,7 +149,7 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
                             val density = ctx.resources.displayMetrics.density
                             val bounds = fontBounds(density)
                             val initialPx = storedFont ?: bounds.default
-                            val c = TerminalViewClientImpl(this, initialPx, bounds) { vm.setTerminalFontSize(it) }
+                            val c = TerminalViewClientImpl(this, initialPx, bounds, mods) { vm.setTerminalFontSize(it) }
                             client = c
                             setTextSize(initialPx)
                             // Bundled JetBrains Mono (OFL) — the system MONOSPACE on some

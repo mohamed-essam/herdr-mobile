@@ -12,6 +12,7 @@ class TerminalViewClientImpl(
     private val view: TerminalView,
     initialPx: Int,
     private val bounds: FontBounds,
+    private val mods: ModifierKeys,
     private val onFontSizeChanged: (Int) -> Unit,
 ) : TerminalViewClient {
     private var textSizePx = initialPx
@@ -44,11 +45,14 @@ class TerminalViewClientImpl(
     override fun onKeyDown(keyCode: Int, e: KeyEvent, session: TerminalSession): Boolean = false
     override fun onKeyUp(keyCode: Int, e: KeyEvent): Boolean = false
     override fun onLongPress(event: MotionEvent): Boolean = false
-    override fun readControlKey(): Boolean = false
-    override fun readAltKey(): Boolean = false
+    override fun readControlKey(): Boolean = mods.readCtrl()
+    override fun readAltKey(): Boolean = mods.readAlt()
     override fun readShiftKey(): Boolean = false
     override fun readFnKey(): Boolean = false
-    override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession): Boolean = false
+    override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession): Boolean {
+        mods.consumeOneShot()
+        return false
+    }
     override fun onEmulatorSet() {}
     override fun logError(tag: String?, message: String?) {}
     override fun logWarn(tag: String?, message: String?) {}
