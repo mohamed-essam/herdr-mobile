@@ -71,7 +71,7 @@ sealed interface ServerFrame {
     data object Unknown : ServerFrame
     data class TermOpened(val reqId: String, val termId: String) : ServerFrame
     data class TermData(val termId: String, val data: String) : ServerFrame
-    data class TermExit(val termId: String, val code: Int) : ServerFrame
+    data class TermExit(val termId: String, val code: Int, val reason: String = "") : ServerFrame
     data class TermError(val reqId: String, val termId: String, val message: String) : ServerFrame
 }
 
@@ -114,7 +114,8 @@ fun parseServerFrame(text: String): ServerFrame {
         "term_data" -> ServerFrame.TermData(
             obj["termId"]!!.jsonPrimitive.content, obj["data"]!!.jsonPrimitive.content)
         "term_exit" -> ServerFrame.TermExit(
-            obj["termId"]!!.jsonPrimitive.content, obj["code"]?.jsonPrimitive?.int ?: 0)
+            obj["termId"]!!.jsonPrimitive.content, obj["code"]?.jsonPrimitive?.int ?: 0,
+            obj["reason"]?.jsonPrimitive?.content ?: "")
         "term_error" -> ServerFrame.TermError(
             obj["reqId"]?.jsonPrimitive?.content ?: "", obj["termId"]?.jsonPrimitive?.content ?: "",
             obj["message"]?.jsonPrimitive?.content ?: "")

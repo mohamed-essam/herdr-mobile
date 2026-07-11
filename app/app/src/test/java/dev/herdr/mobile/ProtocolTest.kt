@@ -51,6 +51,16 @@ class ProtocolTest {
         assertEquals(3, (x as ServerFrame.TermExit).code)
     }
 
+    @Test fun termExitParsesReason() {
+        val x = parseServerFrame("""{"t":"term_exit","termId":"t1","code":3,"reason":"takeover"}""")
+        x as ServerFrame.TermExit
+        assertEquals(3, x.code)
+        assertEquals("takeover", x.reason)
+        // missing reason defaults to ""
+        val y = parseServerFrame("""{"t":"term_exit","termId":"t2","code":0}""") as ServerFrame.TermExit
+        assertEquals("", y.reason)
+    }
+
     @Test fun buildsTermClientMessages() {
         assertTrue(ClientMsg.termOpen("r1", "w6:p1", 80, 24).contains("\"term_open\""))
         assertTrue(ClientMsg.termInput("t1", "aGk=").contains("\"aGk=\""))

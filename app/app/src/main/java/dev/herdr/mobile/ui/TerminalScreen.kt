@@ -58,6 +58,7 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
     var status by remember { mutableStateOf("connecting…") }
     var takenOver by remember { mutableStateOf(false) }
     var attaching by remember { mutableStateOf(false) }
+    var exit by remember { mutableStateOf<ExitCopy?>(null) }
     val scope = rememberCoroutineScope()
     val mods = remember { ModifierKeys() }
     val rootView = LocalView.current
@@ -98,7 +99,9 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
                     session?.feed(bytes, bytes.size)
                 }
                 is ServerFrame.TermExit -> if (f.termId == id) {
-                    status = "taken over elsewhere"
+                    val copy = terminalExitCopy(f.reason, f.code)
+                    exit = copy
+                    status = copy.title
                     termId = null
                     takenOver = true
                 }
@@ -198,15 +201,17 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
                     ) {
                         Text("⚠", style = MaterialTheme.typography.headlineMedium, color = statusColor("blocked", isSystemInDarkTheme()))
                         Spacer(Modifier.height(8.dp))
-                        Text(
-                            "terminal ended or was taken over elsewhere",
-                            style = MaterialTheme.typography.bodyMedium,
+                        Text(exit?.title ?: "session ended",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp))
+                        Spacer(Modifier.height(4.dp))
+                        Text(exit?.detail ?: "",
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(horizontal = 24.dp),
-                        )
+                            textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp))
                         Spacer(Modifier.height(16.dp))
-                        Button(onClick = { scope.launch { attachOnce() } }, shape = MaterialTheme.shapes.small) {
+                        Button(onClick = { exit = null; scope.launch { attachOnce() } }, shape = MaterialTheme.shapes.small) {
                             Text("Reattach")
                         }
                     }
@@ -250,6 +255,17 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
  */
 fun showReconnectOverlay(emulatorReady: Boolean, takenOver: Boolean, status: String): Boolean =
     emulatorReady && !takenOver && status != "connected"
+
+/** Overlay/subtitle copy for a terminal that ended, keyed by the companion's
+ *  reason. Unknown/empty reason falls back to the neutral "session ended" — we
+ *  never claim a takeover we can't prove. */
+data class ExitCopy(val title: String, val detail: String)
+
+fun terminalExitCopy(reason: String, code: Int): ExitCopy = when (reason) {
+    "takeover" -> ExitCopy("taken over on another client", "this terminal is now attached elsewhere")
+    "error"    -> ExitCopy("terminal disconnected", "ended unexpectedly (code $code)")
+    else       -> ExitCopy("session ended", "the terminal process exited")
+}
 
 /** Minimal TerminalSessionClient (emulator-package callbacks). */
 private fun terminalSessionClient(view: TerminalView): TerminalSessionClient =
