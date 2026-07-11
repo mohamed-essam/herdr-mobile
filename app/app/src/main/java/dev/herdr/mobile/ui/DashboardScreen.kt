@@ -99,18 +99,18 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
                 if (panes.isEmpty()) {
                     EmptyState(connected)
                 } else {
-                    val rows = flattenRepoTree(repoTree, collapsed)
+                    val rows = flattenTree(repoTree, collapsed)
                     LazyColumn(contentPadding = PaddingValues(vertical = 8.dp), modifier = Modifier.fillMaxSize()) {
-                        items(rows, key = { dashRowKey(it) }) { row ->
+                        items(rows, key = { treeRowKey(it) }) { row ->
                             when (row) {
-                                is DashRow.Repo -> RepoHeaderRow(row) { vm.toggleExpanded("repo:${row.node.repoKey}") }
-                                is DashRow.Ws -> WsHeaderRow(row) { vm.toggleExpanded(row.node.ws.workspaceId) }
-                                is DashRow.TabRow -> TabHeaderRow(row) { vm.toggleExpanded(row.node.tab.tabId) }
+                                is TreeRow.Repo -> RepoHeaderRow(row) { vm.toggleExpanded("repo:${row.node.repoKey}") }
+                                is TreeRow.Ws -> WsHeaderRow(row) { vm.toggleExpanded(row.node.ws.workspaceId) }
+                                is TreeRow.Tab -> TabHeaderRow(row) { vm.toggleExpanded(row.node.tab.tabId) }
                                 // Promoted panes (their tab was elided) sit one step
                                 // shallower — start=32 puts the card edge at the Tab-header
                                 // level (44dp) as a workspace-direct child; nested panes
                                 // stay at start=48, one step deeper than their Tab header.
-                                is DashRow.PaneRowItem -> Box(
+                                is TreeRow.PaneItem -> Box(
                                     Modifier.padding(start = if (row.promoted) 32.dp else 48.dp),
                                 ) {
                                     PaneRow(row.pane) { p -> selected = p }
@@ -379,51 +379,8 @@ private fun OtherAgentDialog(onConfirm: (String) -> Unit, onDismiss: () -> Unit)
     )
 }
 
-private sealed interface DashRow {
-    data class Repo(val node: RepoNode, val expanded: Boolean, val paneCount: Int) : DashRow
-    data class Ws(val node: WorkspaceNode, val expanded: Boolean) : DashRow
-    data class TabRow(val node: TabNode, val expanded: Boolean) : DashRow
-    data class PaneRowItem(val pane: Pane, val promoted: Boolean) : DashRow
-}
-
-/** A node is expanded unless its id is in [collapsed]; repos key on "repo:<key>". */
-private fun flattenRepoTree(repos: List<RepoNode>, collapsed: Set<String>): List<DashRow> {
-    val rows = mutableListOf<DashRow>()
-    for (r in repos) {
-        val rOpen = "repo:${r.repoKey}" !in collapsed
-        val count = r.workspaces.sumOf { w -> w.tabs.sumOf { it.panes.size } }
-        rows.add(DashRow.Repo(r, rOpen, count))
-        if (!rOpen) continue
-        for (w in r.workspaces) {
-            val wOpen = w.ws.workspaceId !in collapsed
-            rows.add(DashRow.Ws(w, wOpen))
-            if (!wOpen) continue
-            for (child in workspaceChildren(w)) {
-                when (child) {
-                    is WsChild.TabGroup -> {
-                        val t = child.tab
-                        val tOpen = t.tab.tabId !in collapsed
-                        rows.add(DashRow.TabRow(t, tOpen))
-                        if (tOpen) t.panes.forEach { rows.add(DashRow.PaneRowItem(it, promoted = false)) }
-                    }
-                    is WsChild.PromotedPane ->
-                        rows.add(DashRow.PaneRowItem(child.pane, promoted = true))
-                }
-            }
-        }
-    }
-    return rows
-}
-
-private fun dashRowKey(r: DashRow): String = when (r) {
-    is DashRow.Repo -> "r:" + r.node.repoKey
-    is DashRow.Ws -> "w:" + r.node.ws.workspaceId
-    is DashRow.TabRow -> "t:" + r.node.tab.tabId
-    is DashRow.PaneRowItem -> "p:" + r.pane.paneId
-}
-
 @Composable
-private fun RepoHeaderRow(row: DashRow.Repo, onToggle: () -> Unit) {
+private fun RepoHeaderRow(row: TreeRow.Repo, onToggle: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -446,7 +403,7 @@ private fun RepoHeaderRow(row: DashRow.Repo, onToggle: () -> Unit) {
 }
 
 @Composable
-private fun WsHeaderRow(row: DashRow.Ws, onToggle: () -> Unit) {
+private fun WsHeaderRow(row: TreeRow.Ws, onToggle: () -> Unit) {
     val ws = row.node.ws
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(start = 28.dp, end = 12.dp).padding(vertical = 8.dp),
@@ -469,7 +426,7 @@ private fun WsHeaderRow(row: DashRow.Ws, onToggle: () -> Unit) {
 }
 
 @Composable
-private fun TabHeaderRow(row: DashRow.TabRow, onToggle: () -> Unit) {
+private fun TabHeaderRow(row: TreeRow.Tab, onToggle: () -> Unit) {
     val tab = row.node.tab
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(start = 44.dp, end = 12.dp).padding(vertical = 6.dp),
