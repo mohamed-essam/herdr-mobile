@@ -269,9 +269,8 @@ fun keysLive(connected: Boolean, termId: String?, takenOver: Boolean): Boolean =
 data class ExitCopy(val title: String, val detail: String)
 
 fun terminalExitCopy(reason: String, code: Int): ExitCopy = when (reason) {
-    "takeover" -> ExitCopy("taken over on another client", "this terminal is now attached elsewhere")
-    "error"    -> ExitCopy("terminal disconnected", "ended unexpectedly (code $code)")
-    else       -> ExitCopy("session ended", "the terminal process exited")
+    "error" -> ExitCopy("terminal disconnected", "ended unexpectedly (code $code)")
+    else    -> ExitCopy("session ended", "the terminal process exited")
 }
 
 /** Minimal TerminalSessionClient (emulator-package callbacks). */

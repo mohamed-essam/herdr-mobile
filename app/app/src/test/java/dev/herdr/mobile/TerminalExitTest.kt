@@ -6,11 +6,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class TerminalExitTest {
-    @Test fun takeover() {
-        assertEquals("taken over on another client", terminalExitCopy("takeover", 0).title)
-    }
     @Test fun endedClosedUnknownAreNeutral() {
-        for (r in listOf("ended", "closed", "", "weird-future-value")) {
+        for (r in listOf("ended", "closed", "", "weird-future-value", "takeover")) {
             assertEquals("session ended", terminalExitCopy(r, 0).title)
         }
     }

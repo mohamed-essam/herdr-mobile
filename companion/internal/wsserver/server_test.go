@@ -173,32 +173,6 @@ func TestTermExitReasonEnded(t *testing.T) {
 	}
 }
 
-func TestTermExitReasonTakeover(t *testing.T) {
-	s := NewServer(AllowAll{}, &stubRPC{})
-	s.attachArgv = func(target string) []string {
-		return []string{"sh", "-c", "printf 'session taken over here'; exit 0"}
-	}
-	srv := httptest.NewServer(s.Handler())
-	defer srv.Close()
-	ctx := context.Background()
-	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close(websocket.StatusNormalClosure, "")
-
-	c.Write(ctx, websocket.MessageText, []byte(`{"t":"term_open","reqId":"r1","target":"x"}`))
-	opened := readUntil(t, ctx, c, "term_opened")
-	if id, _ := opened["termId"].(string); id == "" {
-		t.Fatal("no termId in term_opened")
-	}
-
-	f := readUntil(t, ctx, c, "term_exit")
-	if f["reason"] != "takeover" {
-		t.Fatalf("want takeover, got %v", f["reason"])
-	}
-}
-
 func TestTermExitReasonClosed(t *testing.T) {
 	s := NewServer(AllowAll{}, &stubRPC{})
 	s.attachArgv = func(target string) []string { return []string{"sh", "-c", "sleep 30"} }

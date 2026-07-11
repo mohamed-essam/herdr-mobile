@@ -61,12 +61,6 @@ type client struct {
 	smu      sync.Mutex
 }
 
-// takeoverMarker is herdr's displaced-attach banner text; scanned
-// case-insensitively across the tail of PTY output to classify a term_exit as
-// a "takeover" (best-effort — herdr does not expose a structured signal for
-// this).
-const takeoverMarker = "taken over"
-
 // termSession wraps a pty.Session with a closing flag so onExit can tell an
 // explicit term_close-induced exit apart from the process ending on its own.
 // closing is set from closeTerm/closeAll, which may run on a different
@@ -458,22 +452,9 @@ func (s *Server) openTerm(ctx context.Context, c *client, reqID, target string, 
 	termID := "t" + strconv.FormatUint(s.termSeq.Add(1), 10)
 
 	ts := &termSession{}
-	var tail []byte
-	sawTakeover := false
 
 	sess, err := pty.Start(s.attachArgv(target), uint16(cols), uint16(rows),
 		func(b []byte) {
-			if !sawTakeover {
-				scan := append(append([]byte(nil), tail...), b...)
-				if strings.Contains(strings.ToLower(string(scan)), takeoverMarker) {
-					sawTakeover = true
-				}
-				if len(scan) > 64 {
-					tail = append(tail[:0], scan[len(scan)-64:]...)
-				} else {
-					tail = scan
-				}
-			}
 			sendBlocking(ctx, c, proto.TermData(termID, base64.StdEncoding.EncodeToString(b)))
 		},
 		func(code int) {
@@ -481,8 +462,6 @@ func (s *Server) openTerm(ctx context.Context, c *client, reqID, target string, 
 			switch {
 			case ts.closing.Load():
 				reason = "closed"
-			case sawTakeover:
-				reason = "takeover"
 			case code != 0:
 				reason = "error"
 			}
