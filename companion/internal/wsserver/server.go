@@ -57,8 +57,23 @@ type Server struct {
 type client struct {
 	conn     *websocket.Conn
 	send     chan []byte
-	sessions map[string]*pty.Session
+	sessions map[string]*termSession
 	smu      sync.Mutex
+}
+
+// takeoverMarker is herdr's displaced-attach banner text; scanned
+// case-insensitively across the tail of PTY output to classify a term_exit as
+// a "takeover" (best-effort — herdr does not expose a structured signal for
+// this).
+const takeoverMarker = "taken over"
+
+// termSession wraps a pty.Session with a closing flag so onExit can tell an
+// explicit term_close-induced exit apart from the process ending on its own.
+// closing is set from closeTerm/closeAll, which may run on a different
+// goroutine than the session's read loop that calls onExit, hence atomic.Bool.
+type termSession struct {
+	sess    *pty.Session
+	closing atomic.Bool
 }
 
 func NewServer(auth Authorizer, rpc HerdrRPC) *Server {
@@ -109,7 +124,7 @@ func (s *Server) Handler() http.Handler {
 		if err != nil {
 			return
 		}
-		c := &client{conn: conn, send: make(chan []byte, 64), sessions: map[string]*pty.Session{}}
+		c := &client{conn: conn, send: make(chan []byte, 64), sessions: map[string]*termSession{}}
 		// enqueue welcome + snapshot BEFORE the client is visible to Broadcast
 		c.send <- proto.Welcome(s.herdrVer, s.herdrProt)
 		c.send <- proto.PanesSnapshot(s.snapshot())
@@ -389,29 +404,34 @@ const maxTerms = 8
 func (c *client) get(id string) *pty.Session {
 	c.smu.Lock()
 	defer c.smu.Unlock()
-	return c.sessions[id]
+	if ts := c.sessions[id]; ts != nil {
+		return ts.sess
+	}
+	return nil
 }
 
 func (c *client) closeTerm(id string) {
 	c.smu.Lock()
-	sess := c.sessions[id]
+	ts := c.sessions[id]
 	delete(c.sessions, id)
 	c.smu.Unlock()
-	if sess != nil {
+	if ts != nil {
 		// sess.Close() kills the child, which makes its PTY read loop exit and
 		// still fire onExit -> term_exit; that's intentional, not a double-signal
 		// bug — an explicit term_close is expected to be followed by term_exit.
-		_ = sess.Close()
+		ts.closing.Store(true) // classify the induced exit as "closed"
+		_ = ts.sess.Close()
 	}
 }
 
 func (c *client) closeAll() {
 	c.smu.Lock()
 	all := c.sessions
-	c.sessions = map[string]*pty.Session{}
+	c.sessions = map[string]*termSession{}
 	c.smu.Unlock()
-	for _, s := range all {
-		_ = s.Close()
+	for _, ts := range all {
+		ts.closing.Store(true)
+		_ = ts.sess.Close()
 	}
 }
 
@@ -436,21 +456,47 @@ func (s *Server) openTerm(ctx context.Context, c *client, reqID, target string, 
 		rows = 24
 	}
 	termID := "t" + strconv.FormatUint(s.termSeq.Add(1), 10)
+
+	ts := &termSession{}
+	var tail []byte
+	sawTakeover := false
+
 	sess, err := pty.Start(s.attachArgv(target), uint16(cols), uint16(rows),
 		func(b []byte) {
+			if !sawTakeover {
+				scan := append(append([]byte(nil), tail...), b...)
+				if strings.Contains(strings.ToLower(string(scan)), takeoverMarker) {
+					sawTakeover = true
+				}
+				if len(scan) > 64 {
+					tail = append(tail[:0], scan[len(scan)-64:]...)
+				} else {
+					tail = scan
+				}
+			}
 			sendBlocking(ctx, c, proto.TermData(termID, base64.StdEncoding.EncodeToString(b)))
 		},
 		func(code int) {
+			reason := "ended"
+			switch {
+			case ts.closing.Load():
+				reason = "closed"
+			case sawTakeover:
+				reason = "takeover"
+			case code != 0:
+				reason = "error"
+			}
 			c.closeTerm(termID)
-			sendBlocking(ctx, c, proto.TermExit(termID, code))
+			sendBlocking(ctx, c, proto.TermExit(termID, code, reason))
 		},
 	)
 	if err != nil {
 		c.send <- proto.TermError(reqID, "", err.Error())
 		return
 	}
+	ts.sess = sess
 	c.smu.Lock()
-	c.sessions[termID] = sess
+	c.sessions[termID] = ts
 	c.smu.Unlock()
 	c.send <- proto.TermOpened(reqID, termID)
 }

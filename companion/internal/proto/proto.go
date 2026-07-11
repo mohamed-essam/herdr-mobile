@@ -45,7 +45,7 @@ func ParseClient(b []byte) (ClientMsg, error) {
 func must(v any) []byte { b, _ := json.Marshal(v); return b }
 
 func Welcome(version string, protocol int) []byte {
-	return must(map[string]any{"t": "welcome", "herdrVersion": version, "herdrProtocol": protocol, "companionProtocol": 6})
+	return must(map[string]any{"t": "welcome", "herdrVersion": version, "herdrProtocol": protocol, "companionProtocol": 7})
 }
 func PanesSnapshot(p []state.Pane) []byte {
 	return must(map[string]any{"t": "panes", "panes": p})
@@ -111,8 +111,8 @@ func TermOpened(reqID, termID string) []byte {
 func TermData(termID, dataB64 string) []byte {
 	return must(map[string]any{"t": "term_data", "termId": termID, "data": dataB64})
 }
-func TermExit(termID string, code int) []byte {
-	return must(map[string]any{"t": "term_exit", "termId": termID, "code": code})
+func TermExit(termID string, code int, reason string) []byte {
+	return must(map[string]any{"t": "term_exit", "termId": termID, "code": code, "reason": reason})
 }
 func TermError(reqID, termID, message string) []byte {
 	return must(map[string]any{"t": "term_error", "reqId": reqID, "termId": termID, "message": message})

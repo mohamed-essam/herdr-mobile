@@ -66,8 +66,8 @@ func TestTermFrames(t *testing.T) {
 		t.Fatalf("bad term_data: %v", got)
 	}
 
-	json.Unmarshal(TermExit("t1", 3), &got)
-	if got["t"] != "term_exit" || got["termId"] != "t1" || got["code"].(float64) != 3 {
+	json.Unmarshal(TermExit("t1", 3, "takeover"), &got)
+	if got["t"] != "term_exit" || got["termId"] != "t1" || got["code"].(float64) != 3 || got["reason"] != "takeover" {
 		t.Fatalf("bad term_exit: %v", got)
 	}
 
@@ -77,10 +77,10 @@ func TestTermFrames(t *testing.T) {
 	}
 }
 
-func TestWelcomeAdvertisesProtocol6(t *testing.T) {
+func TestWelcomeAdvertisesProtocol7(t *testing.T) {
 	var got map[string]any
 	json.Unmarshal(Welcome("0.7.1", 14), &got)
-	if got["companionProtocol"].(float64) != 6 {
-		t.Fatalf("want companionProtocol 6, got %v", got["companionProtocol"])
+	if got["companionProtocol"].(float64) != 7 {
+		t.Fatalf("want companionProtocol 7, got %v", got["companionProtocol"])
 	}
 }
