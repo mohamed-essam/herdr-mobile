@@ -51,7 +51,6 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
         return   // full-screen terminal replaces the dashboard while open
     }
 
-    val tree by vm.tree.collectAsState()
     val repoTree by vm.repoTree.collectAsState()
     val collapsed by vm.collapsed.collectAsState()
     val lastOpened by vm.lastOpenedPaneId.collectAsState()
@@ -75,7 +74,7 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
         drawerState = drawerState,
         drawerContent = {
             SidebarDrawer(
-                tree = tree,
+                repos = repoTree,
                 collapsed = collapsed,
                 focusedPaneId = focusedPaneId,
                 lastOpenedPaneId = lastOpened,
