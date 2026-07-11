@@ -143,4 +143,30 @@ class FlattenTreeTest {
         assertTrue(rows[0] is TreeRow.RepoWs && !(rows[0] as TreeRow.RepoWs).expanded)
         assertTrue(rows.none { it is TreeRow.PaneItem })
     }
+
+    @Test fun blankLabelWorkspaceFolds() {
+        // foldableWorkspace's other branch: a blank ws label is also redundant → folds.
+        val ws = WorkspaceNode(
+            Workspace(workspaceId = "ws-r", label = "", number = 1),
+            listOf(TabNode(Tab(tabId = "tab-r", workspaceId = "ws-r", number = 1), listOf(pane("p1", "ws-r", "tab-r")))),
+        )
+        val rows = flattenTree(listOf(RepoNode("r", "r", listOf(ws))), emptySet())
+        assertTrue(rows[0] is TreeRow.RepoWs)
+        assertTrue(rows.none { it is TreeRow.Repo || it is TreeRow.Ws })
+    }
+
+    @Test fun paneItemCarriesRepoLabelInMultiWorkspaceRepo() {
+        // non-folded (multi-workspace) path also stamps repoLabel = repo.displayName.
+        val w1 = WorkspaceNode(
+            Workspace(workspaceId = "w1", label = "r", number = 1),
+            listOf(TabNode(Tab(tabId = "t1", workspaceId = "w1", number = 1), listOf(pane("p1", "w1", "t1")))),
+        )
+        val w2 = WorkspaceNode(
+            Workspace(workspaceId = "w2", label = "r", number = 2),
+            listOf(TabNode(Tab(tabId = "t2", workspaceId = "w2", number = 1), listOf(pane("p2", "w2", "t2")))),
+        )
+        val rows = flattenTree(listOf(RepoNode("myrepo", "myrepo", listOf(w1, w2))), emptySet())
+        assertTrue(rows[0] is TreeRow.Repo)   // multi-ws → not folded
+        rows.filterIsInstance<TreeRow.PaneItem>().forEach { assertEquals("myrepo", it.repoLabel) }
+    }
 }
