@@ -23,46 +23,15 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.herdr.mobile.net.Pane
 import dev.herdr.mobile.ui.theme.statusColor
 import dev.herdr.mobile.ui.theme.statusGlyph
 
-/** One flattened, renderable row of the tree. */
-private sealed interface Row {
-    data class Ws(val node: WorkspaceNode, val expanded: Boolean) : Row
-    data class TabRow(val node: TabNode, val expanded: Boolean) : Row
-    data class PaneRowItem(val pane: Pane, val promoted: Boolean, val parentTab: TabNode?) : Row
-}
-
-/** A node is expanded unless its id is in [collapsed]. */
-private fun flatten(tree: List<WorkspaceNode>, collapsed: Set<String>): List<Row> {
-    val rows = mutableListOf<Row>()
-    for (w in tree) {
-        val wOpen = w.ws.workspaceId !in collapsed
-        rows.add(Row.Ws(w, wOpen))
-        if (!wOpen) continue
-        for (child in workspaceChildren(w)) {
-            when (child) {
-                is WsChild.TabGroup -> {
-                    val t = child.tab
-                    val tOpen = t.tab.tabId !in collapsed
-                    rows.add(Row.TabRow(t, tOpen))
-                    if (tOpen) t.panes.forEach {
-                        rows.add(Row.PaneRowItem(it, promoted = false, parentTab = null))
-                    }
-                }
-                is WsChild.PromotedPane ->
-                    rows.add(Row.PaneRowItem(child.pane, promoted = true, parentTab = child.parentTab))
-            }
-        }
-    }
-    return rows
-}
-
 @Composable
 fun SidebarDrawer(
-    tree: List<WorkspaceNode>,
+    repos: List<RepoNode>,
     collapsed: Set<String>,
     focusedPaneId: String?,
     lastOpenedPaneId: String?,
@@ -72,7 +41,7 @@ fun SidebarDrawer(
     onNewWorkspace: () -> Unit,
 ) {
     val dark = isSystemInDarkTheme()
-    val rows = flatten(tree, collapsed)
+    val rows = flattenTree(repos, collapsed)
     ModalDrawerSheet(
         drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
@@ -95,11 +64,12 @@ fun SidebarDrawer(
                 )
             }
             LazyColumn(Modifier.fillMaxSize()) {
-                items(rows, key = { rowKey(it) }) { row ->
+                items(rows, key = { treeRowKey(it) }) { row ->
                     when (row) {
-                        is Row.Ws -> WorkspaceRow(row, dark, onToggle, onRowAction)
-                        is Row.TabRow -> TabRowView(row, dark, onToggle, onRowAction)
-                        is Row.PaneRowItem -> PaneTreeRow(row.pane, row.promoted, row.parentTab, dark, focusedPaneId, lastOpenedPaneId, onSelectPane, onRowAction)
+                        is TreeRow.Repo -> RepoRow(row, onToggle)
+                        is TreeRow.Ws -> WorkspaceRow(row, dark, onToggle, onRowAction)
+                        is TreeRow.Tab -> TabRowView(row, dark, onToggle, onRowAction)
+                        is TreeRow.PaneItem -> PaneTreeRow(row.pane, row.promoted, row.parentTab, dark, focusedPaneId, lastOpenedPaneId, onSelectPane, onRowAction)
                     }
                 }
             }
@@ -107,20 +77,40 @@ fun SidebarDrawer(
     }
 }
 
-private fun rowKey(r: Row): String = when (r) {
-    is Row.Ws -> "w:" + r.node.ws.workspaceId
-    is Row.TabRow -> "t:" + r.node.tab.tabId
-    is Row.PaneRowItem -> "p:" + r.pane.paneId
+@Composable
+private fun RepoRow(row: TreeRow.Repo, onToggle: (String) -> Unit) {
+    val node = row.node
+    Row(
+        Modifier.fillMaxWidth()
+            .clickable { onToggle("repo:${node.repoKey}") }
+            .padding(start = 12.dp, end = 12.dp).padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(if (row.expanded) "▾" else "▸", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(8.dp))
+        RepoAvatar(node.displayName)
+        Spacer(Modifier.width(10.dp))
+        Text(
+            node.displayName,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text("${row.paneCount}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun WorkspaceRow(row: Row.Ws, dark: Boolean, onToggle: (String) -> Unit, onRowAction: (RowAction) -> Unit) {
+private fun WorkspaceRow(row: TreeRow.Ws, dark: Boolean, onToggle: (String) -> Unit, onRowAction: (RowAction) -> Unit) {
     val ws = row.node.ws
     Row(
         Modifier.fillMaxWidth()
             .combinedClickable(onClick = { onToggle(ws.workspaceId) }, onLongClick = { onRowAction(wsAction(row.node)) })
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(start = 28.dp, end = 12.dp).padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(if (row.expanded) "▾" else "▸", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -133,10 +123,6 @@ private fun WorkspaceRow(row: Row.Ws, dark: Boolean, onToggle: (String) -> Unit,
             Text("#${ws.number}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
         }
         Spacer(Modifier.weight(1f))
-        ws.worktree?.repoName?.let { repo ->
-            Text("⑂ $repo", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall, modifier = Modifier.alpha(0.8f))
-            Spacer(Modifier.width(8.dp))
-        }
         if (ws.paneCount > 0) Text("${ws.paneCount}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
         RowActionDots("workspace actions") { onRowAction(wsAction(row.node)) }
     }
@@ -144,12 +130,12 @@ private fun WorkspaceRow(row: Row.Ws, dark: Boolean, onToggle: (String) -> Unit,
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TabRowView(row: Row.TabRow, dark: Boolean, onToggle: (String) -> Unit, onRowAction: (RowAction) -> Unit) {
+private fun TabRowView(row: TreeRow.Tab, dark: Boolean, onToggle: (String) -> Unit, onRowAction: (RowAction) -> Unit) {
     val tab = row.node.tab
     Row(
         Modifier.fillMaxWidth()
             .combinedClickable(onClick = { onToggle(tab.tabId) }, onLongClick = { onRowAction(tabAction(row.node)) })
-            .padding(start = 32.dp, end = 12.dp).padding(vertical = 8.dp),
+            .padding(start = 44.dp, end = 12.dp).padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(if (row.expanded) "▾" else "▸", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -189,8 +175,8 @@ private fun PaneTreeRow(
         clickable
             .then(if (marked) Modifier.background(MaterialTheme.colorScheme.surfaceVariant) else Modifier)
             // Promoted panes (elided tab) sit at 40dp — one step shallower than a
-            // tab-nested pane (52dp) — reading as a workspace-direct child.
-            .padding(start = if (promoted) 40.dp else 52.dp, end = 12.dp).padding(vertical = 8.dp),
+            // tab-nested pane (56dp) — reading as a workspace-direct child.
+            .padding(start = if (promoted) 40.dp else 56.dp, end = 12.dp).padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (marked) {

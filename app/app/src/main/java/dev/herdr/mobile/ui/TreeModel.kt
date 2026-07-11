@@ -121,3 +121,53 @@ fun workspaceChildren(ws: WorkspaceNode): List<WsChild> =
         if (tabElided(ws, t)) t.panes.map { WsChild.PromotedPane(it, t) }
         else listOf(WsChild.TabGroup(t))
     }
+
+/** One flattened, renderable row of the repo→workspace→tab→pane tree, shared by
+ *  the dashboard and the sidebar so the two views can never disagree on order or
+ *  structure. Each screen renders these rows in its own chrome. */
+sealed interface TreeRow {
+    data class Repo(val node: RepoNode, val expanded: Boolean, val paneCount: Int) : TreeRow
+    data class Ws(val node: WorkspaceNode, val expanded: Boolean) : TreeRow
+    data class Tab(val node: TabNode, val expanded: Boolean) : TreeRow
+    // promoted: its tab was elided and it's hoisted to a workspace-direct child.
+    // parentTab: that elided tab (for the sidebar's tab-action pivot); null otherwise.
+    data class PaneItem(val pane: Pane, val promoted: Boolean, val parentTab: TabNode?) : TreeRow
+}
+
+/** A node is expanded unless its id is in [collapsed]; repos key on "repo:<key>". */
+fun flattenTree(repos: List<RepoNode>, collapsed: Set<String>): List<TreeRow> {
+    val rows = mutableListOf<TreeRow>()
+    for (r in repos) {
+        val rOpen = "repo:${r.repoKey}" !in collapsed
+        val count = r.workspaces.sumOf { w -> w.tabs.sumOf { it.panes.size } }
+        rows.add(TreeRow.Repo(r, rOpen, count))
+        if (!rOpen) continue
+        for (w in r.workspaces) {
+            val wOpen = w.ws.workspaceId !in collapsed
+            rows.add(TreeRow.Ws(w, wOpen))
+            if (!wOpen) continue
+            for (child in workspaceChildren(w)) {
+                when (child) {
+                    is WsChild.TabGroup -> {
+                        val t = child.tab
+                        val tOpen = t.tab.tabId !in collapsed
+                        rows.add(TreeRow.Tab(t, tOpen))
+                        if (tOpen) t.panes.forEach {
+                            rows.add(TreeRow.PaneItem(it, promoted = false, parentTab = null))
+                        }
+                    }
+                    is WsChild.PromotedPane ->
+                        rows.add(TreeRow.PaneItem(child.pane, promoted = true, parentTab = child.parentTab))
+                }
+            }
+        }
+    }
+    return rows
+}
+
+fun treeRowKey(row: TreeRow): String = when (row) {
+    is TreeRow.Repo -> "r:" + row.node.repoKey
+    is TreeRow.Ws -> "w:" + row.node.ws.workspaceId
+    is TreeRow.Tab -> "t:" + row.node.tab.tabId
+    is TreeRow.PaneItem -> "p:" + row.pane.paneId
+}
