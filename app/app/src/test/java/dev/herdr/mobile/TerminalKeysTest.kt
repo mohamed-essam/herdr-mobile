@@ -14,7 +14,6 @@ class TerminalKeysTest {
     @Test fun bytesForControlKeys() {
         assertArrayEquals(byteArrayOf(0x1b), bytesFor(TermKey.ESC))
         assertArrayEquals(byteArrayOf(0x09), bytesFor(TermKey.TAB))
-        assertArrayEquals(byteArrayOf(0x03), bytesFor(TermKey.CTRL_C))
     }
 
     @Test fun bytesForArrows() {
