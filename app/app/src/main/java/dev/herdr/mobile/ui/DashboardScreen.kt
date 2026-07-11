@@ -171,7 +171,11 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
                         vm.closeNode(target.kind.wire, target.id)
                         confirmTarget = null
                         alsoCloses = emptyList()
-                    }) { Text("Close") }
+                    }) {
+                        Text("Close",
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.Bold)
+                    }
                 },
                 dismissButton = {
                     TextButton(onClick = { confirmTarget = null; alsoCloses = emptyList() }) { Text("Cancel") }
