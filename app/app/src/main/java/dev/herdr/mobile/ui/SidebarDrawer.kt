@@ -32,7 +32,7 @@ import dev.herdr.mobile.ui.theme.statusGlyph
 private sealed interface Row {
     data class Ws(val node: WorkspaceNode, val expanded: Boolean) : Row
     data class TabRow(val node: TabNode, val expanded: Boolean) : Row
-    data class PaneRowItem(val pane: Pane) : Row
+    data class PaneRowItem(val pane: Pane, val promoted: Boolean, val parentTab: TabNode?) : Row
 }
 
 /** A node is expanded unless its id is in [collapsed]. */
@@ -42,11 +42,19 @@ private fun flatten(tree: List<WorkspaceNode>, collapsed: Set<String>): List<Row
         val wOpen = w.ws.workspaceId !in collapsed
         rows.add(Row.Ws(w, wOpen))
         if (!wOpen) continue
-        for (t in w.tabs) {
-            val tOpen = t.tab.tabId !in collapsed
-            rows.add(Row.TabRow(t, tOpen))
-            if (!tOpen) continue
-            t.panes.forEach { rows.add(Row.PaneRowItem(it)) }
+        for (child in workspaceChildren(w)) {
+            when (child) {
+                is WsChild.TabGroup -> {
+                    val t = child.tab
+                    val tOpen = t.tab.tabId !in collapsed
+                    rows.add(Row.TabRow(t, tOpen))
+                    if (tOpen) t.panes.forEach {
+                        rows.add(Row.PaneRowItem(it, promoted = false, parentTab = null))
+                    }
+                }
+                is WsChild.PromotedPane ->
+                    rows.add(Row.PaneRowItem(child.pane, promoted = true, parentTab = child.parentTab))
+            }
         }
     }
     return rows
@@ -91,7 +99,7 @@ fun SidebarDrawer(
                     when (row) {
                         is Row.Ws -> WorkspaceRow(row, dark, onToggle, onRowAction)
                         is Row.TabRow -> TabRowView(row, dark, onToggle, onRowAction)
-                        is Row.PaneRowItem -> PaneTreeRow(row.pane, dark, focusedPaneId, lastOpenedPaneId, onSelectPane, onRowAction)
+                        is Row.PaneRowItem -> PaneTreeRow(row.pane, row.promoted, row.parentTab, dark, focusedPaneId, lastOpenedPaneId, onSelectPane, onRowAction)
                     }
                 }
             }
@@ -157,11 +165,14 @@ private fun TabRowView(row: Row.TabRow, dark: Boolean, onToggle: (String) -> Uni
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PaneTreeRow(
-    pane: Pane, dark: Boolean, focusedPaneId: String?, lastOpenedPaneId: String?, onSelectPane: (Pane) -> Unit,
+    pane: Pane, promoted: Boolean, parentTab: TabNode?, dark: Boolean,
+    focusedPaneId: String?, lastOpenedPaneId: String?, onSelectPane: (Pane) -> Unit,
     onRowAction: (RowAction) -> Unit,
 ) {
     val isAgent = pane.agent != null
     val marked = pane.focused || pane.paneId == focusedPaneId || pane.paneId == lastOpenedPaneId
+    // A promoted pane carries its elided parent tab so its sheet can pivot to tab actions.
+    val action = paneAction(pane, parentTab)
     // Shell panes are now attachable too (herdr terminal attach by terminal_id);
     // keep the dimmed styling as a cue but allow the tap. A pane with no
     // terminal_id is not attachable, so it stays non-clickable.
@@ -169,7 +180,7 @@ private fun PaneTreeRow(
     val clickable = Modifier.fillMaxWidth()
         .let {
             if (attachable) {
-                it.combinedClickable(onClick = { onSelectPane(pane) }, onLongClick = { onRowAction(paneAction(pane)) })
+                it.combinedClickable(onClick = { onSelectPane(pane) }, onLongClick = { onRowAction(action) })
             } else {
                 it
             }
@@ -177,7 +188,9 @@ private fun PaneTreeRow(
     Row(
         clickable
             .then(if (marked) Modifier.background(MaterialTheme.colorScheme.surfaceVariant) else Modifier)
-            .padding(start = 52.dp, end = 12.dp).padding(vertical = 8.dp),
+            // Promoted panes (elided tab) sit at 40dp — one step shallower than a
+            // tab-nested pane (52dp) — reading as a workspace-direct child.
+            .padding(start = if (promoted) 40.dp else 52.dp, end = 12.dp).padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (marked) {
@@ -198,7 +211,7 @@ private fun PaneTreeRow(
             Text(base, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall, modifier = Modifier.alpha(if (isAgent) 0.8f else 0.4f))
         }
         Spacer(Modifier.weight(1f))
-        RowActionDots("pane actions") { onRowAction(paneAction(pane)) }
+        RowActionDots("pane actions") { onRowAction(action) }
     }
 }
 
@@ -234,6 +247,7 @@ fun RowActionSheet(
     onMove: () -> Unit,
     onRename: () -> Unit,
     onClose: () -> Unit,
+    onTabActions: () -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
@@ -250,6 +264,7 @@ fun RowActionSheet(
                     SheetItem("New agent", onNewAgent)
                 }
                 NodeKind.PANE -> {
+                    if (target.mergedTab != null) SheetItem("Tab actions…", onTabActions)
                     SheetItem("Split right", onClick = { onSplit("right") })
                     SheetItem("Split down", onClick = { onSplit("down") })
                     SheetItem("Move…", onMove)
@@ -330,9 +345,10 @@ private fun tabAction(node: TabNode) = RowAction(
     workspaceId = node.tab.workspaceId,
 )
 
-private fun paneAction(pane: Pane) = RowAction(
+private fun paneAction(pane: Pane, parentTab: TabNode? = null) = RowAction(
     kind = NodeKind.PANE,
     id = pane.paneId,
     label = pane.agent ?: "shell",
     isAgent = pane.agent != null,
+    mergedTab = parentTab?.let { tabAction(it) },
 )

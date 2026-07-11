@@ -145,6 +145,7 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
                         }
                     } else vm.closeNode(target.kind.wire, target.id)
                 },
+                onTabActions = { target.mergedTab?.let { actionTarget = it } },
                 onDismiss = { actionTarget = null },
             )
         }

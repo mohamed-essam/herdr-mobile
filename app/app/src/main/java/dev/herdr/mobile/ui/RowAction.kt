@@ -20,6 +20,9 @@ data class RowAction(
     val isAgent: Boolean = false,
     val hasAgent: Boolean = false,
     val workspaceId: String = "",
+    // For a promoted pane (its tab was elided), the parent tab's action so the
+    // pane's sheet can pivot to tab operations. Null for normal panes.
+    val mergedTab: RowAction? = null,
 )
 
 /**
