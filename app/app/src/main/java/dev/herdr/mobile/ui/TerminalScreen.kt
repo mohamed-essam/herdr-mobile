@@ -12,17 +12,24 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -281,108 +288,156 @@ private fun terminalSessionClient(view: TerminalView): TerminalSessionClient =
         override fun logStackTrace(tag: String?, e: Exception?) {}
     }
 
+// Tactile cap fills (the bar is always the dark terminal surface).
+private val CapBrush = Brush.verticalGradient(listOf(Color(0xFF3A3C50), Color(0xFF2A2C3D)))
+private val ArrowBrush = Brush.verticalGradient(listOf(Color(0xFF4A4D63), Color(0xFF363849)))
+private val DpadWell = Color(0xFF11111B)
+
 @Composable
 private fun KeyToolbar(session: RemoteTerminalSession, mods: ModifierKeys) {
+    var expanded by rememberSaveable { mutableStateOf(true) }
     fun send(key: TermKey) {
         val b = bytesFor(key)
         session.write(b, 0, b.size)
         mods.consumeOneShot()   // bar keys don't combine with a modifier; drop a lingering one-shot
     }
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-        Row(
-            Modifier.fillMaxWidth().padding(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        if (!expanded) {
+            ExpandHandle { expanded = true }
+        } else {
             Row(
-                Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                Modifier.fillMaxWidth().padding(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                ModifierKey("ctrl", mods.ctrl, onTap = { mods.tapCtrl() }, onLock = { mods.lockCtrl() })
-                ModifierKey("alt", mods.alt, onTap = { mods.tapAlt() }, onLock = { mods.lockAlt() })
-                KeyCap("esc") { send(TermKey.ESC) }
-                KeyCap("tab") { send(TermKey.TAB) }
-                KeyCap("^C") { send(TermKey.CTRL_C) }
-                KeyCap("home") { send(TermKey.HOME) }
-                KeyCap("end") { send(TermKey.END) }
-                KeyCap("pgup") { send(TermKey.PGUP) }
-                KeyCap("pgdn") { send(TermKey.PGDN) }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        ModifierKey("ctrl", mods.ctrl, Modifier.weight(1f), { mods.tapCtrl() }, { mods.lockCtrl() })
+                        ModifierKey("alt", mods.alt, Modifier.weight(1f), { mods.tapAlt() }, { mods.lockAlt() })
+                        KeyCap("esc", Modifier.weight(1f)) { send(TermKey.ESC) }
+                        KeyCap("tab", Modifier.weight(1f)) { send(TermKey.TAB) }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        KeyCap("home", Modifier.weight(1f)) { send(TermKey.HOME) }
+                        KeyCap("end", Modifier.weight(1f)) { send(TermKey.END) }
+                        KeyCap("pgup", Modifier.weight(1f)) { send(TermKey.PGUP) }
+                        KeyCap("pgdn", Modifier.weight(1f)) { send(TermKey.PGDN) }
+                    }
+                }
+                VerticalDivider(
+                    Modifier.height(72.dp).padding(horizontal = 6.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                )
+                DPad { send(it) }
+                CollapseTab { expanded = false }
             }
-            VerticalDivider(
-                modifier = Modifier.height(48.dp).padding(horizontal = 4.dp),
-                color = MaterialTheme.colorScheme.outlineVariant,
-            )
-            DPad { send(it) }
         }
     }
 }
 
-/** Centered up arrow above a left/down/right row. */
+/** Recessed well holding ↑ over ← ↓ →. */
 @Composable
 private fun DPad(onKey: (TermKey) -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        KeyCap("↑") { onKey(TermKey.UP) }
-        Row {
-            KeyCap("←") { onKey(TermKey.LEFT) }
-            KeyCap("↓") { onKey(TermKey.DOWN) }
-            KeyCap("→") { onKey(TermKey.RIGHT) }
-        }
-    }
-}
-
-/** Flat filled key-cap with ripple feedback. */
-@Composable
-private fun KeyCap(label: String, onClick: () -> Unit) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = MaterialTheme.shapes.small,
-        modifier = Modifier.padding(3.dp),
+    Column(
+        Modifier.clip(RoundedCornerShape(12.dp)).background(DpadWell).padding(3.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Box(
-            Modifier.defaultMinSize(minWidth = 44.dp, minHeight = 44.dp).clickable(onClick = onClick),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                label,
-                fontFamily = FontFamily.Monospace,
-                style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier.padding(horizontal = 12.dp),
-            )
+        ArrowCap("↑") { onKey(TermKey.UP) }
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            ArrowCap("←") { onKey(TermKey.LEFT) }
+            ArrowCap("↓") { onKey(TermKey.DOWN) }
+            ArrowCap("→") { onKey(TermKey.RIGHT) }
         }
     }
 }
 
-/** A sticky modifier cap: fill/text color reflects [state]; tap arms, long-press locks. */
+/** Slim full-height tab that collapses the bar; costs width, not height. */
+@Composable
+private fun CollapseTab(onClick: () -> Unit) {
+    Box(
+        Modifier.padding(start = 2.dp).width(22.dp).height(72.dp)
+            .clip(MaterialTheme.shapes.small)
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = "hide keys" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("⌄", fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.titleMedium)
+    }
+}
+
+/** Thin handle shown while collapsed; tap to restore the bar. */
+@Composable
+private fun ExpandHandle(onClick: () -> Unit) {
+    Box(
+        Modifier.fillMaxWidth().height(20.dp)
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = "show keys" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("⌃", fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.titleMedium)
+    }
+}
+
+/** Tactile filled cap with ripple; [modifier] carries the row weight. */
+@Composable
+private fun KeyCap(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(
+        modifier
+            .shadow(1.dp, MaterialTheme.shapes.small, clip = false)
+            .clip(MaterialTheme.shapes.small)
+            .background(CapBrush)
+            .defaultMinSize(minHeight = 34.dp)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface, maxLines = 1, modifier = Modifier.padding(horizontal = 4.dp))
+    }
+}
+
+/** Fixed-size tactile arrow cap for the d-pad. */
+@Composable
+private fun ArrowCap(label: String, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .shadow(1.dp, MaterialTheme.shapes.small, clip = false)
+            .clip(MaterialTheme.shapes.small)
+            .background(ArrowBrush)
+            .size(width = 30.dp, height = 34.dp)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.titleSmall)
+    }
+}
+
+/** Sticky modifier cap: fill/text reflect [state]; tap arms, long-press locks. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ModifierKey(label: String, state: ModState, onTap: () -> Unit, onLock: () -> Unit) {
-    val bg = when (state) {
-        ModState.OFF -> MaterialTheme.colorScheme.surfaceContainerHigh
-        ModState.ONE_SHOT -> MaterialTheme.colorScheme.primaryContainer
-        ModState.LOCKED -> MaterialTheme.colorScheme.primary
+private fun ModifierKey(label: String, state: ModState, modifier: Modifier = Modifier, onTap: () -> Unit, onLock: () -> Unit) {
+    val fill = when (state) {
+        ModState.OFF -> CapBrush
+        ModState.ONE_SHOT -> SolidColor(MaterialTheme.colorScheme.primaryContainer)
+        ModState.LOCKED -> SolidColor(MaterialTheme.colorScheme.primary)
     }
     val fg = when (state) {
         ModState.OFF -> MaterialTheme.colorScheme.onSurface
         ModState.ONE_SHOT -> MaterialTheme.colorScheme.onPrimaryContainer
         ModState.LOCKED -> MaterialTheme.colorScheme.onPrimary
     }
-    Surface(
-        color = bg,
-        shape = MaterialTheme.shapes.small,
-        modifier = Modifier.padding(3.dp),
+    Box(
+        modifier
+            .shadow(1.dp, MaterialTheme.shapes.small, clip = false)
+            .clip(MaterialTheme.shapes.small)
+            .background(fill)
+            .defaultMinSize(minHeight = 34.dp)
+            .combinedClickable(onClick = onTap, onLongClick = onLock),
+        contentAlignment = Alignment.Center,
     ) {
-        Box(
-            Modifier
-                .defaultMinSize(minWidth = 44.dp, minHeight = 44.dp)
-                .combinedClickable(onClick = onTap, onLongClick = onLock),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                label,
-                fontFamily = FontFamily.Monospace,
-                style = MaterialTheme.typography.labelLarge,
-                color = fg,
-                modifier = Modifier.padding(horizontal = 12.dp),
-            )
-        }
+        Text(label, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelMedium,
+            color = fg, maxLines = 1, modifier = Modifier.padding(horizontal = 4.dp))
     }
 }

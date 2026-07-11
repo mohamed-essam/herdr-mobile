@@ -36,7 +36,7 @@ class ModifierKeys {
 }
 
 /** Non-printing keys the bar sends as literal byte sequences. */
-enum class TermKey { ESC, TAB, CTRL_C, UP, DOWN, LEFT, RIGHT, HOME, END, PGUP, PGDN }
+enum class TermKey { ESC, TAB, UP, DOWN, LEFT, RIGHT, HOME, END, PGUP, PGDN }
 
 private val ESC = byteArrayOf(0x1b)
 
@@ -44,7 +44,6 @@ private val ESC = byteArrayOf(0x1b)
 fun bytesFor(key: TermKey): ByteArray = when (key) {
     TermKey.ESC -> ESC
     TermKey.TAB -> byteArrayOf(0x09)
-    TermKey.CTRL_C -> byteArrayOf(0x03)
     TermKey.UP -> ESC + "[A".toByteArray()
     TermKey.DOWN -> ESC + "[B".toByteArray()
     TermKey.RIGHT -> ESC + "[C".toByteArray()
