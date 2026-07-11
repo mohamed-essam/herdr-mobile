@@ -74,4 +74,16 @@ class TreeCollapseTest {
         assertEquals(2, children.size)
         assertTrue(children.all { it is WsChild.PromotedPane })
     }
+
+    @Test fun paneActionSuppressesPivotForBlankIdTab() {
+        val blankTab = tabNode("", "", listOf(pane("o1", "", "")))
+        val action = dev.herdr.mobile.ui.paneAction(pane("o1", "", ""), blankTab)
+        assertNull(action.mergedTab)
+    }
+
+    @Test fun paneActionAttachesPivotForRealTab() {
+        val realTab = tabNode("t1", "w1", listOf(pane("p1", "w1", "t1")))
+        val action = dev.herdr.mobile.ui.paneAction(pane("p1", "w1", "t1"), realTab)
+        assertNotNull(action.mergedTab)
+    }
 }

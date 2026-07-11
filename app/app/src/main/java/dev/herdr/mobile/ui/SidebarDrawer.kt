@@ -345,10 +345,13 @@ private fun tabAction(node: TabNode) = RowAction(
     workspaceId = node.tab.workspaceId,
 )
 
-private fun paneAction(pane: Pane, parentTab: TabNode? = null) = RowAction(
+internal fun paneAction(pane: Pane, parentTab: TabNode? = null) = RowAction(
     kind = NodeKind.PANE,
     id = pane.paneId,
     label = pane.agent ?: "shell",
     isAgent = pane.agent != null,
-    mergedTab = parentTab?.let { tabAction(it) },
+    // A blank-id parent tab is the synthetic (unknown)-workspace orphan tab; no
+    // pivot for it (its tab actions would dispatch with an empty id, bypassing
+    // the isNotBlank() guard on onRowAction).
+    mergedTab = parentTab?.takeIf { it.tab.tabId.isNotBlank() }?.let { tabAction(it) },
 )
