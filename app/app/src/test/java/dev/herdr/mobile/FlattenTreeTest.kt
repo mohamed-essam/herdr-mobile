@@ -7,6 +7,8 @@ import dev.herdr.mobile.ui.RepoNode
 import dev.herdr.mobile.ui.TabNode
 import dev.herdr.mobile.ui.TreeRow
 import dev.herdr.mobile.ui.WorkspaceNode
+import dev.herdr.mobile.ui.buildRepoTree
+import dev.herdr.mobile.ui.buildTree
 import dev.herdr.mobile.ui.flattenTree
 import dev.herdr.mobile.ui.treeRowKey
 import org.junit.Assert.assertEquals
@@ -82,5 +84,21 @@ class FlattenTreeTest {
     @Test fun rowKeysAreUnique() {
         val keys = flattenTree(repos, emptySet()).map { treeRowKey(it) }
         assertEquals(keys.size, keys.toSet().size)
+    }
+
+    @Test fun orphanTreeHasUniqueKeysAndUnknownRepo() {
+        // A pane whose workspace/tab aren't in the lists surfaces under a synthetic "(unknown)".
+        val real = Workspace(workspaceId = "w1", label = "repo", number = 1)
+        val realTab = Tab(tabId = "t1", workspaceId = "w1", number = 1)
+        val panes = listOf(
+            Pane(paneId = "p1", workspaceId = "w1", tabId = "t1", terminalId = "x1"),
+            Pane(paneId = "orphan", workspaceId = "gone", tabId = "gone", terminalId = "x2"),
+        )
+        val repoTree = buildRepoTree(buildTree(listOf(real), listOf(realTab), panes))
+        val rows = flattenTree(repoTree, emptySet())
+        val keys = rows.map { treeRowKey(it) }
+        assertEquals(keys.size, keys.toSet().size)               // no key collisions incl. orphan
+        assertTrue(rows.any { it is TreeRow.Repo && it.node.repoKey == "(unknown)" })
+        assertTrue(rows.any { it is TreeRow.PaneItem && it.pane.paneId == "orphan" })
     }
 }
