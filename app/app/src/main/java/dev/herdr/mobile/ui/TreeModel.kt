@@ -97,3 +97,27 @@ fun buildRepoTree(nodes: List<WorkspaceNode>): List<RepoNode> {
                 .thenBy { it.displayName },
         )
 }
+
+/**
+ * A tab row is elided (its panes promoted directly under the workspace) when it
+ * carries no grouping information: it is the workspace's only tab, or it holds a
+ * single pane. Empty tabs keep their row so the workspace is never silently blank.
+ */
+fun tabElided(ws: WorkspaceNode, tab: TabNode): Boolean =
+    tab.panes.isNotEmpty() && (ws.tabs.size == 1 || tab.panes.size == 1)
+
+/**
+ * A workspace's display children after tab elision: either a visible tab (render
+ * its row + its panes) or a promoted pane (its tab was elided; the pane is hoisted
+ * to a workspace-direct child). Order follows the workspace's tab order.
+ */
+sealed interface WsChild {
+    data class TabGroup(val tab: TabNode) : WsChild
+    data class PromotedPane(val pane: Pane, val parentTab: TabNode) : WsChild
+}
+
+fun workspaceChildren(ws: WorkspaceNode): List<WsChild> =
+    ws.tabs.flatMap { t ->
+        if (tabElided(ws, t)) t.panes.map { WsChild.PromotedPane(it, t) }
+        else listOf(WsChild.TabGroup(t))
+    }

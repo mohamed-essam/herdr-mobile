@@ -106,13 +106,13 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
                                 is DashRow.Repo -> RepoHeaderRow(row) { vm.toggleExpanded("repo:${row.node.repoKey}") }
                                 is DashRow.Ws -> WsHeaderRow(row) { vm.toggleExpanded(row.node.ws.workspaceId) }
                                 is DashRow.TabRow -> TabHeaderRow(row) { vm.toggleExpanded(row.node.tab.tabId) }
-                                // start=48 so the card edge (+PaneRow's own 12dp) lands at
-                                // ~60dp, one step deeper than the Tab header chevron (44dp),
-                                // keeping the Repo>Ws>Tab>Pane nesting visually unambiguous.
-                                is DashRow.PaneRowItem -> Box(Modifier.padding(start = 48.dp)) {
-                                    // Open any pane's terminal, shells included (shells have a
-                                    // terminalId too); the old agent-only guard made shell rows
-                                    // inert to taps.
+                                // Promoted panes (their tab was elided) sit one step
+                                // shallower — start=32 puts the card edge at the Tab-header
+                                // level (44dp) as a workspace-direct child; nested panes
+                                // stay at start=48, one step deeper than their Tab header.
+                                is DashRow.PaneRowItem -> Box(
+                                    Modifier.padding(start = if (row.promoted) 32.dp else 48.dp),
+                                ) {
                                     PaneRow(row.pane) { p -> selected = p }
                                 }
                             }
@@ -145,6 +145,7 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
                         }
                     } else vm.closeNode(target.kind.wire, target.id)
                 },
+                onTabActions = { target.mergedTab?.let { actionTarget = it } },
                 onDismiss = { actionTarget = null },
             )
         }
@@ -378,7 +379,7 @@ private sealed interface DashRow {
     data class Repo(val node: RepoNode, val expanded: Boolean, val paneCount: Int) : DashRow
     data class Ws(val node: WorkspaceNode, val expanded: Boolean) : DashRow
     data class TabRow(val node: TabNode, val expanded: Boolean) : DashRow
-    data class PaneRowItem(val pane: Pane) : DashRow
+    data class PaneRowItem(val pane: Pane, val promoted: Boolean) : DashRow
 }
 
 /** A node is expanded unless its id is in [collapsed]; repos key on "repo:<key>". */
@@ -393,11 +394,17 @@ private fun flattenRepoTree(repos: List<RepoNode>, collapsed: Set<String>): List
             val wOpen = w.ws.workspaceId !in collapsed
             rows.add(DashRow.Ws(w, wOpen))
             if (!wOpen) continue
-            for (t in w.tabs) {
-                val tOpen = t.tab.tabId !in collapsed
-                rows.add(DashRow.TabRow(t, tOpen))
-                if (!tOpen) continue
-                t.panes.forEach { rows.add(DashRow.PaneRowItem(it)) }
+            for (child in workspaceChildren(w)) {
+                when (child) {
+                    is WsChild.TabGroup -> {
+                        val t = child.tab
+                        val tOpen = t.tab.tabId !in collapsed
+                        rows.add(DashRow.TabRow(t, tOpen))
+                        if (tOpen) t.panes.forEach { rows.add(DashRow.PaneRowItem(it, promoted = false)) }
+                    }
+                    is WsChild.PromotedPane ->
+                        rows.add(DashRow.PaneRowItem(child.pane, promoted = true))
+                }
             }
         }
     }
