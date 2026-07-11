@@ -67,9 +67,10 @@ fun SidebarDrawer(
                 items(rows, key = { treeRowKey(it) }) { row ->
                     when (row) {
                         is TreeRow.Repo -> RepoRow(row, onToggle)
+                        is TreeRow.RepoWs -> RepoWsRow(row, dark, onToggle, onRowAction)
                         is TreeRow.Ws -> WorkspaceRow(row, dark, onToggle, onRowAction)
                         is TreeRow.Tab -> TabRowView(row, dark, onToggle, onRowAction)
-                        is TreeRow.PaneItem -> PaneTreeRow(row.pane, row.promoted, row.parentTab, dark, focusedPaneId, lastOpenedPaneId, onSelectPane, onRowAction)
+                        is TreeRow.PaneItem -> PaneTreeRow(row.pane, row.promoted, row.parentTab, dark, focusedPaneId, lastOpenedPaneId, onSelectPane, onRowAction, row.repoLabel)
                     }
                 }
             }
@@ -100,6 +101,39 @@ private fun RepoRow(row: TreeRow.Repo, onToggle: (String) -> Unit) {
         )
         Spacer(Modifier.width(8.dp))
         Text("${row.paneCount}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun RepoWsRow(row: TreeRow.RepoWs, dark: Boolean, onToggle: (String) -> Unit, onRowAction: (RowAction) -> Unit) {
+    val ws = row.wsNode.ws
+    val hasActions = ws.workspaceId.isNotBlank()   // orphan (unknown) has none
+    val base = Modifier.fillMaxWidth()
+    val row1 = if (hasActions)
+        base.combinedClickable(onClick = { onToggle(ws.workspaceId) }, onLongClick = { onRowAction(wsAction(row.wsNode)) })
+    else base.clickable { onToggle(ws.workspaceId) }
+    Row(
+        row1.padding(start = 12.dp, end = 12.dp).padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(if (row.expanded) "▾" else "▸", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(8.dp))
+        RepoAvatar(row.repo.displayName)
+        Spacer(Modifier.width(10.dp))
+        StatusGlyph(ws.agentStatus, dark)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            row.repo.displayName, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+        )
+        if (ws.number > 0) {
+            Spacer(Modifier.width(6.dp))
+            Text("#${ws.number}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+        }
+        Spacer(Modifier.width(8.dp))
+        Text("${row.paneCount}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+        if (hasActions) RowActionDots("workspace actions") { onRowAction(wsAction(row.wsNode)) }
     }
 }
 
@@ -153,7 +187,7 @@ private fun TabRowView(row: TreeRow.Tab, dark: Boolean, onToggle: (String) -> Un
 private fun PaneTreeRow(
     pane: Pane, promoted: Boolean, parentTab: TabNode?, dark: Boolean,
     focusedPaneId: String?, lastOpenedPaneId: String?, onSelectPane: (Pane) -> Unit,
-    onRowAction: (RowAction) -> Unit,
+    onRowAction: (RowAction) -> Unit, repoLabel: String,
 ) {
     val isAgent = pane.agent != null
     val marked = pane.focused || pane.paneId == focusedPaneId || pane.paneId == lastOpenedPaneId
@@ -185,16 +219,16 @@ private fun PaneTreeRow(
         }
         StatusGlyph(pane.agentStatus, dark)
         Spacer(Modifier.width(8.dp))
-        val label = pane.agent ?: "shell"
+        val label = panePrimaryLabel(pane, repoLabel)
         Text(
             label,
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.alpha(if (isAgent) 1f else 0.5f),
         )
-        val base = pane.cwd.substringAfterLast('/')
-        if (base.isNotEmpty()) {
+        val secondary = paneSecondaryLabel(pane, repoLabel)
+        if (secondary != null) {
             Spacer(Modifier.width(8.dp))
-            Text(base, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall, modifier = Modifier.alpha(if (isAgent) 0.8f else 0.4f))
+            Text(secondary, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall, modifier = Modifier.alpha(if (isAgent) 0.8f else 0.4f))
         }
         Spacer(Modifier.weight(1f))
         RowActionDots("pane actions") { onRowAction(action) }

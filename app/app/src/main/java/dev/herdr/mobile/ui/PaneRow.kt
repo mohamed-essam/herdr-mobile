@@ -23,20 +23,35 @@ import dev.herdr.mobile.ui.theme.statusColor
  */
 fun paneStatusLabel(pane: Pane): String? = if (pane.agent == null) "shell" else pane.agentStatus
 
+/** Pane's primary label, de-duplicated against its enclosing [repoLabel]. Agent
+ *  panes lead with the agent; a shell leads with a differentiating cwd subdir,
+ *  else the generic "shell". Never repeats the repo name. */
+fun panePrimaryLabel(pane: Pane, repoLabel: String): String {
+    pane.agent?.let { return it }
+    val base = pane.cwd.substringAfterLast('/')
+    return if (base.isNotBlank() && base != repoLabel) base else "shell"
+}
+
+/** Secondary (dim) line: the cwd subdir when it adds info beyond the repo label
+ *  for an agent pane; null when redundant or already carried by the title. */
+fun paneSecondaryLabel(pane: Pane, repoLabel: String): String? {
+    if (pane.agent == null) return null
+    val base = pane.cwd.substringAfterLast('/')
+    return if (base.isNotBlank() && base != repoLabel) base else null
+}
+
 /**
  * A pane rendered as a herdr "pane block": a rectangular card fronted by a
  * status-colored bar, the project name in bold mono, and a dim workspace·agent
  * subline. Tapping opens the pane's terminal.
  */
 @Composable
-fun PaneRow(pane: Pane, onClick: (Pane) -> Unit) {
+fun PaneRow(pane: Pane, repoLabel: String, onClick: (Pane) -> Unit) {
     val dark = isSystemInDarkTheme()
     val status = paneStatusLabel(pane)
     val accent = statusColor(status, dark)
-    val title = pane.cwd.substringAfterLast('/').ifBlank { pane.workspaceId.ifBlank { pane.paneId } }
-    // agent panes: "workspace · agent"; shells: just the workspace (the status
-    // chip already reads "shell", so don't duplicate it here).
-    val subtitle = listOfNotNull(pane.workspaceId.ifBlank { null }, pane.agent).joinToString(" · ")
+    val title = panePrimaryLabel(pane, repoLabel)
+    val secondary = paneSecondaryLabel(pane, repoLabel)
 
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -67,14 +82,16 @@ fun PaneRow(pane: Pane, onClick: (Pane) -> Unit) {
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                if (secondary != null) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        secondary,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             StatusIndicator(status, Modifier.padding(end = 14.dp))
         }
