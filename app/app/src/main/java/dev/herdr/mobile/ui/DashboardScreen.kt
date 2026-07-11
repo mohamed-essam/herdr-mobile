@@ -103,6 +103,7 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
                         items(rows, key = { treeRowKey(it) }) { row ->
                             when (row) {
                                 is TreeRow.Repo -> RepoHeaderRow(row) { vm.toggleExpanded("repo:${row.node.repoKey}") }
+                                is TreeRow.RepoWs -> RepoWsHeaderRow(row) { vm.toggleExpanded(row.wsNode.ws.workspaceId) }
                                 is TreeRow.Ws -> WsHeaderRow(row) { vm.toggleExpanded(row.node.ws.workspaceId) }
                                 is TreeRow.Tab -> TabHeaderRow(row) { vm.toggleExpanded(row.node.tab.tabId) }
                                 // Promoted panes (their tab was elided) sit one step
@@ -396,6 +397,30 @@ private fun RepoHeaderRow(row: TreeRow.Repo, onToggle: () -> Unit) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
+        Spacer(Modifier.width(8.dp))
+        Text("${row.paneCount}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+@Composable
+private fun RepoWsHeaderRow(row: TreeRow.RepoWs, onToggle: () -> Unit) {
+    val ws = row.wsNode.ws
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(if (row.expanded) "▾" else "▸", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(8.dp))
+        RepoAvatar(row.repo.displayName)
+        Spacer(Modifier.width(10.dp))
+        Text(
+            row.repo.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+        )
+        if (ws.number > 0) {
+            Spacer(Modifier.width(8.dp))
+            Text("#${ws.number}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+        }
         Spacer(Modifier.width(8.dp))
         Text("${row.paneCount}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
     }

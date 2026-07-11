@@ -98,7 +98,49 @@ class FlattenTreeTest {
         val rows = flattenTree(repoTree, emptySet())
         val keys = rows.map { treeRowKey(it) }
         assertEquals(keys.size, keys.toSet().size)               // no key collisions incl. orphan
-        assertTrue(rows.any { it is TreeRow.Repo && it.node.repoKey == "(unknown)" })
+        assertTrue(rows.any { it is TreeRow.RepoWs && it.repo.repoKey == "(unknown)" })
         assertTrue(rows.any { it is TreeRow.PaneItem && it.pane.paneId == "orphan" })
+    }
+
+    // ws label == repo displayName → foldable
+    private fun foldedRepo(key: String, wsNum: Int, panes: List<Pane>): RepoNode {
+        val ws = WorkspaceNode(
+            Workspace(workspaceId = "ws-$key", label = key, number = wsNum),
+            listOf(TabNode(Tab(tabId = "tab-$key", workspaceId = "ws-$key", number = 1), panes)),
+        )
+        return RepoNode(key, key, listOf(ws))
+    }
+
+    @Test fun singleWorkspaceRepoWithRedundantLabelFolds() {
+        val rows = flattenTree(listOf(foldedRepo("r", 3, listOf(pane("p1", "ws-r", "tab-r")))), emptySet())
+        val rw = rows[0] as TreeRow.RepoWs
+        assertEquals("r", rw.repo.repoKey); assertEquals(3, rw.wsNode.ws.number); assertEquals(1, rw.paneCount)
+        assertTrue(rows.none { it is TreeRow.Repo || it is TreeRow.Ws })   // no separate repo/ws rows
+        val pi = rows[1] as TreeRow.PaneItem                                // single tab elided → promoted
+        assertTrue(pi.promoted); assertEquals("r", pi.repoLabel)
+    }
+
+    @Test fun singleWorkspaceRepoWithDistinctLabelDoesNotFold() {
+        val ws = WorkspaceNode(
+            Workspace(workspaceId = "ws-r", label = "feature-x", number = 1),
+            listOf(TabNode(Tab(tabId = "tab-r", workspaceId = "ws-r", number = 1), listOf(pane("p1", "ws-r", "tab-r")))),
+        )
+        val rows = flattenTree(listOf(RepoNode("r", "r", listOf(ws))), emptySet())
+        assertTrue(rows[0] is TreeRow.Repo); assertTrue(rows[1] is TreeRow.Ws)
+    }
+
+    @Test fun twoWorkspaceRepoDoesNotFold() {
+        val w1 = WorkspaceNode(Workspace(workspaceId = "w1", label = "r", number = 1),
+            listOf(TabNode(Tab(tabId = "t1", workspaceId = "w1", number = 1), listOf(pane("p1", "w1", "t1")))))
+        val w2 = WorkspaceNode(Workspace(workspaceId = "w2", label = "r", number = 2),
+            listOf(TabNode(Tab(tabId = "t2", workspaceId = "w2", number = 1), listOf(pane("p2", "w2", "t2")))))
+        val rows = flattenTree(listOf(RepoNode("r", "r", listOf(w1, w2))), emptySet())
+        assertTrue(rows[0] is TreeRow.Repo); assertEquals(2, rows.count { it is TreeRow.Ws })
+    }
+
+    @Test fun collapsedRepoWsHidesChildren() {
+        val rows = flattenTree(listOf(foldedRepo("r", 1, listOf(pane("p1", "ws-r", "tab-r")))), setOf("ws-r"))
+        assertTrue(rows[0] is TreeRow.RepoWs && !(rows[0] as TreeRow.RepoWs).expanded)
+        assertTrue(rows.none { it is TreeRow.PaneItem })
     }
 }
