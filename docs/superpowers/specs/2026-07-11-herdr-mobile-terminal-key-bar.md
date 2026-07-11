@@ -23,8 +23,12 @@ only for what it can't reach.
   right edge that never scrolls away.
 - **Visual: flat filled key-caps**, no border stroke, rounded `shapes.small`,
   mono `labelLarge`, real ripple press feedback.
-- **Modifiers: one-shot + double-tap lock.** Single tap arms for the next key
-  then auto-clears; double tap locks until tapped off.
+- **Modifiers: one-shot + long-press lock.** Single tap arms for the next key
+  then auto-clears; long-press locks until tapped off. (Originally scoped as
+  double-tap-to-lock; changed to long-press during final review because
+  double-tap detection imposes a ~300ms latency on every single-tap arm, and
+  `combinedClickable(onClick, onLongClick)` also restores ripple + a11y that the
+  `detectTapGestures` approach lacked.)
 
 ## Feasibility (verified in the vendored Termux view)
 
