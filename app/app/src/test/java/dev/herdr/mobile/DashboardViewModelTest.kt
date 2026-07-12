@@ -86,7 +86,7 @@ class DashboardViewModelTest {
             recentAgentsStore = MutableStateFlow(listOf("claude")),
             persistRecentAgent = { recorded = it },
         )
-        vm.recordRecentAgent("codex")
+        vm.recordRecentAgent("Codex")
         assertEquals("codex", recorded)
     }
 

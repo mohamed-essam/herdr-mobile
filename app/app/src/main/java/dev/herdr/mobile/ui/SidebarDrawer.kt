@@ -323,7 +323,7 @@ fun AgentPickerSheet(
                 recentShown.forEach { AgentItem(it) { onPick(it) } }
                 GroupLabel("all")
             }
-            filterAgents(agents, query).forEach { AgentItem(it) { onPick(it) } }
+            filterAgents(agents, query).filter { it !in recentShown }.forEach { AgentItem(it) { onPick(it) } }
             SheetItem("Other…", onOther, color = MaterialTheme.colorScheme.primary)
         }
     }

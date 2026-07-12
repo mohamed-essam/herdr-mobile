@@ -36,7 +36,7 @@ class DashboardViewModel(
 
     val recentAgents: StateFlow<List<String>> =
         recentAgentsStore.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    fun recordRecentAgent(name: String) = persistRecentAgent(name)
+    fun recordRecentAgent(name: String) = persistRecentAgent(name.lowercase())
 
     val tree: StateFlow<List<WorkspaceNode>> =
         combine(repo.workspaces, repo.tabs, repo.panes) { ws, tabs, panes -> buildTree(ws, tabs, panes) }
