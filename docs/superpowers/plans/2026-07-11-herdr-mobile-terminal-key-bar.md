@@ -188,7 +188,7 @@ Expected: PASS (7 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add app/app/src/main/java/dev/herdr/mobile/ui/TerminalKeys.kt app/app/src/test/java/dev/herdr/mobile/TerminalKeysTest.kt
 git commit -m "feat(app): terminal key bar modifier state machine + key bytes"
 ```
@@ -266,7 +266,7 @@ Expected: `BUILD SUCCESSFUL`; all existing unit tests (incl. `TerminalKeysTest`)
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add app/app/src/main/java/dev/herdr/mobile/ui/TerminalViewClientImpl.kt app/app/src/main/java/dev/herdr/mobile/ui/TerminalScreen.kt
 git commit -m "feat(app): delegate terminal modifier hooks to ModifierKeys"
 ```
@@ -419,7 +419,7 @@ Expected: `BUILD SUCCESSFUL`; all existing unit tests pass. (If the compiler rep
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add app/app/src/main/java/dev/herdr/mobile/ui/TerminalScreen.kt
 git commit -m "feat(app): restyled terminal key bar with modifiers and d-pad"
 ```

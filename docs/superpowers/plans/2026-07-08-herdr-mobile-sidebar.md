@@ -1359,4 +1359,4 @@ git commit -m "feat(app): Paseo-style sidebar drawer with workspace/tab/pane tre
 ## Post-implementation
 
 - Update `docs/superpowers/specs/2026-07-08-herdr-mobile-sidebar-design.md` status note if anything diverged.
-- Update the memory file `/home/messam/.claude/projects/-home-messam-work-personal-herdr-mobile/memory/herdr-mobile-v1-design.md` with: the sidebar drawer shipped, `workspace.list`/`tab.list` fields (labels + worktree), companionProtocol 3, and the collapse-set-holds-collapsed-ids convention.
+- Update the memory file `the project design-notes memory` with: the sidebar drawer shipped, `workspace.list`/`tab.list` fields (labels + worktree), companionProtocol 3, and the collapse-set-holds-collapsed-ids convention.

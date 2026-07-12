@@ -6,7 +6,7 @@
 
 **Architecture:** An Android adaptive icon (`minSdk 26`, so no raster fallback): a VectorDrawable foreground carrying the ram silhouette converted from `herdr/assets/logo.svg`, a solid `#d9dad8` background color, and a monochrome layer reusing the foreground for Android 13+ themed icons. The manifest `<application>` is wired to it.
 
-**Tech Stack:** Android resources (VectorDrawable, `<adaptive-icon>` XML), Gradle. Build: `cd /home/messam/work/personal/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:assembleDebug`.
+**Tech Stack:** Android resources (VectorDrawable, `<adaptive-icon>` XML), Gradle. Build: `cd ~/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:assembleDebug`.
 
 ## Global Constraints
 
@@ -14,7 +14,7 @@
 - **Background:** authentic `#d9dad8`, fixed (not the app's dark theme).
 - **Composition:** 1:1 with the web logo — viewport `512` mapped to the full `108dp` canvas; body bleeds off edges.
 - **Format:** vector adaptive icon only; no raster PNG densities, no legacy `mipmap-*dpi` fallbacks (`minSdk 26`).
-- **Source of truth for the path:** the `d` attribute of the single `<path>` in `/home/messam/work/personal/herdr/assets/logo.svg` (line 4), copied verbatim.
+- **Source of truth for the path:** the `d` attribute of the single `<path>` in `the herdr repo's assets/logo.svg` (line 4), copied verbatim.
 - **SVG→VectorDrawable transform:** SVG `transform="translate(0 512) scale(.1 -.1)"` becomes a VectorDrawable `<group android:translateY="512" android:scaleX="0.1" android:scaleY="-0.1">`.
 - No unit test (resource-only change); a green `assembleDebug` proves the VectorDrawable parses, and on-device install confirms the visual.
 
@@ -33,7 +33,7 @@
 
 - [ ] **Step 1: Create the foreground VectorDrawable**
 
-Create `app/app/src/main/res/drawable/ic_launcher_foreground.xml` with the structure below. For `android:pathData`, copy the **entire** value of the `d` attribute from the single `<path>` in `/home/messam/work/personal/herdr/assets/logo.svg` (line 4) **verbatim** — do not re-type or truncate it. (Do NOT copy the SVG's background `<rect>`; the background is a separate layer.)
+Create `app/app/src/main/res/drawable/ic_launcher_foreground.xml` with the structure below. For `android:pathData`, copy the **entire** value of the `d` attribute from the single `<path>` in `the herdr repo's assets/logo.svg` (line 4) **verbatim** — do not re-type or truncate it. (Do NOT copy the SVG's background `<rect>`; the background is a separate layer.)
 
 ```xml
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
@@ -103,13 +103,13 @@ In `app/app/src/main/AndroidManifest.xml`, add `android:icon` and `android:round
 
 - [ ] **Step 6: Build**
 
-Run: `cd /home/messam/work/personal/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:assembleDebug`
+Run: `cd ~/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:assembleDebug`
 Expected: `BUILD SUCCESSFUL`. (A malformed `pathData` or bad resource reference fails resource linking/parsing, so success proves the vector and adaptive XML are valid.)
 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add app/app/src/main/res/drawable/ic_launcher_foreground.xml \
         app/app/src/main/res/values/colors.xml \
         app/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml \

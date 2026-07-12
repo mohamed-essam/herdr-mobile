@@ -112,7 +112,7 @@ Ships and is fully testable on its own (drive it with `websocat`/`wscat` against
 The repo is currently not a git repo. Run:
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git init
 mkdir -p companion/cmd/herdr-mobiled companion/internal/{herdr,state,notify,proto,wsserver,engine}
 ```
@@ -156,7 +156,7 @@ License: (match herdr's license — TODO confirm)
 - [ ] **Step 4: Init the Go module**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile/companion
+cd ~/herdr-mobile/companion
 go mod init github.com/mohamed-essam/herdr-mobile/companion
 go mod edit -go=1.22
 ```
@@ -164,7 +164,7 @@ go mod edit -go=1.22
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add .gitignore README.md companion/go.mod
 git commit -m "chore: init repo and go module"
 ```
@@ -1208,7 +1208,7 @@ Finished-debounce: when a `working`→`idle`/`done` transition occurs, wait `Deb
 - [ ] **Step 1: Add the websocket dependency**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile/companion
+cd ~/herdr-mobile/companion
 go get github.com/coder/websocket@latest
 ```
 

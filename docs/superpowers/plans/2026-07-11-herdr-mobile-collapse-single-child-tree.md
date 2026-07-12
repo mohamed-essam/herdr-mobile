@@ -162,7 +162,7 @@ Expected: PASS (6 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add app/app/src/main/java/dev/herdr/mobile/ui/TreeModel.kt app/app/src/test/java/dev/herdr/mobile/TreeCollapseTest.kt
 git commit -m "feat(app): tab-elision primitive for single-child tree collapse"
 ```
@@ -253,7 +253,7 @@ Expected: `BUILD SUCCESSFUL`; all existing unit tests (incl. `TreeCollapseTest`,
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add app/app/src/main/java/dev/herdr/mobile/ui/DashboardScreen.kt
 git commit -m "feat(app): collapse single-child tabs in the dashboard tree"
 ```
@@ -471,7 +471,7 @@ Expected: `BUILD SUCCESSFUL`; all existing unit tests pass.
 - [ ] **Step 10: Commit**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add app/app/src/main/java/dev/herdr/mobile/ui/RowAction.kt app/app/src/main/java/dev/herdr/mobile/ui/SidebarDrawer.kt app/app/src/main/java/dev/herdr/mobile/ui/DashboardScreen.kt
 git commit -m "feat(app): collapse single-child tabs in the sidebar with tab-action pivot"
 ```

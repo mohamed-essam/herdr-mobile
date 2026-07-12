@@ -14,8 +14,8 @@
 - Push payloads are NOT versioned — this change is additive, no `companionProtocol` bump.
 - A `clear` push carries `paneId` and `workspaceId` only; title and body stay empty.
 - Notifications are keyed by `paneId.hashCode()` (must match the existing `Notifications.post` key).
-- Go companion test command: `go -C /home/messam/work/personal/herdr-mobile/companion test ./...`
-- Android build: `cd /home/messam/work/personal/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:assembleDebug`
+- Go companion test command: `go -C ~/herdr-mobile/companion test ./...`
+- Android build: `cd ~/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:assembleDebug`
 
 ---
 
@@ -55,7 +55,7 @@ func TestShouldNotifyClearOnResume(t *testing.T) {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `go -C /home/messam/work/personal/herdr-mobile/companion test ./internal/notify/ -run TestShouldNotifyClearOnResume -v`
+Run: `go -C ~/herdr-mobile/companion test ./internal/notify/ -run TestShouldNotifyClearOnResume -v`
 Expected: FAIL — `ShouldNotify` currently returns `ok=false` for `To == "working"`, so the `!ok` branch fires with `got {} ok=false`.
 
 - [ ] **Step 3: Add the `clear` case to `ShouldNotify`**
@@ -86,7 +86,7 @@ The resulting switch reads:
 
 - [ ] **Step 4: Run the notify tests to verify they pass**
 
-Run: `go -C /home/messam/work/personal/herdr-mobile/companion test ./internal/notify/ -v`
+Run: `go -C ~/herdr-mobile/companion test ./internal/notify/ -v`
 Expected: PASS — `TestShouldNotifyClearOnResume` passes and all pre-existing notify tests (`TestShouldNotifyBlocked`, `TestShouldNotifyUsesDisplayName`, `TestShouldNotifyFinishedOnlyFromWorking`, the HTTP notifier tests) still pass. `TestShouldNotifyFinishedOnlyFromWorking` still verifies `idle→done` does NOT notify — that is unaffected (To is `done`, not `working`).
 
 - [ ] **Step 5: Add an engine end-to-end test that a resume fires a `clear` push immediately**
@@ -138,18 +138,18 @@ All required imports (`context`, `encoding/json`, `net/http`, `net/http/httptest
 
 - [ ] **Step 6: Run the engine test to verify it passes**
 
-Run: `go -C /home/messam/work/personal/herdr-mobile/companion test ./internal/engine/ -run TestResumeFiresClearPush -v`
+Run: `go -C ~/herdr-mobile/companion test ./internal/engine/ -run TestResumeFiresClearPush -v`
 Expected: PASS — the resume-to-working transition produces a push with `kind == "clear"` within 2s.
 
 - [ ] **Step 7: Run the full companion suite**
 
-Run: `go -C /home/messam/work/personal/herdr-mobile/companion test ./...`
+Run: `go -C ~/herdr-mobile/companion test ./...`
 Expected: PASS — all packages green.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add companion/internal/notify/notifier.go companion/internal/notify/notifier_test.go companion/internal/engine/engine_test.go
 git commit -m "feat(companion): clear push on resume to working"
 ```
@@ -212,13 +212,13 @@ to:
 
 - [ ] **Step 3: Build the debug APK to verify it compiles**
 
-Run: `cd /home/messam/work/personal/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:assembleDebug`
+Run: `cd ~/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:assembleDebug`
 Expected: `BUILD SUCCESSFUL`.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add app/app/src/main/java/dev/herdr/mobile/push/Notifications.kt app/app/src/main/java/dev/herdr/mobile/push/UnifiedPushReceiver.kt
 git commit -m "feat(app): dismiss notification on clear push"
 ```

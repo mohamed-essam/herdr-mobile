@@ -637,7 +637,7 @@ git commit -m "feat(companion): PTY bridge over the websocket (term_open/input/r
 Run (uses a shallow clone; network required):
 ```bash
 cd /tmp && rm -rf tx && git clone --depth 1 https://github.com/termux/termux-app.git tx
-cd /home/messam/work/personal/herdr-mobile/app
+cd ~/herdr-mobile/app
 mkdir -p terminal-emulator terminal-view
 cp -r /tmp/tx/terminal-emulator/src terminal-emulator/src
 cp -r /tmp/tx/terminal-view/src terminal-view/src
@@ -710,7 +710,7 @@ In `app/app/build.gradle.kts`, add to `dependencies { ... }`:
 
 Run:
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 curl -sL https://www.gnu.org/licenses/gpl-3.0.txt -o LICENSE
 ```
 Expected: `LICENSE` contains "GNU GENERAL PUBLIC LICENSE Version 3".
@@ -719,15 +719,15 @@ Expected: `LICENSE` contains "GNU GENERAL PUBLIC LICENSE Version 3".
 
 Run:
 ```bash
-cd /home/messam/work/personal/herdr-mobile/app
-ANDROID_HOME=/home/messam/Android/Sdk ./gradlew :terminal-emulator:assembleDebug :terminal-view:assembleDebug
+cd ~/herdr-mobile/app
+ANDROID_HOME=$HOME/Android/Sdk ./gradlew :terminal-emulator:assembleDebug :terminal-view:assembleDebug
 ```
 Expected: `BUILD SUCCESSFUL`. If a Termux source file references a stripped resource or `BuildConfig`, remove that reference (e.g. delete an unused androidTest leftover) until it compiles — do not add features.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add LICENSE app/settings.gradle.kts app/app/build.gradle.kts app/terminal-emulator app/terminal-view
 git commit -m "build(app): vendor Termux terminal-emulator + terminal-view (GPLv3); app is now GPLv3"
 ```
@@ -820,15 +820,15 @@ public class RemoteTerminalSession extends TerminalSession {
 
 Run:
 ```bash
-cd /home/messam/work/personal/herdr-mobile/app
-ANDROID_HOME=/home/messam/Android/Sdk ./gradlew :terminal-emulator:assembleDebug
+cd ~/herdr-mobile/app
+ANDROID_HOME=$HOME/Android/Sdk ./gradlew :terminal-emulator:assembleDebug
 ```
 Expected: `BUILD SUCCESSFUL`. (If `mEmulator`, `mTranscriptRows`, `mClient`, or `notifyScreenUpdate` are not visible, re-check Task 4 Step 4 and that this file is in package `com.termux.terminal`.)
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add app/terminal-emulator/src/main/java/com/termux/terminal/RemoteTerminalSession.java
 git commit -m "feat(app): RemoteTerminalSession bridging Termux to the websocket"
 ```
@@ -885,8 +885,8 @@ class ProtocolTest {
 
 Run:
 ```bash
-cd /home/messam/work/personal/herdr-mobile/app
-ANDROID_HOME=/home/messam/Android/Sdk ./gradlew :app:testDebugUnitTest --tests dev.herdr.mobile.ProtocolTest
+cd ~/herdr-mobile/app
+ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest --tests dev.herdr.mobile.ProtocolTest
 ```
 Expected: FAIL — unresolved `ServerFrame.TermOpened` / `ClientMsg.termOpen`.
 
@@ -960,15 +960,15 @@ Add methods to the class (near `sendKeys`):
 
 Run:
 ```bash
-cd /home/messam/work/personal/herdr-mobile/app
-ANDROID_HOME=/home/messam/Android/Sdk ./gradlew :app:testDebugUnitTest --tests dev.herdr.mobile.ProtocolTest --tests dev.herdr.mobile.CompanionClientTest
+cd ~/herdr-mobile/app
+ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest --tests dev.herdr.mobile.ProtocolTest --tests dev.herdr.mobile.CompanionClientTest
 ```
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add app/app/src/main/java/dev/herdr/mobile/net/ app/app/src/test/java/dev/herdr/mobile/ProtocolTest.kt
 git commit -m "feat(app): term_* protocol frames + CompanionClient terminal methods"
 ```
@@ -1208,15 +1208,15 @@ private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier =
 
 Run:
 ```bash
-cd /home/messam/work/personal/herdr-mobile/app
-ANDROID_HOME=/home/messam/Android/Sdk ./gradlew :app:compileDebugKotlin
+cd ~/herdr-mobile/app
+ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:compileDebugKotlin
 ```
 Expected: `BUILD SUCCESSFUL`. If `TerminalSessionClient` has a different method set than listed, adjust the anonymous object to match the vendored interface exactly (check `terminal-emulator/.../TerminalSessionClient.java`).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add app/app/src/main/java/dev/herdr/mobile/ui/TerminalScreen.kt app/app/src/main/java/dev/herdr/mobile/ui/TerminalViewClientImpl.kt app/app/src/main/java/dev/herdr/mobile/ui/DashboardViewModel.kt
 git commit -m "feat(app): interactive TerminalScreen (Termux view) + key toolbar"
 ```
@@ -1291,15 +1291,15 @@ Replace the body of `DashboardScreen` so a selected agent pane shows `TerminalSc
 
 Run:
 ```bash
-cd /home/messam/work/personal/herdr-mobile/app
-ANDROID_HOME=/home/messam/Android/Sdk ./gradlew :app:assembleDebug :app:testDebugUnitTest
+cd ~/herdr-mobile/app
+ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:assembleDebug :app:testDebugUnitTest
 ```
 Expected: `BUILD SUCCESSFUL`; tests green. (If a leftover reference to `QuickReplySheet` remains, remove it.)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add -A app/app/src/main/java/dev/herdr/mobile/ui/
 git commit -m "feat(app): tap agent pane opens the terminal; retire quick-reply"
 ```
@@ -1310,13 +1310,13 @@ git commit -m "feat(app): tap agent pane opens the terminal; retire quick-reply"
 
 **Files:**
 - Modify: `.superpowers/sdd/progress.md`
-- Modify: `/home/messam/.claude/projects/-home-messam-work-personal-herdr-mobile/memory/herdr-mobile-v1-design.md`
+- Modify: `the project design-notes memory`
 
 - [ ] **Step 1: Rebuild the companion and deploy the app to the emulator**
 
 Run:
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 go -C companion build -o ~/.local/bin/herdr-mobiled ./cmd/herdr-mobiled
 scripts/dev-emulator.sh --build
 ```
@@ -1326,7 +1326,7 @@ Expected: companion rebuilt, emulator booted, APK installed, app on the dashboar
 
 Run:
 ```bash
-export ANDROID_HOME=/home/messam/Android/Sdk; export PATH=$PATH:$ANDROID_HOME/platform-tools
+export ANDROID_HOME=$HOME/Android/Sdk; export PATH=$PATH:$ANDROID_HOME/platform-tools
 # tap the omega3 agent row (find its y from a UI dump), then screenshot
 adb shell uiautomator dump /sdcard/ui.xml >/dev/null
 adb shell cat /sdcard/ui.xml | tr '>' '\n' | grep -n omega3
@@ -1345,7 +1345,7 @@ Press back to leave the terminal (`term_close`), then confirm the pane still exi
 ```bash
 python3 - <<'PY'
 import socket, json
-s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect("/home/messam/.config/herdr/herdr.sock")
+s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect("~/.config/herdr/herdr.sock")
 s.sendall((json.dumps({"id":"x","method":"pane.list","params":{}})+"\n").encode())
 b=b""
 while not b.endswith(b"\n"): b+=s.recv(65536)
@@ -1358,7 +1358,7 @@ Expected: `w7:p1 present: True`.
 
 Record: the terminal feature shipped, the companion PTY bridge, the Termux vendoring (GPLv3), the two vendored edits, and any live-testing gotchas discovered. Then:
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add .superpowers/sdd/progress.md
 git commit -m "docs: record interactive terminal (v2 phase 1) shipped + validated"
 ```

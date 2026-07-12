@@ -117,6 +117,6 @@ the input to `buildRepoTree`, which then re-sorts for the dashboard).
 
 ## Build / Test Commands
 
-- Companion: `go -C /home/messam/work/personal/herdr-mobile/companion test ./...`
+- Companion: `go -C ~/herdr-mobile/companion test ./...`
 - App build: `cd app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:assembleDebug`
 - App tests: `cd app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest`

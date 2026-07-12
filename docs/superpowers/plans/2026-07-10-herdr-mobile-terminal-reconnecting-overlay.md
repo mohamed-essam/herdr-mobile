@@ -15,8 +15,8 @@
 - Scrim = `MaterialTheme.colorScheme.background.copy(alpha = 0.6f)`; the frozen last screen must remain faintly visible (semi-transparent, not opaque).
 - The scrim must consume tap gestures so a dead terminal does not pop the soft keyboard.
 - The `takenOver` overlay and all reconnect/re-attach/input logic are unchanged — this change is additive UI only.
-- Android build: `cd /home/messam/work/personal/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:assembleDebug`
-- Unit tests: `cd /home/messam/work/personal/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest`
+- Android build: `cd ~/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:assembleDebug`
+- Unit tests: `cd ~/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest`
 
 ---
 
@@ -58,7 +58,7 @@ class ReconnectOverlayTest {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `cd /home/messam/work/personal/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest --tests "dev.herdr.mobile.ReconnectOverlayTest"`
+Run: `cd ~/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest --tests "dev.herdr.mobile.ReconnectOverlayTest"`
 Expected: FAIL — compilation error / unresolved reference `showReconnectOverlay` (the function does not exist yet).
 
 - [ ] **Step 3: Add the function**
@@ -79,13 +79,13 @@ fun showReconnectOverlay(emulatorReady: Boolean, takenOver: Boolean, status: Str
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `cd /home/messam/work/personal/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest --tests "dev.herdr.mobile.ReconnectOverlayTest"`
+Run: `cd ~/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest --tests "dev.herdr.mobile.ReconnectOverlayTest"`
 Expected: PASS (`BUILD SUCCESSFUL`, tests green).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add app/app/src/main/java/dev/herdr/mobile/ui/TerminalScreen.kt app/app/src/test/java/dev/herdr/mobile/ReconnectOverlayTest.kt
 git commit -m "feat(app): showReconnectOverlay decision function + test"
 ```
@@ -146,18 +146,18 @@ Note: `takenOver` and `showReconnectOverlay(...)` are mutually exclusive (the fu
 
 - [ ] **Step 3: Build the debug APK to verify it compiles**
 
-Run: `cd /home/messam/work/personal/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:assembleDebug`
+Run: `cd ~/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:assembleDebug`
 Expected: `BUILD SUCCESSFUL`.
 
 - [ ] **Step 4: Run the unit suite to confirm nothing regressed**
 
-Run: `cd /home/messam/work/personal/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest`
+Run: `cd ~/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest`
 Expected: `BUILD SUCCESSFUL`, all unit tests green (including `ReconnectOverlayTest`).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add app/app/src/main/java/dev/herdr/mobile/ui/TerminalScreen.kt
 git commit -m "feat(app): dim terminal with reconnecting overlay"
 ```

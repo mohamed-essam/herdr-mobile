@@ -1267,7 +1267,7 @@ git commit -m "feat(app): agent picker (+ Other) and move-destination sheet"
 ### Task 6: Live validation (emulator + phone) + docs/memory
 
 **Files:**
-- Modify: `/home/messam/.claude/projects/-home-messam-work-personal-herdr-mobile/memory/herdr-mobile-v1-design.md`
+- Modify: `the project design-notes memory`
 
 **Interfaces:** none.
 
@@ -1276,7 +1276,7 @@ git commit -m "feat(app): agent picker (+ Other) and move-destination sheet"
 ```bash
 cd companion && go build -o ~/.local/bin/herdr-mobiled ./cmd/herdr-mobiled
 pgrep -x herdr-mobiled | xargs -r kill
-nohup ~/.local/bin/herdr-mobiled --listen 0.0.0.0:8787 > /home/messam/.claude/jobs/89d5ce51/tmp/herdr-mobiled.log 2>&1 &
+nohup ~/.local/bin/herdr-mobiled --listen 0.0.0.0:8787 > /tmp/herdr-mobiled.log 2>&1 &
 ```
 
 - [ ] **Step 2: Install on emulator + phone**

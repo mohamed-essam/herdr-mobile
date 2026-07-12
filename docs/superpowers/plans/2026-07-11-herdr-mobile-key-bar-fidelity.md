@@ -213,7 +213,7 @@ Expected: `BUILD SUCCESSFUL`; all existing unit tests pass. (If the compiler fla
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add app/app/src/main/java/dev/herdr/mobile/ui/TerminalScreen.kt
 git commit -m "feat(app): rounded tactile JetBrains Mono key caps to match mockup"
 ```

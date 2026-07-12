@@ -18,7 +18,7 @@
 - The sidebar drawer's tree and all row-action/close/move logic are unchanged.
 - Build: `cd app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:assembleDebug`
 - Unit tests: `cd app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest`
-- Paths are relative to repo root `/home/messam/work/personal/herdr-mobile`.
+- Paths are relative to repo root `~/herdr-mobile`.
 
 ---
 
@@ -49,13 +49,13 @@ Leave the rest of the file (imports, `base`, `HerdrShapes`, `HerdrTheme`) unchan
 
 - [ ] **Step 2: Build to verify it compiles**
 
-Run: `cd /home/messam/work/personal/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:assembleDebug`
+Run: `cd ~/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:assembleDebug`
 Expected: `BUILD SUCCESSFUL`.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add app/app/src/main/java/dev/herdr/mobile/ui/theme/Theme.kt
 git commit -m "feat(app): mixed typography — headers mono, body sans"
 ```
@@ -137,7 +137,7 @@ class RepoTreeTest {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `cd /home/messam/work/personal/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest --tests "dev.herdr.mobile.RepoTreeTest"`
+Run: `cd ~/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest --tests "dev.herdr.mobile.RepoTreeTest"`
 Expected: FAIL — unresolved references `buildRepoTree` / `repoKeyFor` (not defined yet).
 
 - [ ] **Step 3: Implement in `TreeModel.kt`**
@@ -184,13 +184,13 @@ fun buildRepoTree(nodes: List<WorkspaceNode>): List<RepoNode> {
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `cd /home/messam/work/personal/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest --tests "dev.herdr.mobile.RepoTreeTest"`
+Run: `cd ~/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest --tests "dev.herdr.mobile.RepoTreeTest"`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add app/app/src/main/java/dev/herdr/mobile/ui/TreeModel.kt app/app/src/test/java/dev/herdr/mobile/RepoTreeTest.kt
 git commit -m "feat(app): buildRepoTree repo grouping + tests"
 ```
@@ -245,7 +245,7 @@ class RepoAvatarTest {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `cd /home/messam/work/personal/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest --tests "dev.herdr.mobile.RepoAvatarTest"`
+Run: `cd ~/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest --tests "dev.herdr.mobile.RepoAvatarTest"`
 Expected: FAIL — unresolved references `monogram` / `colorIndexFor`.
 
 - [ ] **Step 3: Add color helpers to `Palette.kt`**
@@ -332,18 +332,18 @@ fun RepoAvatar(name: String, modifier: Modifier = Modifier) {
 
 - [ ] **Step 5: Run the test to verify it passes**
 
-Run: `cd /home/messam/work/personal/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest --tests "dev.herdr.mobile.RepoAvatarTest"`
+Run: `cd ~/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest --tests "dev.herdr.mobile.RepoAvatarTest"`
 Expected: PASS.
 
 - [ ] **Step 6: Build to verify the composable compiles**
 
-Run: `cd /home/messam/work/personal/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:assembleDebug`
+Run: `cd ~/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:assembleDebug`
 Expected: `BUILD SUCCESSFUL`.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add app/app/src/main/java/dev/herdr/mobile/ui/theme/Palette.kt app/app/src/main/java/dev/herdr/mobile/ui/RepoAvatar.kt app/app/src/test/java/dev/herdr/mobile/RepoAvatarTest.kt
 git commit -m "feat(app): repo monogram avatar + deterministic color"
 ```
@@ -535,18 +535,18 @@ private fun TabHeaderRow(row: DashRow.TabRow, onToggle: () -> Unit) {
 
 - [ ] **Step 6: Build the debug APK**
 
-Run: `cd /home/messam/work/personal/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:assembleDebug`
+Run: `cd ~/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:assembleDebug`
 Expected: `BUILD SUCCESSFUL`.
 
 - [ ] **Step 7: Run the full unit suite**
 
-Run: `cd /home/messam/work/personal/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest`
+Run: `cd ~/herdr-mobile/app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest`
 Expected: `BUILD SUCCESSFUL`, all unit tests green (including `RepoTreeTest`, `RepoAvatarTest`). Note: `CompanionClientTest` was recently de-flaked; if it ever fails with a MockWebServer teardown `IOException`, re-run once.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-cd /home/messam/work/personal/herdr-mobile
+cd ~/herdr-mobile
 git add app/app/src/main/java/dev/herdr/mobile/ui/DashboardViewModel.kt app/app/src/main/java/dev/herdr/mobile/ui/DashboardScreen.kt
 git commit -m "feat(app): repo-grouped dashboard tree with avatars"
 ```

@@ -1357,7 +1357,7 @@ git commit -m "feat(app): row action sheet, rename/close dialogs, snackbar"
 ### Task 7: Live validation (emulator + phone) + docs/memory update
 
 **Files:**
-- Modify: `/home/messam/.claude/projects/-home-messam-work-personal-herdr-mobile/memory/herdr-mobile-v1-design.md` (record raw-attach + structural actions)
+- Modify: `the project design-notes memory` (record raw-attach + structural actions)
 
 **Interfaces:** none.
 
@@ -1366,10 +1366,10 @@ git commit -m "feat(app): row action sheet, rename/close dialogs, snackbar"
 ```bash
 cd companion && go build -o ~/.local/bin/herdr-mobiled ./cmd/herdr-mobiled
 pgrep -x herdr-mobiled | xargs -r kill
-~/.local/bin/herdr-mobiled --listen 0.0.0.0:8787 > /home/messam/.claude/jobs/89d5ce51/tmp/herdr-mobiled.log 2>&1 &
+~/.local/bin/herdr-mobiled --listen 0.0.0.0:8787 > /tmp/herdr-mobiled.log 2>&1 &
 ```
 
-(If the binary path/flags differ, check `companion/cmd/` and the prior run in `/home/messam/.claude/jobs/89d5ce51/tmp/herdr-mobiled.log`.)
+(If the binary path/flags differ, check `companion/cmd/` and the prior run in `/tmp/herdr-mobiled.log`.)
 
 - [ ] **Step 2: Install the app on the emulator and the phone**
 
@@ -1379,7 +1379,7 @@ $HOME/Android/Sdk/platform-tools/adb -s emulator-5554 install -r app/build/outpu
 $HOME/Android/Sdk/platform-tools/adb -s adb-R5CY32261JN-KB349E._adb-tls-connect._tcp install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-- [ ] **Step 3: Validate raw attach** — in the sidebar, tap a **shell** pane (e.g. `w7:p2`, dimmed "shell" row). Expected: a live interactive terminal opens (not the old inert/no-op). Screenshot via `adb -s emulator-5554 exec-out screencap -p > /home/messam/.claude/jobs/89d5ce51/tmp/shot.png` and show it to the user.
+- [ ] **Step 3: Validate raw attach** — in the sidebar, tap a **shell** pane (e.g. `w7:p2`, dimmed "shell" row). Expected: a live interactive terminal opens (not the old inert/no-op). Screenshot via `adb -s emulator-5554 exec-out screencap -p > /tmp/shot.png` and show it to the user.
 
 - [ ] **Step 4: Validate rename** — long-press (and separately, tap `⋮` on) a workspace, a tab, and a pane; Rename → change the label → Save. Expected: the tree row shows the new label within ~1-2s (re-poll). Screenshot each and show the user.
 
@@ -1391,7 +1391,7 @@ $HOME/Android/Sdk/platform-tools/adb -s adb-R5CY32261JN-KB349E._adb-tls-connect.
 
 - [ ] **Step 8: Update memory**
 
-Append to `/home/messam/.claude/projects/-home-messam-work-personal-herdr-mobile/memory/herdr-mobile-v1-design.md`: raw-terminal attach via `herdr terminal attach <terminal_id> --takeover` (agent-attach is agent-only; terminal-attach streams any pane by terminal_id); shell panes now tappable; structural actions (rename/close) via `action`/`action_result` frames (companionProtocol 4) mapping to herdr's six rename/close methods with an immediate re-poll poke; close-confirm rule (agents, multi-pane tabs, workspaces). Move create/split/move/swap/zoom to the still-deferred list.
+Append to `the project design-notes memory`: raw-terminal attach via `herdr terminal attach <terminal_id> --takeover` (agent-attach is agent-only; terminal-attach streams any pane by terminal_id); shell panes now tappable; structural actions (rename/close) via `action`/`action_result` frames (companionProtocol 4) mapping to herdr's six rename/close methods with an immediate re-poll poke; close-confirm rule (agents, multi-pane tabs, workspaces). Move create/split/move/swap/zoom to the still-deferred list.
 
 - [ ] **Step 9: Commit any doc changes** (memory lives outside the repo; if the in-repo spec/plan need a status note, commit that)
 

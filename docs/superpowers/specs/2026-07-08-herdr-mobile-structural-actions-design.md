@@ -45,7 +45,7 @@ Two paired capabilities, shipped as one coherent slice:
 
 ## Verified findings (from the herdr 0.7.x source + a live 0.7.1 server)
 
-Cloned `github.com/ogulcancelik/herdr` to `/home/messam/work/personal/herdr`.
+Cloned `github.com/ogulcancelik/herdr` to `the herdr repo`.
 
 - **`herdr agent attach <target>` is agent-only.** `src/cli/agent.rs`
   `agent_attach` resolves the target *to an agent*, reads
