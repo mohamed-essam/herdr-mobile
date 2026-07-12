@@ -290,8 +290,8 @@ fun RowActionSheet(
                 }
                 NodeKind.PANE -> {
                     if (target.mergedTab != null) SheetItem("Tab actions…", onTabActions)
-                    SheetItem("Split right", onClick = { onSplit("right") })
-                    SheetItem("Split down", onClick = { onSplit("down") })
+                    SheetItem("Split shell right", onClick = { onSplit("right") })
+                    SheetItem("Split shell down", onClick = { onSplit("down") })
                     SheetItem("Move…", onMove)
                 }
             }
