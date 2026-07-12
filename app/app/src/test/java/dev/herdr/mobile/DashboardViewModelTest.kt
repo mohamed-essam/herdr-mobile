@@ -79,6 +79,17 @@ class DashboardViewModelTest {
         assertEquals(44, persisted)
     }
 
+    @Test fun recordRecentAgentInvokesPersist() {
+        var recorded: String? = null
+        val vm = DashboardViewModel(
+            CompanionClient(), PaneRepository(),
+            recentAgentsStore = MutableStateFlow(listOf("claude")),
+            persistRecentAgent = { recorded = it },
+        )
+        vm.recordRecentAgent("Codex")
+        assertEquals("codex", recorded)
+    }
+
     @Test fun renameNodeSendsActionAndSurfacesError() = runBlocking {
         val server = MockWebServer()
         val seenOps = java.util.concurrent.CopyOnWriteArrayList<String>()

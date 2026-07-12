@@ -186,10 +186,13 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
         agentPickerFor?.let { target ->
             LaunchedEffect(target) { vm.refreshAgents() }
             val agents by vm.agents.collectAsState()
+            val recent by vm.recentAgents.collectAsState()
             AgentPickerSheet(
                 agents = agents,
+                recent = recent,
                 onPick = { name ->
                     val ctx = target
+                    vm.recordRecentAgent(name)
                     if (ctx.kind == NodeKind.TAB) {
                         vm.createNode(what = "agent", tabId = ctx.id, direction = "down", agentName = name, argv = listOf(name))
                     } else {
@@ -207,6 +210,7 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
                 onConfirm = { input ->
                     val cmd = parseAgentCommand(input)
                     if (cmd.argv.isNotEmpty()) {
+                        if (cmd.name.isNotBlank()) vm.recordRecentAgent(cmd.name)
                         if (target.kind == NodeKind.TAB) {
                             vm.createNode(what = "agent", tabId = target.id, direction = "down", agentName = cmd.name, argv = cmd.argv)
                         } else {

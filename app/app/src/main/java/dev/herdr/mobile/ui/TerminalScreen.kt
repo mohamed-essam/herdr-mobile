@@ -7,6 +7,8 @@ import android.graphics.Typeface
 import android.util.Base64
 import android.view.inputmethod.InputMethodManager
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -31,6 +33,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
@@ -411,13 +414,15 @@ private fun ExpandHandle(onClick: () -> Unit) {
  *  [outer] carries the row weight (specials) or fixed width (arrows);
  *  [click] is the caller's clickable/combinedClickable modifier. */
 @Composable
-private fun Keycap(outer: Modifier, face: Brush, click: Modifier, content: @Composable BoxScope.() -> Unit) {
+private fun Keycap(outer: Modifier, face: Brush, click: Modifier, border: BorderStroke? = null, content: @Composable BoxScope.() -> Unit) {
     Box(
         outer.height(34.dp).clip(CapShape).background(CapLip),
         contentAlignment = Alignment.TopCenter,
     ) {
         Box(
-            Modifier.fillMaxWidth().height(32.dp).clip(CapShape).background(face).then(click),
+            Modifier.fillMaxWidth().height(32.dp).clip(CapShape).background(face)
+                .then(if (border != null) Modifier.border(border, CapShape) else Modifier)
+                .then(click),
             contentAlignment = Alignment.Center,
             content = content,
         )
@@ -442,22 +447,31 @@ private fun ArrowCap(label: String, mono: FontFamily, enabled: Boolean, onClick:
     }
 }
 
-/** Sticky modifier cap: face/text reflect [state]; tap arms, long-press locks. */
+/** Sticky modifier cap: face/text reflect [state]; tap arms, long-press locks.
+ *  ONE_SHOT gets a primary ring (mauve wash otherwise reads too close to OFF);
+ *  LOCKED is a solid fill with an uppercased label. [stateDescription] carries
+ *  off/armed/locked to TalkBack since the visual-only distinction wouldn't. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ModifierKey(label: String, state: ModState, mono: FontFamily, modifier: Modifier = Modifier, enabled: Boolean, onTap: () -> Unit, onLock: () -> Unit) {
+    val primary = MaterialTheme.colorScheme.primary
     val face = when (state) {
         ModState.OFF -> CapBrush
-        ModState.ONE_SHOT -> SolidColor(MaterialTheme.colorScheme.primaryContainer)
-        ModState.LOCKED -> SolidColor(MaterialTheme.colorScheme.primary)
+        ModState.ONE_SHOT -> SolidColor(primary.copy(alpha = 0.22f))
+        ModState.LOCKED -> SolidColor(primary)
     }
     val fg = when (state) {
-        ModState.OFF -> MaterialTheme.colorScheme.onSurface
-        ModState.ONE_SHOT -> MaterialTheme.colorScheme.onPrimaryContainer
         ModState.LOCKED -> MaterialTheme.colorScheme.onPrimary
+        else -> MaterialTheme.colorScheme.onSurface
     }
-    Keycap(modifier, face, Modifier.combinedClickable(enabled = enabled, onClick = onTap, onLongClick = onLock)) {
-        Text(label, fontFamily = mono, style = MaterialTheme.typography.labelMedium,
+    val border = if (state == ModState.ONE_SHOT) BorderStroke(1.5.dp, primary) else null
+    val text = if (state == ModState.LOCKED) label.uppercase() else label
+    val desc = when (state) { ModState.OFF -> "off"; ModState.ONE_SHOT -> "armed"; ModState.LOCKED -> "locked" }
+    val click = Modifier
+        .combinedClickable(enabled = enabled, onClick = onTap, onLongClick = onLock)
+        .semantics { stateDescription = desc }
+    Keycap(modifier, face, click, border) {
+        Text(text, fontFamily = mono, style = MaterialTheme.typography.labelMedium,
             color = fg, maxLines = 1, modifier = Modifier.padding(horizontal = 4.dp))
     }
 }
