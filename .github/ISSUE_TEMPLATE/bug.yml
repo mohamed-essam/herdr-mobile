@@ -1,0 +1,66 @@
+name: Bug report
+description: Report a reproducible problem in herdr-mobile
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please keep it focused and include a real reproduction.
+        For feature ideas or questions, open a regular issue or discussion instead.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part is affected?
+      options:
+        - App (Android)
+        - Companion (herdr-mobiled)
+        - Both / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: Current behavior
+      description: What actually happens?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The shortest reliable reproduction.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Versions and setup relevant to the bug.
+      placeholder: |
+        - herdr-mobile version / commit:
+        - herdr version:
+        - Android version + device (if app):
+        - OS + Go version (if companion):
+        - Network setup (Tailscale / SSH tunnel / other):
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant logs or stack traces. Redact tailnet IPs, tokens, and personal paths.
+      render: shell
+    validations:
+      required: false

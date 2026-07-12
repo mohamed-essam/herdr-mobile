@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/mohamed-essam/herdr-mobile/security/advisories/new
+    about: Please report security issues privately, not as public issues.
+  - name: herdr project
+    url: https://herdr.dev
+    about: Questions about herdr itself (not herdr-mobile) belong upstream.

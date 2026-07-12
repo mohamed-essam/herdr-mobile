@@ -11,5 +11,11 @@
 /app/local.properties
 /app/.idea/
 *.apk
+# Release build artifacts
+/companion/herdr-mobiled-*
+RELEASE_NOTES.md
+# Agent/session scratch (never publish)
+/.remember/
+/.superpowers/
 # misc
 .DS_Store
