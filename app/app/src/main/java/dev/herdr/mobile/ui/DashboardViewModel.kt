@@ -24,6 +24,8 @@ class DashboardViewModel(
     private val repo: PaneRepository,
     fontSizeStore: Flow<Int?> = MutableStateFlow(null),
     private val persistFontSize: (Int) -> Unit = {},
+    recentAgentsStore: Flow<List<String>> = MutableStateFlow(emptyList()),
+    private val persistRecentAgent: (String) -> Unit = {},
 ) : ViewModel() {
     val panes: StateFlow<List<Pane>> = repo.panes
     val connected: StateFlow<Boolean> = client.connected
@@ -31,6 +33,10 @@ class DashboardViewModel(
     val terminalFontSize: StateFlow<Int?> =
         fontSizeStore.stateIn(viewModelScope, SharingStarted.Eagerly, null)
     fun setTerminalFontSize(px: Int) = persistFontSize(px)
+
+    val recentAgents: StateFlow<List<String>> =
+        recentAgentsStore.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    fun recordRecentAgent(name: String) = persistRecentAgent(name)
 
     val tree: StateFlow<List<WorkspaceNode>> =
         combine(repo.workspaces, repo.tabs, repo.panes) { ws, tabs, panes -> buildTree(ws, tabs, panes) }

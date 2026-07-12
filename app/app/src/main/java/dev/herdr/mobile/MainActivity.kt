@@ -59,6 +59,8 @@ class MainActivity : ComponentActivity() {
             PaneRepository(),
             fontSizeStore = settings.terminalFontSize,
             persistFontSize = { px -> lifecycleScope.launch { settings.setTerminalFontSize(px) } },
+            recentAgentsStore = settings.recentAgents,
+            persistRecentAgent = { name -> lifecycleScope.launch { settings.addRecentAgent(name) } },
         )
         val initialPane = intent.getStringExtra("paneId")
 
