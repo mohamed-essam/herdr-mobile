@@ -488,7 +488,7 @@ func TestInitialSnapshotIncludesWorkspacesAndTabs(t *testing.T) {
 }
 ```
 
-Add `"github.com/messam/herdr-mobile/companion/internal/state"` to the test file's imports.
+Add `"github.com/mohamed-essam/herdr-mobile/companion/internal/state"` to the test file's imports.
 
 - [ ] **Step 4: Run test to verify it passes**
 

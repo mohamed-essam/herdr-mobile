@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/messam/herdr-mobile/companion/internal/state"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
 )
 
 func TestShouldNotifyBlocked(t *testing.T) {

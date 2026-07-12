@@ -3,7 +3,7 @@ package state
 import (
 	"testing"
 
-	"github.com/messam/herdr-mobile/companion/internal/herdr"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/herdr"
 )
 
 func infos(p ...herdr.PaneInfo) []herdr.PaneInfo { return p }

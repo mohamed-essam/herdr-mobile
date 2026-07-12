@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/messam/herdr-mobile/companion/internal/state"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
 )
 
 func TestParseClientMsg(t *testing.T) {

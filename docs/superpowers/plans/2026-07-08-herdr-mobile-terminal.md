@@ -16,7 +16,7 @@
 - **Agent panes only.** `herdr agent attach <pane_id>` resolves for agent panes; shell panes are out of scope.
 - Vendoring Termux makes the app **GPLv3** — add a top-level `LICENSE` (GPL-3.0-or-later) + attribution.
 - Toolchain (unchanged from v1): Go 1.23; Android compileSdk/targetSdk 36, minSdk 26, AGP 8.13.2, Gradle 8.14.5, Kotlin 2.3.0, JDK 17, Compose BOM 2026.06.01.
-- Module Go path prefix: `github.com/messam/herdr-mobile/companion`.
+- Module Go path prefix: `github.com/mohamed-essam/herdr-mobile/companion`.
 - Termux Java package is `com.termux.terminal` (emulator) / `com.termux.view` (view); AGP namespaces `com.termux.emulator` / `com.termux.view`.
 - creack/pty API: `pty.StartWithSize(cmd *exec.Cmd, ws *pty.Winsize) (*os.File, error)`, `pty.Setsize(f, ws)`, `pty.Winsize{Rows, Cols, X, Y uint16}`.
 
@@ -470,7 +470,7 @@ Expected: FAIL — `s.attachArgv undefined` / compile error.
 
 In `companion/internal/wsserver/server.go`:
 
-Add imports: `"encoding/base64"`, `"strconv"`, `"sync/atomic"`, and `"github.com/messam/herdr-mobile/companion/internal/pty"`.
+Add imports: `"encoding/base64"`, `"strconv"`, `"sync/atomic"`, and `"github.com/mohamed-essam/herdr-mobile/companion/internal/pty"`.
 
 Add fields to `Server` (after `herdrProt int`):
 ```go

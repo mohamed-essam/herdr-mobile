@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/messam/herdr-mobile/companion/internal/herdr"
-	"github.com/messam/herdr-mobile/companion/internal/state"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/herdr"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
 )
 
 // stubRPC satisfies HerdrRPC without touching herdr, and records action calls.

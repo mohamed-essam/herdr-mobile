@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/messam/herdr-mobile/companion/internal/herdr"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/herdr"
 )
 
 type Pane struct {

@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/messam/herdr-mobile/companion/internal/engine"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/engine"
 )
 
 func defaultSocket() string {

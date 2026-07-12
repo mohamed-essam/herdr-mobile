@@ -98,7 +98,7 @@ func TestToPaneCarriesTerminalID(t *testing.T) {
 }
 ```
 
-(`herdr` is already imported in `store_test.go` via the package under test; if the test file lacks the import, add `"github.com/messam/herdr-mobile/companion/internal/herdr"`.)
+(`herdr` is already imported in `store_test.go` via the package under test; if the test file lacks the import, add `"github.com/mohamed-essam/herdr-mobile/companion/internal/herdr"`.)
 
 - [ ] **Step 6: Run it to confirm it fails**
 

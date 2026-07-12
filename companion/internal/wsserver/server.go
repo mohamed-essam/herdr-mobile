@@ -10,10 +10,10 @@ import (
 	"sync/atomic"
 
 	"github.com/coder/websocket"
-	"github.com/messam/herdr-mobile/companion/internal/herdr"
-	"github.com/messam/herdr-mobile/companion/internal/proto"
-	"github.com/messam/herdr-mobile/companion/internal/pty"
-	"github.com/messam/herdr-mobile/companion/internal/state"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/herdr"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/proto"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/pty"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
 )
 
 type HerdrRPC interface {

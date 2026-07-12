@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/messam/herdr-mobile/companion/internal/herdr"
-	"github.com/messam/herdr-mobile/companion/internal/notify"
-	"github.com/messam/herdr-mobile/companion/internal/proto"
-	"github.com/messam/herdr-mobile/companion/internal/state"
-	"github.com/messam/herdr-mobile/companion/internal/wsserver"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/herdr"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/notify"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/proto"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/wsserver"
 )
 
 type Config struct {
@@ -85,7 +85,12 @@ func (e *Engine) Run(ctx context.Context) error {
 	go e.pollLoop(ctx)
 
 	httpSrv := &http.Server{Addr: e.cfg.ListenAddr, Handler: e.srv.Handler()}
-	go func() { <-ctx.Done(); shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second); defer cancel(); httpSrv.Shutdown(shutdownCtx) }()
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		httpSrv.Shutdown(shutdownCtx)
+	}()
 	err := httpSrv.ListenAndServe()
 	if err == http.ErrServerClosed {
 		return nil

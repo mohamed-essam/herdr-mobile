@@ -157,7 +157,7 @@ License: (match herdr's license — TODO confirm)
 
 ```bash
 cd /home/messam/work/personal/herdr-mobile/companion
-go mod init github.com/messam/herdr-mobile/companion
+go mod init github.com/mohamed-essam/herdr-mobile/companion
 go mod edit -go=1.22
 ```
 
@@ -742,7 +742,7 @@ package state
 import (
 	"testing"
 
-	"github.com/messam/herdr-mobile/companion/internal/herdr"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/herdr"
 )
 
 func infos(p ...herdr.PaneInfo) []herdr.PaneInfo { return p }
@@ -791,7 +791,7 @@ Expected: FAIL — undefined `NewStore`.
 ```go
 package state
 
-import "github.com/messam/herdr-mobile/companion/internal/herdr"
+import "github.com/mohamed-essam/herdr-mobile/companion/internal/herdr"
 
 type Pane struct {
 	PaneID      string `json:"paneId"`
@@ -902,7 +902,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/messam/herdr-mobile/companion/internal/state"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
 )
 
 func TestShouldNotifyBlocked(t *testing.T) {
@@ -964,7 +964,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/messam/herdr-mobile/companion/internal/state"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
 )
 
 type Push struct {
@@ -1061,7 +1061,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/messam/herdr-mobile/companion/internal/state"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
 )
 
 func TestParseClientMsg(t *testing.T) {
@@ -1110,7 +1110,7 @@ package proto
 import (
 	"encoding/json"
 
-	"github.com/messam/herdr-mobile/companion/internal/state"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
 )
 
 type ClientMsg struct {
@@ -1226,9 +1226,9 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/messam/herdr-mobile/companion/internal/herdr"
-	"github.com/messam/herdr-mobile/companion/internal/state"
-	"github.com/messam/herdr-mobile/companion/internal/wsserver"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/herdr"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/wsserver"
 )
 
 // wsHarness spins up the server handler on an httptest server and returns a
@@ -1309,8 +1309,8 @@ import (
 	"sync"
 
 	"github.com/coder/websocket"
-	"github.com/messam/herdr-mobile/companion/internal/proto"
-	"github.com/messam/herdr-mobile/companion/internal/state"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/proto"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
 )
 
 type HerdrRPC interface {
@@ -1467,11 +1467,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/messam/herdr-mobile/companion/internal/herdr"
-	"github.com/messam/herdr-mobile/companion/internal/notify"
-	"github.com/messam/herdr-mobile/companion/internal/proto"
-	"github.com/messam/herdr-mobile/companion/internal/state"
-	"github.com/messam/herdr-mobile/companion/internal/wsserver"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/herdr"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/notify"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/proto"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/wsserver"
 )
 
 type Config struct {
@@ -1699,7 +1699,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/messam/herdr-mobile/companion/internal/engine"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/engine"
 )
 
 func defaultSocket() string {

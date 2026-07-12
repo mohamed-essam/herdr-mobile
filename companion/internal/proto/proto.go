@@ -3,7 +3,7 @@ package proto
 import (
 	"encoding/json"
 
-	"github.com/messam/herdr-mobile/companion/internal/state"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
 )
 
 type ClientMsg struct {

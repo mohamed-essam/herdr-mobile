@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/messam/herdr-mobile/companion/internal/herdr"
-	"github.com/messam/herdr-mobile/companion/internal/state"
-	"github.com/messam/herdr-mobile/companion/internal/wsserver"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/herdr"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/wsserver"
 )
 
 // wsHarness spins up the server handler on an httptest server and returns a

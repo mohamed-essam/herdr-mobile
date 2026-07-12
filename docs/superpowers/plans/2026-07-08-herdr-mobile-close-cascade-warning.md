@@ -6,7 +6,7 @@
 
 **Architecture:** On workspace-close tap, the app sends a new `close_impact` request. The companion runs herdr `worktree.list` for that workspace's repo, applies herdr's own cascade rule against the worktree entries + the workspace snapshot, and replies with the labeled siblings. The confirm dialog appends an "Also closes …" line. On any error/timeout the app falls back to the current confirm.
 
-**Tech Stack:** Go 1.23 companion (`companion/`, module `github.com/messam/herdr-mobile/companion`); Kotlin/Compose app (`app/`); NDJSON over Unix socket to herdr; JSON over WebSocket to the app.
+**Tech Stack:** Go 1.23 companion (`companion/`, module `github.com/mohamed-essam/herdr-mobile/companion`); Kotlin/Compose app (`app/`); NDJSON over Unix socket to herdr; JSON over WebSocket to the app.
 
 ## Global Constraints
 
@@ -257,7 +257,7 @@ Expected: compile error — `computeAlsoCloses` and the `herdr` import don't exi
 In `companion/internal/wsserver/server.go`, add the `herdr` import to the import block (after the `pty` import, line 14):
 
 ```go
-	"github.com/messam/herdr-mobile/companion/internal/herdr"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/herdr"
 ```
 
 Add to the `HerdrRPC` interface (after `ListAgentNames`, line 34):
@@ -354,7 +354,7 @@ Add a `worktrees` field to the `stubRPC` struct (after `failOn`):
 Add the `herdr` import to `server_test.go`'s import block:
 
 ```go
-	"github.com/messam/herdr-mobile/companion/internal/herdr"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/herdr"
 ```
 
 In `companion/internal/engine/engine_test.go`, add to `fakeRPC` (after `ListAgentNames`, line 102):
@@ -363,7 +363,7 @@ In `companion/internal/engine/engine_test.go`, add to `fakeRPC` (after `ListAgen
 func (fakeRPC) ListWorktrees(context.Context, string) ([]herdr.WorktreeEntry, error) { return nil, nil }
 ```
 
-Ensure `engine_test.go` imports `herdr` (it already imports the herdr package for `herdr.Event`; if not, add `"github.com/messam/herdr-mobile/companion/internal/herdr"`).
+Ensure `engine_test.go` imports `herdr` (it already imports the herdr package for `herdr.Event`; if not, add `"github.com/mohamed-essam/herdr-mobile/companion/internal/herdr"`).
 
 - [ ] **Step 6: Write the failing handler round-trip test**
 

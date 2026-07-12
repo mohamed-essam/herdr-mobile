@@ -1,4 +1,4 @@
-module github.com/messam/herdr-mobile/companion
+module github.com/mohamed-essam/herdr-mobile/companion
 
 go 1.23
 
