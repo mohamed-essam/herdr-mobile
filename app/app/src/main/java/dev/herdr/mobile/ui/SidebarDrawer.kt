@@ -15,8 +15,13 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -298,15 +303,48 @@ fun RowActionSheet(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AgentPickerSheet(agents: List<String>, onPick: (String) -> Unit, onOther: () -> Unit, onDismiss: () -> Unit) {
+fun AgentPickerSheet(
+    agents: List<String>, recent: List<String>,
+    onPick: (String) -> Unit, onOther: () -> Unit, onDismiss: () -> Unit,
+) {
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+        var query by rememberSaveable { mutableStateOf("") }
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding()) {
             Text("New agent", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
-            agents.forEach { name -> SheetItem(name, { onPick(name) }) }
+            OutlinedTextField(
+                value = query, onValueChange = { query = it }, singleLine = true,
+                placeholder = { Text("search agents") }, shape = MaterialTheme.shapes.small,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
+            )
+            val recentShown = if (query.isBlank()) recent.filter { it in agents } else emptyList()
+            if (recentShown.isNotEmpty()) {
+                GroupLabel("recent")
+                recentShown.forEach { AgentItem(it) { onPick(it) } }
+                GroupLabel("all")
+            }
+            filterAgents(agents, query).forEach { AgentItem(it) { onPick(it) } }
             SheetItem("Other…", onOther, color = MaterialTheme.colorScheme.primary)
         }
     }
+}
+
+@Composable
+private fun AgentItem(name: String, onClick: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 10.dp),
+    ) {
+        Text(name, style = MaterialTheme.typography.bodyLarge)
+        describeAgent(name)?.let {
+            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun GroupLabel(text: String) {
+    Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 20.dp, top = 10.dp, bottom = 2.dp))
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
