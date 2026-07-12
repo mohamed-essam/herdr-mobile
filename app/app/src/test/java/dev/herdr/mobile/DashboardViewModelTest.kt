@@ -18,7 +18,7 @@ import org.junit.Test
 class DashboardViewModelTest {
     // Per-test OkHttpClient injected into every CompanionClient so teardown can
     // force-release it. Without this, each method's client keeps its WebSocket
-    // connection + dispatcher threads alive after server.shutdown(); across the
+    // connection + dispatcher threads alive after server.shutdownQuietly(); across the
     // full suite those leftovers starve later WS round-trips past their 3s
     // withTimeout deadlines (a cross-test flake — every method passes in
     // isolation). Mirrors the fix already applied to CompanionClientTest.
@@ -54,7 +54,7 @@ class DashboardViewModelTest {
         assertEquals("blocked", vm.panes.value.first().agentStatus)
         val text = client.readPane("w6:p1")
         assertEquals("Proceed? (y/n)", text)
-        server.shutdown()
+        server.shutdownQuietly()
     }
 
     @Test fun toggleExpandedFlipsCollapsedMembership() {
@@ -126,7 +126,7 @@ class DashboardViewModelTest {
         assertEquals("cannot close", errors.first())
 
         job.cancel()
-        server.shutdown()
+        server.shutdownQuietly()
     }
 
     @Test fun openTerminalTargetsTerminalIdButTracksPaneId() = runBlocking {
@@ -154,7 +154,7 @@ class DashboardViewModelTest {
         assertTrue(seenFrames.first().contains("\"target\":\"term_abc\""))
         assertEquals("w7:p2", vm.lastOpenedPaneId.value)
 
-        server.shutdown()
+        server.shutdownQuietly()
     }
 
     @Test fun createNodeEmitsAutoOpenAndMoveSurfacesErrors() = runBlocking {
@@ -197,6 +197,6 @@ class DashboardViewModelTest {
         withTimeout(3000) { while (vm.agents.value.isEmpty()) delay(20) }
         assertEquals(listOf("claude", "codex"), vm.agents.value)
 
-        j1.cancel(); j2.cancel(); server.shutdown()
+        j1.cancel(); j2.cancel(); server.shutdownQuietly()
     }
 }

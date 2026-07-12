@@ -32,7 +32,7 @@ class CompanionClientTest {
         http.dispatcher.cancelAll()
         http.dispatcher.executorService.shutdown()
         http.connectionPool.evictAll()
-        if (::server.isInitialized) server.shutdown()
+        if (::server.isInitialized) server.shutdownQuietly()
     }
 
     @Test fun receivesWelcomeAndPanes() = runBlocking {
