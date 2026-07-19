@@ -108,7 +108,7 @@ jobs:
         run: ls -R dist
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           body_path: RELEASE_NOTES.md
           fail_on_unmatched_files: true
