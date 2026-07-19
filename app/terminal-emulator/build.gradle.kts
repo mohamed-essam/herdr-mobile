@@ -11,4 +11,4 @@ android {
     testOptions { unitTests.isReturnDefaultValues = true }
 }
 
-dependencies { implementation("androidx.annotation:annotation:1.9.0") }
+dependencies { implementation("androidx.annotation:annotation:1.10.0") }
