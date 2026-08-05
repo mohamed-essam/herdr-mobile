@@ -40,6 +40,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.doOnLayout
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.termux.terminal.RemoteTerminalSession
 import com.termux.terminal.TerminalSessionClient
 import com.termux.terminal.TerminalSession
@@ -63,6 +66,15 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
     var takenOver by remember { mutableStateOf(false) }
     var attaching by remember { mutableStateOf(false) }
     var exit by remember { mutableStateOf<ExitCopy?>(null) }
+    // An attach makes herdr resize-lock the pane to this phone's geometry on the
+    // desktop, so we must not hold one for a screen nobody is looking at. Track
+    // foreground state and release the attach whenever the app is backgrounded:
+    // otherwise a dozing phone's socket flaps and the (re)attach effect below
+    // opens a fresh attach per reconnect, jolting the pane on the desktop each
+    // time. `releasing` marks that teardown as intentional so the exit overlay
+    // (which means "the pane went away") is not shown for it.
+    var foreground by remember { mutableStateOf(true) }
+    var releasing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val mods = remember { ModifierKeys() }
     val rootView = LocalView.current
@@ -85,11 +97,36 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
             val rows = emu?.mRows ?: 24
             status = "connecting…"
             runCatching { vm.openTerminal(pane, cols, rows) }
-                .onSuccess { termId = it; status = "connected"; takenOver = false }
+                .onSuccess { id ->
+                    // The app can reach the background while this attach is in
+                    // flight; adopting it then would strand a resize-lock on the
+                    // desktop pane with nobody watching. Hand it straight back.
+                    if (foreground) {
+                        termId = id; status = "connected"; takenOver = false
+                    } else {
+                        releasing = true
+                        vm.closeTerminal(id)
+                    }
+                }
                 .onFailure { status = "failed: ${it.message}" }
         } finally {
             attaching = false
         }
+    }
+
+    // Mirror the host lifecycle. ON_START/ON_STOP (not RESUME/PAUSE) is the right
+    // boundary: a partially covered screen is still visible and worth keeping live.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> foreground = true
+                Lifecycle.Event.ON_STOP -> foreground = false
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     // Feed incoming term_data for the ACTIVE termId into the emulator; react to exit.
@@ -102,7 +139,7 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
                     val bytes = Base64.decode(f.data, Base64.NO_WRAP)
                     session?.feed(bytes, bytes.size)
                 }
-                is ServerFrame.TermExit -> if (f.termId == id) {
+                is ServerFrame.TermExit -> if (f.termId == id && !releasing) {
                     val copy = terminalExitCopy(f.reason, f.code)
                     exit = copy
                     status = copy.title
@@ -114,13 +151,34 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
         }
     }
 
+    // Drop the attach on the way to the background and take it again on return.
+    // Holding it while backgrounded is pure cost: the desktop pane stays clamped
+    // to this phone's geometry, and every socket flap re-attaches for a screen
+    // that isn't on. Re-attaching on return is already the established behaviour
+    // after a WS drop, so nothing is lost that was not lost before.
+    LaunchedEffect(foreground) {
+        if (foreground) {
+            releasing = false
+            return@LaunchedEffect
+        }
+        val id = termId ?: return@LaunchedEffect
+        releasing = true
+        termId = null
+        // Keep the status honest: "connected" must not outlive the attach, or the
+        // reconnect scrim stays hidden over a screen that is no longer live.
+        status = "paused"
+        vm.closeTerminal(id)
+    }
+
     // (Re)attach whenever the WS is connected and the emulator exists. On a
     // mid-session WS drop the companion tears down our PTY session (closeAll),
     // so the retained termId is dead: clear it and show a reconnecting state.
     // CompanionClient auto-reconnects; when it does, open a FRESH attach
     // (scrollback from before the drop is not restored). Gating on emulatorReady
     // preserves the no-byte-drop guarantee (feed() drops bytes with no emulator).
-    LaunchedEffect(connected, emulatorReady) {
+    // Gating on foreground keeps a backgrounded phone from re-attaching forever.
+    LaunchedEffect(connected, emulatorReady, foreground) {
+        if (!foreground) return@LaunchedEffect
         if (!connected) {
             if (termId != null) termId = null
             if (emulatorReady) status = "reconnecting…"

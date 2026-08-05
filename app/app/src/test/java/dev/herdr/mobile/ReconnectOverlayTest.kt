@@ -16,5 +16,7 @@ class ReconnectOverlayTest {
         assertTrue(showReconnectOverlay(emulatorReady = true, takenOver = false, status = "reconnecting…"))
         // connecting / re-attaching -> scrim
         assertTrue(showReconnectOverlay(emulatorReady = true, takenOver = false, status = "connecting…"))
+        // released on the way to the background -> scrim, never a stale live screen
+        assertTrue(showReconnectOverlay(emulatorReady = true, takenOver = false, status = "paused"))
     }
 }
