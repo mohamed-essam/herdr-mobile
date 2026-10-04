@@ -236,3 +236,29 @@ immediately, with the error text.
 Permission/approval cards, interrupting a running turn, slash-command UI,
 streaming partial text (`turn.step`), images, subagent transcripts, persisting
 chat history in the companion across restarts, non-Claude agents.
+
+## v2 candidates
+
+Read from the Claude Code 2.1.289 mod API types only. None of this has been
+tried against a running session.
+
+- **Subagents (fully visible).** Every subagent row passes through the same
+  `session.append` hook with an `agentId`; v1 drops them. `$.agent.list()` lists
+  the live agent loops, `$.session.messages({ agentId })` reads one subagent's
+  history, and `turn.step` / `turn.complete` carry `agentId` too. Show each
+  subagent as a nested, collapsible thread under the `Agent` tool card that
+  started it.
+- **Workflows (partly visible).** A workflow's agents carry an `agentId` on
+  events, so their messages arrive like subagents'. They are deliberately left
+  out of `$.agent.list()`, so there is no roster: group them under the
+  `Workflow` tool card as their events arrive.
+- **Background shells and monitors (status, probably not output).** Background
+  tasks are typed (`shell`, `subagent`, `monitor`, `workflow`) with metadata such
+  as a workflow's name or a monitor's MCP tool. Their completion notices arrive
+  as user-role rows with `origin.kind: 'task-notification'` and
+  `{ id, status, durationMs }`. A "background tasks" strip (running / done /
+  failed, duration) is doable. No hook found that streams a background shell's
+  live output to a mod; reading its output file would need its own spike.
+- **Approvals.** Answer permission prompts from the phone via a `tool.check`
+  hook (`allow` / `deny`). Needs a test of the hook time budget against a slow
+  tap, and a fallback to the terminal's own prompt.
