@@ -37,6 +37,9 @@ import kotlinx.coroutines.delay
 import java.time.ZoneId
 import java.util.Locale
 
+/** Minimum gap between chat_history requests from the paging trigger. */
+private const val OLDER_RETRY_MS = 2_000L
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTerminal: () -> Unit) {
@@ -71,7 +74,16 @@ fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTermina
         }
     }
     val itemCount = rows.size + view.pending.size
-    val lastKey = view.pending.lastOrNull()?.id ?: rows.lastOrNull()?.let { "e${view.epoch}-${it.seq}" }
+    // The newest item, plus what can still grow under it: a tool card's result
+    // and images, a question card's state.
+    val lastKey = view.pending.lastOrNull()?.id ?: rows.lastOrNull()?.let { e ->
+        val grows = when (val ev = e.event) {
+            is ChatEvent.ToolUse -> results[ev.toolUseId]?.let { "r${it.images.size}" }
+            is ChatEvent.Question -> "${ev.toolUseId in view.answering}${ev.toolUseId in view.answered}"
+            else -> null
+        }
+        "e${view.epoch}-${e.seq}/$grows"
+    }
     // Follow new output only while the user is already at the bottom.
     val atBottom by remember {
         derivedStateOf {
@@ -96,8 +108,16 @@ fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTermina
     // Page back once the oldest item is on screen. Items are keyed by seq, so
     // the list keeps the visible item where it is when the page is prepended.
     val atTop by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
+    // A rejected page clears loadingOlder but leaves hasMore set; space the
+    // requests out so sitting at the top doesn't re-request in a tight loop.
+    var lastOlderAt by remember(pane.paneId) { mutableLongStateOf(0L) }
     LaunchedEffect(atTop, entryScrolled, view.hasMore, view.loadingOlder) {
-        if (atTop && entryScrolled && view.hasMore && !view.loadingOlder) vm.loadOlderChat(pane.paneId)
+        if (atTop && entryScrolled && view.hasMore && !view.loadingOlder) {
+            val wait = lastOlderAt + OLDER_RETRY_MS - System.currentTimeMillis()
+            if (wait > 0) delay(wait)
+            lastOlderAt = System.currentTimeMillis()
+            vm.loadOlderChat(pane.paneId)
+        }
     }
 
     val title = pane.cwd.substringAfterLast('/').ifBlank { pane.workspaceId.ifBlank { pane.paneId } }
@@ -106,8 +126,15 @@ fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTermina
         view.state == "working" -> "working ${spinnerFrame()}"
         else -> "idle"
     }
-    val now = System.currentTimeMillis()
-    fun ts(t: Long?) = t?.let { formatTs(it, now, ZoneId.systemDefault(), Locale.getDefault()) }
+    // "Today" moves on a minute ticker, so items only recompose when it ticks.
+    val now by produceState(System.currentTimeMillis()) {
+        while (true) { delay(60_000); value = System.currentTimeMillis() }
+    }
+    val ts: (Long?) -> String? = remember(now) {
+        val zone = ZoneId.systemDefault()
+        val locale = Locale.getDefault()
+        ({ t -> t?.let { formatTs(it, now, zone, locale) } })
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,

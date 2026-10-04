@@ -76,7 +76,8 @@ fun QuestionCard(
     answer: String?,
     onSubmit: (Map<String, String>) -> Unit,
 ) {
-    var inputs by remember(q.toolUseId) { mutableStateOf(List(q.questions.size) { QuestionInput() }) }
+    // Indexed by question, so a repeat with a different count starts fresh.
+    var inputs by remember(q.toolUseId, q.questions.size) { mutableStateOf(List(q.questions.size) { QuestionInput() }) }
     fun update(i: Int, f: (QuestionInput) -> QuestionInput) { inputs = inputs.toMutableList().also { it[i] = f(it[i]) } }
     val active = enabled && !sending && !answered
     // A lone single-select question answers on tap, like the terminal dialog.
@@ -158,21 +159,24 @@ private fun QuestionInputs(
             placeholder = item.placeholder?.let { { Text(it) } },
             suffix = item.unit?.takeIf { it.isNotBlank() }?.let { { Text(it) } },
             supportingText = numberRange(item)?.let { { Text(it) } },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            // Decimal pads often lack a minus sign; take any text when negatives
+            // are allowed (answerFor rejects what doesn't parse).
+            keyboardOptions = KeyboardOptions(
+                keyboardType = if (item.min == null || item.min < 0) KeyboardType.Text else KeyboardType.Decimal,
+            ),
         )
         QuestionKind.Choice -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             for (opt in item.options) {
                 val selected = opt.label in input.selected
                 val toggle = {
                     onPick?.invoke(opt.label)
+                    // Single-select: an option and "Other…" text replace each other.
                     onChange(
-                        input.copy(
-                            selected = when {
-                                !item.multiSelect -> setOf(opt.label)
-                                selected -> input.selected - opt.label
-                                else -> input.selected + opt.label
-                            },
-                        ),
+                        when {
+                            !item.multiSelect -> input.copy(selected = setOf(opt.label), other = "")
+                            selected -> input.copy(selected = input.selected - opt.label)
+                            else -> input.copy(selected = input.selected + opt.label)
+                        },
                     )
                 }
                 Surface(
@@ -199,7 +203,12 @@ private fun QuestionInputs(
             }
             OutlinedTextField(
                 value = input.other,
-                onValueChange = { onChange(input.copy(other = it)) },
+                onValueChange = {
+                    onChange(
+                        if (item.multiSelect || it.isBlank()) input.copy(other = it)
+                        else input.copy(other = it, selected = emptySet()),
+                    )
+                },
                 enabled = enabled,
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = { Text("Other…") },
