@@ -134,7 +134,7 @@ func (h *Hub) SyncResync(paneID, sessionID string, events []json.RawMessage) ([]
 
 func isChatEvent(t string) bool {
 	switch t {
-	case "user_text", "assistant_text", "tool_use", "tool_result":
+	case "user_text", "assistant_text", "tool_use", "tool_result", "task_notice":
 		return true
 	}
 	return false
@@ -158,6 +158,7 @@ func (p *pane) apply(paneID, sessionID string, raw json.RawMessage) bool {
 		}
 		if p.sessionID != "" && p.sessionID != sessionID {
 			p.outbox = nil // queued for the previous session
+			p.setIdle()    // the old session's turn state does not carry over
 		}
 		p.sessionID = sessionID
 		return true
@@ -185,6 +186,15 @@ func (p *pane) apply(paneID, sessionID string, raw json.RawMessage) bool {
 		p.fan(Update{Kind: "event", Epoch: p.epoch, Entry: e})
 	}
 	return false
+}
+
+// setIdle resets a stale turn state (a pending message's timeout is paused
+// while working, so a stuck "working" would pin it forever).
+func (p *pane) setIdle() {
+	if p.state != "idle" {
+		p.state = "idle"
+		p.fan(Update{Kind: "state", Epoch: p.epoch, State: p.state})
+	}
 }
 
 func (p *pane) push(raw json.RawMessage) Entry {
@@ -268,7 +278,8 @@ func (h *Hub) Subscribe(paneID string) (Snapshot, <-chan Update, func()) {
 	return snap, ch, cancel
 }
 
-// Tick expires panes whose mod has not synced within LiveWindow.
+// Tick expires panes whose mod has not synced within LiveWindow and resets
+// their turn state to idle.
 func (h *Hub) Tick() {
 	now := h.now()
 	var dead []string
@@ -277,6 +288,7 @@ func (h *Hub) Tick() {
 		if p.live && now.Sub(p.lastSeen) >= LiveWindow {
 			p.live = false
 			p.outbox = nil // never deliver stale messages to a later session
+			p.setIdle()    // a dead mod is not working
 			dead = append(dead, id)
 		}
 	}
