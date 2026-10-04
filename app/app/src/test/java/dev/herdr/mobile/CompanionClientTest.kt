@@ -108,6 +108,49 @@ class CompanionClientTest {
         assertEquals("ops", result.single().label)
     }
 
+    @Test fun sendAnswerSucceedsAndThrowsTheErrorCode() = runBlocking {
+        server = MockWebServer()
+        server.enqueue(MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                if (!text.contains("\"chat_answer\"")) return
+                val reqId = Regex("\"reqId\":\"([^\"]+)\"").find(text)!!.groupValues[1]
+                if (text.contains("\"toolUseId\":\"ok\"")) webSocket.send("""{"t":"chat_answer_result","reqId":"$reqId","ok":true}""")
+                else webSocket.send("""{"t":"chat_answer_result","reqId":"$reqId","ok":false,"error":"no_question"}""")
+            }
+        }))
+        server.start()
+        client = CompanionClient(http)
+        client.connect(server.url("/").toString().replace("http", "ws"))
+        withTimeout(3000) { client.sendAnswer("p", "ok", mapOf("Q" to "A")) }
+        val err = runCatching { withTimeout(3000) { client.sendAnswer("p", "gone", mapOf("Q" to "A")) } }.exceptionOrNull()
+        assertEquals("no_question", err?.message)
+    }
+
+    @Test fun imageFramesBypassTheReplayedFrameFlow() = runBlocking {
+        server = MockWebServer()
+        server.enqueue(MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                if (!text.contains("\"chat_image\"")) return
+                webSocket.send("""{"t":"chat_image_data","paneId":"p","id":"u#0","mediaType":"image/png","data":"aGk="}""")
+                webSocket.send("""{"t":"welcome"}""")
+            }
+        }))
+        server.start()
+        client = CompanionClient(http)
+        val frames = java.util.concurrent.CopyOnWriteArrayList<ServerFrame>()
+        val images = java.util.concurrent.CopyOnWriteArrayList<ServerFrame>()
+        val j1 = launch(Dispatchers.Default) { client.frames.collect { frames.add(it) } }
+        val j2 = launch(Dispatchers.Default) { client.images.collect { images.add(it) } }
+        client.connect(server.url("/").toString().replace("http", "ws"))
+        withTimeout(3000) { while (!client.connected.value) delay(20) }
+        delay(100) // let both collectors subscribe
+        client.send(dev.herdr.mobile.net.ClientMsg.chatImage("p", "u#0"))
+        withTimeout(3000) { while (frames.none { it is ServerFrame.Welcome } || images.isEmpty()) delay(20) }
+        assertEquals("u#0", (images.single() as ServerFrame.ChatImageData).id)
+        assertTrue(frames.none { it is ServerFrame.ChatImageData })
+        j1.cancel(); j2.cancel()
+    }
+
     @Test fun closeImpactReturnsEmptyOnError() = runBlocking {
         server = MockWebServer()
         server.enqueue(MockResponse().withWebSocketUpgrade(object : WebSocketListener() {

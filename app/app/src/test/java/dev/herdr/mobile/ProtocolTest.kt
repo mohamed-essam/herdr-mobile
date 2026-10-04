@@ -222,4 +222,104 @@ class ProtocolTest {
         assertEquals("idle", (parseServerFrame("""{"t":"chat_state","paneId":"p","state":null}""") as ServerFrame.ChatState).state)
         assertEquals("idle", (parseServerFrame("""{"t":"chat_snapshot","paneId":"p","epoch":1,"state":null,"events":[]}""") as ServerFrame.ChatSnapshot).state)
     }
+
+    // ---- protocol 9 ----
+
+    @Test fun v9FieldsDefaultWhenAbsent() {
+        val f = parseServerFrame("""{"t":"chat_snapshot","paneId":"p","epoch":1,"state":"idle","events":[
+            {"seq":1,"event":{"type":"user_text","uuid":"u1","text":"hi"}},
+            {"seq":2,"event":{"type":"assistant_text","uuid":"a1","text":"yo"}},
+            {"seq":3,"event":{"type":"tool_result","toolUseId":"t1","isError":false,"preview":"ok"}}]}""") as ServerFrame.ChatSnapshot
+        assertFalse(f.hasMore)
+        val u = f.entries[0].event as ChatEvent.UserText
+        assertNull(u.ts)
+        assertEquals(emptyList<String>(), u.images)
+        assertNull((f.entries[1].event as ChatEvent.AssistantText).ts)
+        assertEquals(emptyList<String>(), (f.entries[2].event as ChatEvent.ToolResult).images)
+    }
+
+    @Test fun parsesTimestampsImagesAndHasMore() {
+        val f = parseServerFrame("""{"t":"chat_snapshot","paneId":"p","epoch":1,"state":"idle","hasMore":true,"events":[
+            {"seq":1,"event":{"type":"user_text","uuid":"u1","text":"","ts":1759600000123,"images":["u1#0","u1#1"]}},
+            {"seq":2,"event":{"type":"assistant_text","uuid":"a1","text":"yo","ts":1759600000456}},
+            {"seq":3,"event":{"type":"tool_use","uuid":"a1#1","toolUseId":"t1","tool":"Read","summary":"Read: x.png","ts":5}},
+            {"seq":4,"event":{"type":"tool_result","toolUseId":"t1","isError":false,"preview":"","images":["r#0.0"],"ts":6}},
+            {"seq":5,"event":{"type":"task_notice","uuid":"d#0","status":"completed","summary":"done","ts":7}}]}""") as ServerFrame.ChatSnapshot
+        assertTrue(f.hasMore)
+        assertEquals(ChatEvent.UserText("u1", "", 1759600000123, listOf("u1#0", "u1#1")), f.entries[0].event)
+        assertEquals(ChatEvent.AssistantText("a1", "yo", 1759600000456), f.entries[1].event)
+        assertEquals(ChatEvent.ToolResult("t1", false, "", listOf("r#0.0"), 6), f.entries[3].event)
+        assertEquals(7L, (f.entries[4].event as ChatEvent.TaskNotice).ts)
+    }
+
+    @Test fun parsesQuestionEventKinds() {
+        val e = parseServerFrame("""{"t":"chat_event","paneId":"p","epoch":1,"seq":4,"event":{"type":"question","uuid":"a#2","toolUseId":"tq","ts":9,"questions":[
+            {"question":"Color?","header":"Color","options":[{"label":"Red","description":"warm"},{"label":"Blue"}],"multiSelect":true},
+            {"question":"Name?","header":"Name","kind":"text","options":[],"multiSelect":false,"placeholder":"type","description":"why"},
+            {"question":"How many?","header":"N","kind":"number","options":[],"multiSelect":false,"min":1,"max":10.5,"step":0.5,"unit":"GB"}]}}""") as ServerFrame.ChatEventFrame
+        val q = e.entry!!.event as ChatEvent.Question
+        assertEquals("a#2", q.uuid)
+        assertEquals("tq", q.toolUseId)
+        assertEquals(9L, q.ts)
+        val (c, t, n) = q.questions
+        assertEquals(QuestionKind.Choice, c.kind)
+        assertTrue(c.multiSelect)
+        assertEquals(listOf(QuestionOption("Red", "warm"), QuestionOption("Blue", null)), c.options)
+        assertEquals(QuestionKind.Text, t.kind)
+        assertEquals("type", t.placeholder)
+        assertEquals("why", t.description)
+        assertEquals(QuestionKind.Number, n.kind)
+        assertEquals(1.0, n.min!!, 0.0)
+        assertEquals(10.5, n.max!!, 0.0)
+        assertEquals(0.5, n.step!!, 0.0)
+        assertEquals("GB", n.unit)
+        assertNull(c.min)
+        assertNull(c.unit)
+    }
+
+    @Test fun unknownQuestionKindFallsBackToChoice() {
+        val e = parseServerFrame("""{"t":"chat_event","paneId":"p","epoch":1,"seq":4,"event":{"type":"question","uuid":"u","toolUseId":"tq","questions":[
+            {"question":"Q","header":"H","kind":"slider","options":[{"label":"A"}]}]}}""") as ServerFrame.ChatEventFrame
+        val q = e.entry!!.event as ChatEvent.Question
+        assertNull(q.ts)
+        assertEquals(QuestionKind.Choice, q.questions.single().kind)
+        assertFalse(q.questions.single().multiSelect)
+    }
+
+    @Test fun parsesHistoryPage() {
+        val f = parseServerFrame("""{"t":"chat_history_page","reqId":"h1","paneId":"p","epoch":3,"hasMore":true,"events":[
+            {"seq":7,"event":{"type":"user_text","uuid":"u7","text":"old"}}]}""") as ServerFrame.ChatHistoryPage
+        assertEquals("h1", f.reqId)
+        assertEquals("p", f.paneId)
+        assertEquals(3, f.epoch)
+        assertTrue(f.hasMore)
+        assertFalse(f.stale)
+        assertEquals(listOf(7), f.entries.map { it.seq })
+        val s = parseServerFrame("""{"t":"chat_history_page","reqId":"h2","paneId":"p","epoch":2,"events":[],"hasMore":false,"stale":true}""") as ServerFrame.ChatHistoryPage
+        assertTrue(s.stale)
+        assertFalse(s.hasMore)
+    }
+
+    @Test fun parsesImageDataAndMissing() {
+        val d = parseServerFrame("""{"t":"chat_image_data","paneId":"p","id":"u#0","mediaType":"image/png","data":"aGk="}""") as ServerFrame.ChatImageData
+        assertEquals(ServerFrame.ChatImageData("p", "u#0", "image/png", "aGk=", false), d)
+        val m = parseServerFrame("""{"t":"chat_image_data","paneId":"p","id":"u#1","missing":true}""") as ServerFrame.ChatImageData
+        assertTrue(m.missing)
+        assertNull(m.data)
+    }
+
+    @Test fun parsesAnswerResult() {
+        val ok = parseServerFrame("""{"t":"chat_answer_result","reqId":"q1","ok":true}""") as ServerFrame.ChatAnswerResult
+        assertEquals(ServerFrame.ChatAnswerResult("q1", true, null), ok)
+        val bad = parseServerFrame("""{"t":"chat_answer_result","reqId":"q2","ok":false,"error":"no_question"}""") as ServerFrame.ChatAnswerResult
+        assertEquals("no_question", bad.error)
+    }
+
+    @Test fun v9ClientMessages() {
+        assertEquals("""{"t":"chat_history","reqId":"h1","paneId":"p","epoch":2,"beforeSeq":301,"limit":300}""",
+            ClientMsg.chatHistory("h1", "p", 2, 301, 300))
+        assertEquals("""{"t":"chat_image","paneId":"p","id":"u#0"}""", ClientMsg.chatImage("p", "u#0"))
+        assertEquals("""{"t":"chat_answer","reqId":"q1","paneId":"p","toolUseId":"tq","answers":{"Color?":"Red, Blue","N?":"3"}}""",
+            ClientMsg.chatAnswer("q1", "p", "tq", linkedMapOf("Color?" to "Red, Blue", "N?" to "3")))
+    }
 }

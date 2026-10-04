@@ -18,6 +18,11 @@ class CompanionClient(private val http: OkHttpClient = OkHttpClient()) {
     // the immediate welcome/panes frames (avoids a subscribe-vs-onMessage race).
     private val _frames = MutableSharedFlow<ServerFrame>(replay = 16, extraBufferCapacity = 64)
     val frames: SharedFlow<ServerFrame> = _frames.asSharedFlow()
+    // Image replies (up to ~5 MB each) bypass [frames] so its replay buffer
+    // never pins them. At most MAX_IMAGE_REQUESTS are in flight, so the buffer
+    // never overflows for one collector.
+    private val _images = MutableSharedFlow<ServerFrame.ChatImageData>(extraBufferCapacity = 8)
+    val images: SharedFlow<ServerFrame.ChatImageData> = _images.asSharedFlow()
     private val _connected = MutableStateFlow(false)
     val connected: StateFlow<Boolean> = _connected.asStateFlow()
 
@@ -53,6 +58,10 @@ class CompanionClient(private val http: OkHttpClient = OkHttpClient()) {
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 val frame = parseServerFrame(text)
+                if (frame is ServerFrame.ChatImageData) {
+                    _images.tryEmit(frame)
+                    return
+                }
                 when (frame) {
                     is ServerFrame.PaneRead -> pending.remove(frame.reqId)?.complete(frame)
                     is ServerFrame.Ack -> pending.remove(frame.reqId)?.complete(frame)
@@ -61,6 +70,7 @@ class CompanionClient(private val http: OkHttpClient = OkHttpClient()) {
                     is ServerFrame.TermError -> if (frame.reqId.isNotEmpty()) pending.remove(frame.reqId)?.complete(frame)
                     is ServerFrame.ActionResult -> pending.remove(frame.reqId)?.complete(frame)
                     is ServerFrame.ChatSendResult -> pending.remove(frame.reqId)?.complete(frame)
+                    is ServerFrame.ChatAnswerResult -> pending.remove(frame.reqId)?.complete(frame)
                     is ServerFrame.Created -> pending.remove(frame.reqId)?.complete(frame)
                     is ServerFrame.Agents -> pending.remove(frame.reqId)?.complete(frame)
                     is ServerFrame.CloseImpact -> pending.remove(frame.reqId)?.complete(frame)
@@ -172,6 +182,16 @@ class CompanionClient(private val http: OkHttpClient = OkHttpClient()) {
             is ServerFrame.ChatSendResult -> if (!f.ok) throw RuntimeException(f.error ?: "send failed")
             is ServerFrame.ErrorFrame -> throw RuntimeException(f.message)
             else -> throw RuntimeException("unexpected reply to chat_send")
+        }
+    }
+
+    /** Answers a pending AskUserQuestion; throws with the companion's error code. */
+    suspend fun sendAnswer(paneId: String, toolUseId: String, answers: Map<String, String>) {
+        val reqId = "q${seq.incrementAndGet()}"
+        when (val f = request(reqId, ClientMsg.chatAnswer(reqId, paneId, toolUseId, answers))) {
+            is ServerFrame.ChatAnswerResult -> if (!f.ok) throw RuntimeException(f.error ?: "answer failed")
+            is ServerFrame.ErrorFrame -> throw RuntimeException(f.message)
+            else -> throw RuntimeException("unexpected reply to chat_answer")
         }
     }
 

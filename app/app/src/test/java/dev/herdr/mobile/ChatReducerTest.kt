@@ -239,4 +239,154 @@ class ChatReducerTest {
         assertEquals(4, entryScrollTarget(loaded = true, itemCount = 5, done = false))
         assertNull(entryScrollTarget(loaded = true, itemCount = 5, done = true))
     }
+
+    // ---- protocol 9: history paging ----
+
+    private fun page(epoch: Int, vararg e: ChatEntry, hasMore: Boolean = false, stale: Boolean = false) =
+        ServerFrame.ChatHistoryPage("h", "p", epoch, e.toList(), hasMore, stale)
+
+    @Test fun snapshotCarriesHasMore() {
+        val v = onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", listOf(user(5, "a")), hasMore = true))
+        assertTrue(v.hasMore)
+        assertFalse(onFrame(v, snap(1, user(5, "a"))).hasMore)
+    }
+
+    @Test fun historyPagePrependsOlderEntriesWithDedup() {
+        var v = onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", listOf(user(4, "d"), reply(5, "e")), hasMore = true))
+        v = ChatReducer.startLoadingOlder(v)
+        assertTrue(v.loadingOlder)
+        v = onFrame(v, page(1, user(2, "b"), reply(3, "c"), user(4, "dup"), reply(5, "dup"), hasMore = true))
+        assertEquals(listOf(2, 3, 4, 5), v.entries.map { it.seq })
+        assertEquals("d", (v.entries[2].event as ChatEvent.UserText).text)
+        assertEquals(5, v.lastSeq)
+        assertTrue(v.hasMore)
+        assertFalse(v.loadingOlder)
+        v = onFrame(ChatReducer.startLoadingOlder(v), page(1, user(1, "a"), hasMore = false))
+        assertEquals(listOf(1, 2, 3, 4, 5), v.entries.map { it.seq })
+        assertFalse(v.hasMore)
+        assertFalse(v.loadingOlder)
+    }
+
+    @Test fun staleOrOtherEpochPageOnlyClearsLoadingOlder() {
+        val base = ChatReducer.startLoadingOlder(
+            onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 2, "idle", listOf(user(4, "d")), hasMore = true)))
+        val other = onFrame(base, page(1, user(1, "x"), hasMore = false))
+        assertEquals(listOf(4), other.entries.map { it.seq })
+        assertTrue(other.hasMore)
+        assertFalse(other.loadingOlder)
+        val stale = onFrame(base, page(2, hasMore = false, stale = true))
+        assertEquals(listOf(4), stale.entries.map { it.seq })
+        assertTrue(stale.hasMore)
+        assertFalse(stale.loadingOlder)
+    }
+
+    @Test fun pageBeforeSnapshotIsIgnored() {
+        val v = onFrame(ChatView(), page(1, user(1, "x"), hasMore = true))
+        assertFalse(v.loaded)
+        assertTrue(v.entries.isEmpty())
+        assertFalse(v.hasMore)
+    }
+
+    @Test fun snapshotClearsLoadingOlder() {
+        val v = ChatReducer.startLoadingOlder(onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", listOf(user(4, "d")), hasMore = true)))
+        assertFalse(onFrame(v, snap(2, user(1, "n"))).loadingOlder)
+    }
+
+    @Test fun historyPageDoesNotConfirmPending() {
+        var v = onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", listOf(user(4, "d")), hasMore = true))
+        v = ChatReducer.addPending(v, "p1", "yes", 0)
+        v = onFrame(v, page(1, user(3, "yes")))
+        assertEquals(listOf("p1"), v.pending.map { it.id })
+    }
+
+    // ---- protocol 9: questions ----
+
+    private val qItem = QuestionItem("Color?", "Color", QuestionKind.Choice, listOf(QuestionOption("Red", null)), false)
+    private fun question(seq: Int, toolUseId: String) = ChatEntry(seq, ChatEvent.Question("q$seq", toolUseId, listOf(qItem), null))
+    private fun result(seq: Int, toolUseId: String) = ChatEntry(seq, ChatEvent.ToolResult(toolUseId, false, "Red"))
+
+    @Test fun liveToolResultMarksQuestionAnswered() {
+        var v = onFrame(ChatView(), snap(1, user(1, "a")))
+        v = onFrame(v, ev(1, question(2, "tq")))
+        assertEquals(emptySet<String>(), v.answered)
+        v = ChatReducer.markAnswering(v, "tq")
+        assertEquals(setOf("tq"), v.answering)
+        v = onFrame(v, ev(1, result(3, "other")))
+        assertEquals(emptySet<String>(), v.answered)
+        v = onFrame(v, ev(1, result(4, "tq")))
+        assertEquals(setOf("tq"), v.answered)
+        assertEquals(emptySet<String>(), v.answering)
+    }
+
+    @Test fun snapshotAndPageComputeAnswered() {
+        var v = onFrame(ChatView(), snap(1, question(1, "t1"), result(2, "t1"), question(3, "t2")))
+        assertEquals(setOf("t1"), v.answered)
+        v = onFrame(v, ServerFrame.ChatSnapshot("p", 2, "idle", listOf(result(10, "t0"), question(11, "t3")), hasMore = true))
+        assertEquals(emptySet<String>(), v.answered)
+        v = onFrame(v, page(2, question(9, "t0")))
+        assertEquals(setOf("t0"), v.answered)
+    }
+
+    @Test fun repeatedQuestionIsKeptOnce() {
+        var v = onFrame(ChatView(), snap(1, question(1, "tq")))
+        v = onFrame(v, ev(1, question(2, "tq")))
+        assertEquals(1, v.entries.count { it.event is ChatEvent.Question })
+        assertEquals(2, v.lastSeq)
+        v = onFrame(v, snap(1, question(1, "tq"), user(2, "x"), question(3, "tq")))
+        assertEquals(listOf(1, 2), v.entries.map { it.seq })
+        v = onFrame(v, ServerFrame.ChatSnapshot("p", 2, "idle", listOf(question(5, "tz")), hasMore = true))
+        v = onFrame(v, page(2, question(4, "tz")))
+        assertEquals(listOf(4), v.entries.map { it.seq })
+    }
+
+    @Test fun clearAnsweringDropsTheMark() {
+        var v = ChatReducer.markAnswering(onFrame(ChatView(), snap(1)), "tq")
+        v = ChatReducer.clearAnswering(v, "tq")
+        assertEquals(emptySet<String>(), v.answering)
+    }
+
+    @Test fun answerErrorLabels() {
+        assertEquals("Claude isn't connected", answerErrorLabel("no_mod"))
+        assertEquals("the question is no longer waiting", answerErrorLabel("no_question"))
+        assertEquals("empty answer", answerErrorLabel("empty"))
+        assertEquals("answer failed: timed out", answerErrorLabel("timed out"))
+        assertEquals("answer failed: error", answerErrorLabel(null))
+    }
+
+    @Test fun newEpochSnapshotDropsAnswering() {
+        var v = ChatReducer.markAnswering(onFrame(ChatView(), snap(1, question(1, "tq"))), "tq")
+        assertEquals(setOf("tq"), onFrame(v, snap(1, question(1, "tq"))).answering)
+        v = onFrame(v, snap(2, question(1, "tq")))
+        assertEquals(emptySet<String>(), v.answering)
+    }
+
+    @Test fun trimmingLiveEntriesSetsHasMore() {
+        var v = onFrame(ChatView(), snap(1))
+        for (i in 1..MAX_ENTRIES) v = onFrame(v, ev(1, reply(i, "r")))
+        assertFalse(v.hasMore)
+        v = onFrame(v, ev(1, reply(MAX_ENTRIES + 1, "r")))
+        assertTrue(v.hasMore)
+    }
+
+    @Test fun multiSelectAnswerJoinsLabels() {
+        assertEquals("Red, Blue", joinAnswerLabels(listOf("Red", "Blue")))
+        assertEquals("Red", joinAnswerLabels(listOf("Red")))
+    }
+
+    // ---- timestamps ----
+
+    @Test fun formatTsTodayVsEarlierDay() {
+        val zone = java.time.ZoneId.of("Africa/Cairo")
+        val loc = java.util.Locale.US
+        fun at(s: String) = java.time.LocalDateTime.parse(s).atZone(zone).toInstant().toEpochMilli()
+        val now = at("2026-10-04T15:30:00")
+        assertEquals("09:05", formatTs(at("2026-10-04T09:05:00"), now, zone, loc))
+        assertEquals("00:00", formatTs(at("2026-10-04T00:00:00"), now, zone, loc))
+        assertEquals("Oct 3 23:59", formatTs(at("2026-10-03T23:59:00"), now, zone, loc))
+        assertEquals("Sep 12 07:45", formatTs(at("2026-09-12T07:45:00"), now, zone, loc))
+        // Just past midnight: an hour ago is yesterday.
+        val afterMidnight = at("2026-10-05T00:10:00")
+        assertEquals("Oct 4 23:10", formatTs(at("2026-10-04T23:10:00"), afterMidnight, zone, loc))
+        assertEquals("00:05", formatTs(at("2026-10-05T00:05:00"), afterMidnight, zone, loc))
+    }
 }

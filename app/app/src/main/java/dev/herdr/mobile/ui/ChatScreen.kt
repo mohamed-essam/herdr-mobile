@@ -129,6 +129,7 @@ fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTermina
                             ) { expanded = if (ev.toolUseId in expanded) expanded - ev.toolUseId else expanded + ev.toolUseId }
                             is ChatEvent.TaskNotice -> TaskNoticeRow(ev)
                             is ChatEvent.ToolResult -> {}
+                            is ChatEvent.Question -> {} // question card: Task 7
                         }
                     }
                     items(view.pending, key = { it.id }) { p ->

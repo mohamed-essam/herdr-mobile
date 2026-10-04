@@ -3,6 +3,10 @@ package dev.herdr.mobile.data
 import dev.herdr.mobile.net.ChatEntry
 import dev.herdr.mobile.net.ChatEvent
 import dev.herdr.mobile.net.ServerFrame
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 enum class PendingStatus { Queued, Failed, NotDelivered }
 
@@ -25,10 +29,26 @@ data class ChatView(
     val idleSince: Long = 0L,
     /** A seq gap was seen in this epoch; events wait for the fresh snapshot. */
     val gap: Boolean = false,
+    /** The companion has events older than [entries]' first one. */
+    val hasMore: Boolean = false,
+    /** A chat_history request is in flight. */
+    val loadingOlder: Boolean = false,
+    /** toolUseIds of shown questions whose tool_result arrived (the card collapses). */
+    val answered: Set<String> = emptySet(),
+    /** toolUseIds with an answer sent from the phone and no tool_result yet. */
+    val answering: Set<String> = emptySet(),
 )
 
 const val PENDING_TIMEOUT_MS = 120_000L
-const val MAX_ENTRIES = 500
+/** Matches the companion's ring, so paging back through it is never trimmed away. */
+const val MAX_ENTRIES = 5000
+const val HISTORY_PAGE_LIMIT = 300
+
+sealed interface ImageState {
+    data object Loading : ImageState
+    class Ready(val bytes: ByteArray) : ImageState
+    data object Missing : ImageState
+}
 
 object ChatReducer {
     /**
@@ -39,14 +59,24 @@ object ChatReducer {
      * ignored until a snapshot heals the view. The caller re-opens the pane.
      */
     fun onFrame(v: ChatView, f: ServerFrame, now: Long): ChatView = when (f) {
-        is ServerFrame.ChatSnapshot -> withState(v, f.state, now).copy(
-            loaded = true,
-            epoch = f.epoch,
-            entries = f.entries.takeLast(MAX_ENTRIES),
-            lastSeq = f.entries.maxOfOrNull { it.seq } ?: 0,
-            pending = confirm(v.pending, snapshotCandidates(v, f)),
-            gap = false,
-        )
+        is ServerFrame.ChatSnapshot -> {
+            val all = dedupQuestions(f.entries)
+            val entries = all.takeLast(MAX_ENTRIES)
+            val answered = answeredIds(entries)
+            withState(v, f.state, now).copy(
+                loaded = true,
+                epoch = f.epoch,
+                entries = entries,
+                lastSeq = f.entries.maxOfOrNull { it.seq } ?: 0,
+                pending = confirm(v.pending, snapshotCandidates(v, f)),
+                gap = false,
+                hasMore = f.hasMore || entries.size < all.size,
+                loadingOlder = false,
+                answered = answered,
+                // A new epoch (companion restart / new session) dropped any held answer.
+                answering = if (v.loaded && f.epoch == v.epoch) v.answering - answeredResults(entries) else emptySet(),
+            )
+        }
         is ServerFrame.ChatEventFrame -> {
             val e = f.entry
             when {
@@ -55,15 +85,69 @@ object ChatReducer {
                 f.epoch > v.epoch -> v.copy(gap = true)
                 f.epoch != v.epoch || e == null || e.seq <= v.lastSeq -> v
                 e.seq != v.lastSeq + 1 -> v.copy(gap = true)
-                else -> v.copy(
-                    entries = (v.entries + e).takeLast(MAX_ENTRIES),
-                    lastSeq = e.seq,
-                    pending = confirm(v.pending, listOfNotNull(userText(e))),
+                else -> append(v, e)
+            }
+        }
+        is ServerFrame.ChatHistoryPage -> when {
+            !v.loaded -> v
+            f.stale || f.epoch != v.epoch -> v.copy(loadingOlder = false)
+            else -> {
+                val first = v.entries.firstOrNull()?.seq ?: (v.lastSeq + 1)
+                val entries = dedupQuestions(f.entries.filter { it.seq < first }.sortedBy { it.seq } + v.entries)
+                v.copy(
+                    entries = entries,
+                    hasMore = f.hasMore,
+                    loadingOlder = false,
+                    answered = answeredIds(entries),
+                    answering = v.answering - answeredResults(entries),
                 )
             }
         }
         is ServerFrame.ChatState -> withState(v, f.state, now)
         else -> v
+    }
+
+    private fun append(v: ChatView, e: ChatEntry): ChatView {
+        val ev = e.event
+        // A question repeated after a resync is shown once, where it first appeared.
+        if (ev is ChatEvent.Question && v.entries.any { (it.event as? ChatEvent.Question)?.toolUseId == ev.toolUseId })
+            return v.copy(lastSeq = e.seq)
+        val all = v.entries + e
+        val entries = all.takeLast(MAX_ENTRIES)
+        val id = when (ev) {
+            is ChatEvent.ToolResult -> ev.toolUseId.takeIf { id -> entries.any { (it.event as? ChatEvent.Question)?.toolUseId == id } }
+            is ChatEvent.Question -> ev.toolUseId.takeIf { id -> entries.any { (it.event as? ChatEvent.ToolResult)?.toolUseId == id } }
+            else -> null
+        }
+        return v.copy(
+            entries = entries,
+            lastSeq = e.seq,
+            pending = confirm(v.pending, listOfNotNull(userText(e))),
+            hasMore = v.hasMore || entries.size < all.size,
+            answered = if (id != null) v.answered + id else v.answered,
+            answering = if (ev is ChatEvent.ToolResult) v.answering - ev.toolUseId else v.answering,
+        )
+    }
+
+    fun startLoadingOlder(v: ChatView): ChatView = v.copy(loadingOlder = true)
+
+    fun markAnswering(v: ChatView, toolUseId: String): ChatView = v.copy(answering = v.answering + toolUseId)
+
+    fun clearAnswering(v: ChatView, toolUseId: String): ChatView = v.copy(answering = v.answering - toolUseId)
+
+    private fun dedupQuestions(entries: List<ChatEntry>): List<ChatEntry> {
+        val seen = HashSet<String>()
+        return entries.filter { e -> (e.event as? ChatEvent.Question)?.let { seen.add(it.toolUseId) } ?: true }
+    }
+
+    private fun answeredResults(entries: List<ChatEntry>): Set<String> =
+        entries.mapNotNullTo(HashSet()) { (it.event as? ChatEvent.ToolResult)?.toolUseId }
+
+    private fun answeredIds(entries: List<ChatEntry>): Set<String> {
+        val results = answeredResults(entries)
+        return entries.mapNotNullTo(HashSet()) { e ->
+            (e.event as? ChatEvent.Question)?.toolUseId?.takeIf { it in results }
+        }
     }
 
     private fun withState(v: ChatView, state: String, now: Long): ChatView =
@@ -139,3 +223,20 @@ fun taskNoticeLabel(n: ChatEvent.TaskNotice): String = when {
 }
 
 fun taskNoticeIsError(n: ChatEvent.TaskNotice): Boolean = n.status == "failed" || n.status == "killed"
+
+/** A multi-select answer: the chosen labels joined the way AskUserQuestion expects. */
+fun joinAnswerLabels(labels: List<String>): String = labels.joinToString(", ")
+
+fun answerErrorLabel(error: String?): String = when (error) {
+    "no_mod" -> "Claude isn't connected"
+    "no_question" -> "the question is no longer waiting"
+    "empty" -> "empty answer"
+    else -> "answer failed: ${error ?: "error"}"
+}
+
+/** `HH:mm` when [ts] falls on [now]'s day in [zone], `MMM d HH:mm` otherwise. */
+fun formatTs(ts: Long, now: Long, zone: ZoneId, locale: Locale): String {
+    val t = Instant.ofEpochMilli(ts).atZone(zone)
+    val sameDay = t.toLocalDate() == Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+    return DateTimeFormatter.ofPattern(if (sameDay) "HH:mm" else "MMM d HH:mm", locale).format(t)
+}

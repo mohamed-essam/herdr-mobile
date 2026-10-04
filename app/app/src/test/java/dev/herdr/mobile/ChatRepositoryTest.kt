@@ -4,6 +4,8 @@ import dev.herdr.mobile.data.*
 import dev.herdr.mobile.net.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.*
@@ -130,5 +132,206 @@ class ChatRepositoryTest {
         t += 1
         repo.expirePending()
         assertEquals(PendingStatus.NotDelivered, repo.view("p").value.pending.single().status)
+    }
+
+    // ---- protocol 9: history paging ----
+
+    private fun snapMore(epoch: Int, hasMore: Boolean, vararg seqs: Int) = ServerFrame.ChatSnapshot(
+        "p", epoch, "idle", seqs.map { ChatEntry(it, ChatEvent.AssistantText("a$it", "r")) }, hasMore)
+
+    private fun historyMsgs(sent: List<String>) = sent.filter { it.contains("\"chat_history\"") }
+
+    @Test fun loadOlderSendsOneRequestWhileInFlight() {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> })
+        repo.loadOlder("p") // not loaded yet
+        assertEquals(emptyList<String>(), historyMsgs(sent))
+        repo.onFrame(snapMore(3, true, 301, 302))
+        repo.loadOlder("p")
+        repo.loadOlder("p")
+        val reqs = historyMsgs(sent)
+        assertEquals(1, reqs.size)
+        val o = kotlinx.serialization.json.Json.parseToJsonElement(reqs[0]) as kotlinx.serialization.json.JsonObject
+        val reqId = (o["reqId"] as kotlinx.serialization.json.JsonPrimitive).content
+        assertEquals(ClientMsg.chatHistory(reqId, "p", 3, 301, 300), reqs[0])
+        assertTrue(repo.view("p").value.loadingOlder)
+        repo.onFrame(ServerFrame.ChatHistoryPage(reqId, "p", 3, listOf(ChatEntry(300, ChatEvent.AssistantText("a300", "r"))), true, false))
+        assertFalse(repo.view("p").value.loadingOlder)
+        repo.loadOlder("p")
+        assertEquals(2, historyMsgs(sent).size)
+        assertTrue(historyMsgs(sent)[1].contains("\"beforeSeq\":300"))
+    }
+
+    @Test fun loadOlderDoesNothingWithoutHasMore() {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> })
+        repo.onFrame(snapMore(1, false, 1, 2))
+        repo.loadOlder("p")
+        assertEquals(emptyList<String>(), historyMsgs(sent))
+        assertFalse(repo.view("p").value.loadingOlder)
+    }
+
+    @Test fun reconnectSnapshotResetsPaging() {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> })
+        repo.open("p")
+        repo.onFrame(snapMore(1, true, 5))
+        repo.loadOlder("p")
+        repo.onReconnected()
+        // The reply to the lost request never comes; the fresh snapshot resets paging.
+        repo.onFrame(snapMore(1, true, 5))
+        repo.loadOlder("p")
+        assertEquals(2, historyMsgs(sent).size)
+    }
+
+    // ---- protocol 9: images ----
+
+    private fun imageMsgs(sent: List<String>) = sent.filter { it.contains("\"chat_image\"") }
+    private fun b64(s: String) = java.util.Base64.getEncoder().encodeToString(s.toByteArray())
+
+    @Test fun imageIsRequestedOnceAndServedFromCache() = runTest {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> }, scope = backgroundScope)
+        val st = repo.imageState("p", "u#0")
+        assertEquals(ImageState.Loading, st.value)
+        assertSame(st, repo.imageState("p", "u#0"))
+        assertEquals(listOf(ClientMsg.chatImage("p", "u#0")), imageMsgs(sent))
+        repo.onFrame(ServerFrame.ChatImageData("p", "u#0", "image/png", b64("png!"), false))
+        assertEquals("png!", String((st.value as ImageState.Ready).bytes))
+        assertEquals("png!", String((repo.imageState("p", "u#0").value as ImageState.Ready).bytes))
+        assertEquals(1, imageMsgs(sent).size)
+    }
+
+    @Test fun imagesAreKeyedByPane() = runTest {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> }, scope = backgroundScope)
+        repo.imageState("p", "u#0")
+        repo.imageState("q", "u#0")
+        assertEquals(listOf(ClientMsg.chatImage("p", "u#0"), ClientMsg.chatImage("q", "u#0")), imageMsgs(sent))
+    }
+
+    @Test fun imageLruEvictsAt31() = runTest {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> }, scope = backgroundScope)
+        for (i in 0 until 31) {
+            repo.imageState("p", "i$i")
+            repo.onFrame(ServerFrame.ChatImageData("p", "i$i", "image/png", b64("x$i"), false))
+        }
+        assertEquals(31, imageMsgs(sent).size)
+        repo.imageState("p", "i30") // still cached
+        assertEquals(31, imageMsgs(sent).size)
+        repo.imageState("p", "i0") // evicted as least recently used
+        assertEquals(32, imageMsgs(sent).size)
+        assertEquals(ClientMsg.chatImage("p", "i0"), imageMsgs(sent).last())
+    }
+
+    @Test fun imageLruKeepsRecentlyUsed() = runTest {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> }, scope = backgroundScope)
+        for (i in 0 until 30) {
+            repo.imageState("p", "i$i")
+            repo.onFrame(ServerFrame.ChatImageData("p", "i$i", "image/png", b64("x"), false))
+        }
+        repo.imageState("p", "i0") // touch: i1 becomes the eldest
+        repo.imageState("p", "i30")
+        repo.onFrame(ServerFrame.ChatImageData("p", "i30", "image/png", b64("x"), false))
+        val before = imageMsgs(sent).size
+        repo.imageState("p", "i0")
+        assertEquals(before, imageMsgs(sent).size)
+        repo.imageState("p", "i1")
+        assertEquals(before + 1, imageMsgs(sent).size)
+    }
+
+    @Test fun atMostThreeImageRequestsInFlight() = runTest {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> }, scope = backgroundScope)
+        for (i in 0 until 5) repo.imageState("p", "i$i")
+        assertEquals((0 until 3).map { ClientMsg.chatImage("p", "i$it") }, imageMsgs(sent))
+        repo.onFrame(ServerFrame.ChatImageData("p", "i1", "image/png", b64("x"), false))
+        assertEquals(4, imageMsgs(sent).size)
+        assertEquals(ClientMsg.chatImage("p", "i3"), imageMsgs(sent).last())
+        repo.onFrame(ServerFrame.ChatImageData("p", "i0", null, null, true)) // missing: retry later, slot frees now
+        assertEquals(5, imageMsgs(sent).size)
+        assertEquals(ClientMsg.chatImage("p", "i4"), imageMsgs(sent).last())
+    }
+
+    @Test fun missingImageIsRetriedOnceAfterThreeSeconds() = runTest {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> }, scope = backgroundScope)
+        val st = repo.imageState("p", "u#0")
+        repo.onFrame(ServerFrame.ChatImageData("p", "u#0", null, null, true))
+        assertEquals(ImageState.Loading, st.value)
+        advanceTimeBy(2_999); runCurrent()
+        assertEquals(1, imageMsgs(sent).size)
+        advanceTimeBy(1); runCurrent()
+        assertEquals(2, imageMsgs(sent).size)
+        repo.onFrame(ServerFrame.ChatImageData("p", "u#0", null, null, true))
+        assertEquals(ImageState.Missing, st.value)
+        advanceTimeBy(10_000); runCurrent()
+        assertEquals(2, imageMsgs(sent).size)
+        repo.imageState("p", "u#0")
+        assertEquals(2, imageMsgs(sent).size)
+    }
+
+    @Test fun missingImageThatArrivesOnRetryIsReady() = runTest {
+        val repo = ChatRepository(sendRaw = {}, sendChat = { _, _ -> }, scope = backgroundScope)
+        val st = repo.imageState("p", "u#0")
+        repo.onFrame(ServerFrame.ChatImageData("p", "u#0", null, null, true))
+        advanceTimeBy(3_000); runCurrent()
+        repo.onFrame(ServerFrame.ChatImageData("p", "u#0", "image/png", b64("late"), false))
+        assertEquals("late", String((st.value as ImageState.Ready).bytes))
+    }
+
+    @Test fun undecodableImageIsMissing() = runTest {
+        val repo = ChatRepository(sendRaw = {}, sendChat = { _, _ -> }, scope = backgroundScope)
+        val st = repo.imageState("p", "u#0")
+        repo.onFrame(ServerFrame.ChatImageData("p", "u#0", "image/png", "%%%not base64", false))
+        assertEquals(ImageState.Missing, st.value)
+    }
+
+    @Test fun reconnectReRequestsLoadingImages() = runTest {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> }, scope = backgroundScope)
+        for (i in 0 until 4) repo.imageState("p", "i$i")
+        repo.onFrame(ServerFrame.ChatImageData("p", "i0", "image/png", b64("x"), false))
+        sent.clear()
+        repo.onReconnected()
+        assertEquals((1 until 4).map { ClientMsg.chatImage("p", "i$it") }, imageMsgs(sent))
+    }
+
+    // ---- protocol 9: answers ----
+
+    @Test fun answerMarksAnsweringAndKeepsItUntilToolResult() = runTest {
+        val calls = mutableListOf<Triple<String, String, Map<String, String>>>()
+        val repo = ChatRepository(sendRaw = {}, sendChat = { _, _ -> }, sendAnswer = { p, t, a -> calls += Triple(p, t, a) })
+        repo.onFrame(ServerFrame.ChatSnapshot("p", 1, "idle", listOf(ChatEntry(1, ChatEvent.Question("q", "tq", emptyList(), null)))))
+        repo.answer("p", "tq", mapOf("Color?" to "Red"))
+        assertEquals(listOf(Triple("p", "tq", mapOf("Color?" to "Red"))), calls)
+        assertEquals(setOf("tq"), repo.view("p").value.answering)
+        repo.onFrame(ServerFrame.ChatEventFrame("p", 1, ChatEntry(2, ChatEvent.ToolResult("tq", false, "Red"))))
+        assertEquals(emptySet<String>(), repo.view("p").value.answering)
+        assertEquals(setOf("tq"), repo.view("p").value.answered)
+    }
+
+    @Test fun answerFailureClearsAnsweringAndRethrows() = runTest {
+        var seen: Set<String>? = null
+        lateinit var repo: ChatRepository
+        repo = ChatRepository(sendRaw = {}, sendChat = { _, _ -> }, sendAnswer = { p, _, _ ->
+            seen = repo.view(p).value.answering
+            throw RuntimeException("no_question")
+        })
+        try { repo.answer("p", "tq", mapOf("Q" to "A")); fail("expected failure") } catch (e: RuntimeException) {
+            assertEquals("no_question", e.message)
+        }
+        assertEquals(setOf("tq"), seen)
+        assertEquals(emptySet<String>(), repo.view("p").value.answering)
+    }
+
+    @Test fun answerWhileInFlightIsIgnored() = runTest {
+        var calls = 0
+        val repo = ChatRepository(sendRaw = {}, sendChat = { _, _ -> }, sendAnswer = { _, _, _ -> calls++ })
+        repo.answer("p", "tq", mapOf("Q" to "A"))
+        repo.answer("p", "tq", mapOf("Q" to "B"))
+        assertEquals(1, calls)
     }
 }

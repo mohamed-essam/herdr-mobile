@@ -55,25 +55,83 @@ data class AlsoClose(
 )
 
 sealed interface ChatEvent {
-    data class UserText(val uuid: String, val text: String) : ChatEvent
-    data class AssistantText(val uuid: String, val text: String) : ChatEvent
-    data class ToolUse(val uuid: String, val toolUseId: String, val tool: String, val summary: String) : ChatEvent
-    data class ToolResult(val toolUseId: String, val isError: Boolean, val preview: String) : ChatEvent
+    // [ts] is epoch ms, null when the companion didn't send one. Image fields
+    // hold ids to fetch with chat_image.
+    data class UserText(val uuid: String, val text: String, val ts: Long? = null, val images: List<String> = emptyList()) : ChatEvent
+    data class AssistantText(val uuid: String, val text: String, val ts: Long? = null) : ChatEvent
+    data class ToolUse(val uuid: String, val toolUseId: String, val tool: String, val summary: String, val ts: Long? = null) : ChatEvent
+    data class ToolResult(val toolUseId: String, val isError: Boolean, val preview: String, val images: List<String> = emptyList(), val ts: Long? = null) : ChatEvent
     /** A background task finished (Claude Code's task-notification). */
-    data class TaskNotice(val uuid: String, val status: String, val summary: String) : ChatEvent
+    data class TaskNotice(val uuid: String, val status: String, val summary: String, val ts: Long? = null) : ChatEvent
+    /** An AskUserQuestion call; may repeat (e.g. after a resync), so key it by [toolUseId]. */
+    data class Question(val uuid: String, val toolUseId: String, val questions: List<QuestionItem>, val ts: Long? = null) : ChatEvent
 }
+
+enum class QuestionKind { Choice, Text, Number }
+
+data class QuestionOption(val label: String, val description: String? = null)
+
+/** One question of an AskUserQuestion call. */
+data class QuestionItem(
+    val question: String,
+    val header: String,
+    val kind: QuestionKind = QuestionKind.Choice,
+    val options: List<QuestionOption> = emptyList(),
+    val multiSelect: Boolean = false,
+    val min: Double? = null,
+    val max: Double? = null,
+    val step: Double? = null,
+    val unit: String? = null,
+    val placeholder: String? = null,
+    val description: String? = null,
+)
 
 data class ChatEntry(val seq: Int, val event: ChatEvent)
 
+private fun JsonObject.str(k: String) = strOrNull(k) ?: ""
+private fun JsonObject.strOrNull(k: String) = (this[k] as? JsonPrimitive)?.contentOrNull
+private fun JsonObject.bool(k: String) = (this[k] as? JsonPrimitive)?.booleanOrNull ?: false
+private fun JsonObject.long(k: String) = (this[k] as? JsonPrimitive)?.longOrNull
+private fun JsonObject.double(k: String) = (this[k] as? JsonPrimitive)?.doubleOrNull
+private fun JsonObject.strings(k: String) =
+    (this[k] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()
+
+private fun parseQuestionItem(el: JsonElement): QuestionItem? {
+    val o = el as? JsonObject ?: return null
+    return QuestionItem(
+        question = o.str("question"),
+        header = o.str("header"),
+        kind = when (o.strOrNull("kind")) {
+            "text" -> QuestionKind.Text
+            "number" -> QuestionKind.Number
+            else -> QuestionKind.Choice
+        },
+        options = (o["options"] as? JsonArray)?.mapNotNull { op ->
+            (op as? JsonObject)?.let { QuestionOption(it.str("label"), it.strOrNull("description")) }
+        } ?: emptyList(),
+        multiSelect = o.bool("multiSelect"),
+        min = o.double("min"),
+        max = o.double("max"),
+        step = o.double("step"),
+        unit = o.strOrNull("unit"),
+        placeholder = o.strOrNull("placeholder"),
+        description = o.strOrNull("description"),
+    )
+}
+
 /** Null for an event type this app version doesn't know (skipped, not an error). */
 fun parseChatEvent(o: JsonObject): ChatEvent? {
-    fun s(k: String) = o[k]?.jsonPrimitive?.contentOrNull ?: ""
+    fun s(k: String) = o.str(k)
+    val ts = o.long("ts")
     return when (s("type")) {
-        "user_text" -> ChatEvent.UserText(s("uuid"), s("text"))
-        "assistant_text" -> ChatEvent.AssistantText(s("uuid"), s("text"))
-        "tool_use" -> ChatEvent.ToolUse(s("uuid"), s("toolUseId"), s("tool"), s("summary"))
-        "task_notice" -> ChatEvent.TaskNotice(s("uuid"), s("status"), s("summary"))
-        "tool_result" -> ChatEvent.ToolResult(s("toolUseId"), o["isError"]?.jsonPrimitive?.booleanOrNull ?: false, s("preview"))
+        "user_text" -> ChatEvent.UserText(s("uuid"), s("text"), ts, o.strings("images"))
+        "assistant_text" -> ChatEvent.AssistantText(s("uuid"), s("text"), ts)
+        "tool_use" -> ChatEvent.ToolUse(s("uuid"), s("toolUseId"), s("tool"), s("summary"), ts)
+        "task_notice" -> ChatEvent.TaskNotice(s("uuid"), s("status"), s("summary"), ts)
+        "tool_result" -> ChatEvent.ToolResult(s("toolUseId"), o.bool("isError"), s("preview"), o.strings("images"), ts)
+        "question" -> ChatEvent.Question(
+            s("uuid"), s("toolUseId"),
+            (o["questions"] as? JsonArray)?.mapNotNull(::parseQuestionItem) ?: emptyList(), ts)
         else -> null
     }
 }
@@ -85,7 +143,12 @@ private fun parseChatEntry(el: JsonElement): ChatEntry? {
 }
 
 sealed interface ServerFrame {
-    data class ChatSnapshot(val paneId: String, val epoch: Int, val state: String, val entries: List<ChatEntry>) : ServerFrame
+    data class ChatSnapshot(val paneId: String, val epoch: Int, val state: String, val entries: List<ChatEntry>, val hasMore: Boolean = false) : ServerFrame
+    /** A [stale] page (the epoch moved on) carries no entries and hasMore false. */
+    data class ChatHistoryPage(val reqId: String, val paneId: String, val epoch: Int, val entries: List<ChatEntry>, val hasMore: Boolean, val stale: Boolean = false) : ServerFrame
+    /** [data] is base64; null with [missing] when the companion doesn't have the image. */
+    data class ChatImageData(val paneId: String, val id: String, val mediaType: String?, val data: String?, val missing: Boolean) : ServerFrame
+    data class ChatAnswerResult(val reqId: String, val ok: Boolean, val error: String?) : ServerFrame
     data class ChatEventFrame(val paneId: String, val epoch: Int, val entry: ChatEntry?) : ServerFrame
     data class ChatState(val paneId: String, val state: String) : ServerFrame
     data class ChatSendResult(val reqId: String, val ok: Boolean, val error: String?) : ServerFrame
@@ -158,7 +221,16 @@ fun parseServerFrame(text: String): ServerFrame {
             obj["paneId"]?.jsonPrimitive?.content ?: "",
             obj["epoch"]?.jsonPrimitive?.intOrNull ?: 0,
             obj["state"]?.jsonPrimitive?.contentOrNull ?: "idle",
-            (obj["events"] as? JsonArray)?.mapNotNull(::parseChatEntry) ?: emptyList())
+            (obj["events"] as? JsonArray)?.mapNotNull(::parseChatEntry) ?: emptyList(),
+            obj.bool("hasMore"))
+        "chat_history_page" -> ServerFrame.ChatHistoryPage(
+            obj.str("reqId"), obj.str("paneId"),
+            obj["epoch"]?.jsonPrimitive?.intOrNull ?: 0,
+            (obj["events"] as? JsonArray)?.mapNotNull(::parseChatEntry) ?: emptyList(),
+            obj.bool("hasMore"), obj.bool("stale"))
+        "chat_image_data" -> ServerFrame.ChatImageData(
+            obj.str("paneId"), obj.str("id"), obj.strOrNull("mediaType"), obj.strOrNull("data"), obj.bool("missing"))
+        "chat_answer_result" -> ServerFrame.ChatAnswerResult(obj.str("reqId"), obj.bool("ok"), obj.strOrNull("error"))
         "chat_event" -> ServerFrame.ChatEventFrame(
             obj["paneId"]?.jsonPrimitive?.content ?: "",
             obj["epoch"]?.jsonPrimitive?.intOrNull ?: 0,
@@ -182,6 +254,14 @@ object ClientMsg {
     fun chatClose(paneId: String) = obj("t" to JsonPrimitive("chat_close"), "paneId" to JsonPrimitive(paneId))
     fun chatSend(reqId: String, paneId: String, text: String) =
         obj("t" to JsonPrimitive("chat_send"), "reqId" to JsonPrimitive(reqId), "paneId" to JsonPrimitive(paneId), "text" to JsonPrimitive(text))
+    fun chatHistory(reqId: String, paneId: String, epoch: Int, beforeSeq: Int, limit: Int) =
+        obj("t" to JsonPrimitive("chat_history"), "reqId" to JsonPrimitive(reqId), "paneId" to JsonPrimitive(paneId),
+            "epoch" to JsonPrimitive(epoch), "beforeSeq" to JsonPrimitive(beforeSeq), "limit" to JsonPrimitive(limit))
+    fun chatImage(paneId: String, id: String) =
+        obj("t" to JsonPrimitive("chat_image"), "paneId" to JsonPrimitive(paneId), "id" to JsonPrimitive(id))
+    fun chatAnswer(reqId: String, paneId: String, toolUseId: String, answers: Map<String, String>) =
+        obj("t" to JsonPrimitive("chat_answer"), "reqId" to JsonPrimitive(reqId), "paneId" to JsonPrimitive(paneId),
+            "toolUseId" to JsonPrimitive(toolUseId), "answers" to JsonObject(answers.mapValues { JsonPrimitive(it.value) }))
     fun hello() = obj("t" to JsonPrimitive("hello"), "client" to JsonPrimitive("herdr-mobile"), "clientVersion" to JsonPrimitive("1.0.0"))
     fun registerPush(endpoint: String) = obj("t" to JsonPrimitive("register_push"), "endpoint" to JsonPrimitive(endpoint))
     fun readPane(reqId: String, paneId: String, source: String, lines: Int) =
