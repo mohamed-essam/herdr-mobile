@@ -64,6 +64,13 @@ class DashboardViewModel(
     fun sendChat(paneId: String, text: String) { viewModelScope.launch { chat.send(paneId, text) } }
     fun retryChat(paneId: String, pendingId: String) { viewModelScope.launch { chat.retry(paneId, pendingId) } }
     fun expireChat() = chat.expirePending()
+    /** Esc to the pane, the way the terminal interrupts a working agent. */
+    fun interruptChat(paneId: String) {
+        viewModelScope.launch {
+            runCatching { client.sendKeys(paneId, "esc") }
+                .onFailure { _actionErrors.tryEmit(it.message ?: "interrupt failed") }
+        }
+    }
     fun loadOlderChat(paneId: String) = chat.loadOlder(paneId)
     fun chatImage(paneId: String, id: String): StateFlow<ImageState> = chat.imageState(paneId, id)
     /** answers: question text -> answer (multi-select: [joinAnswerLabels]). */

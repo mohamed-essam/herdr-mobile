@@ -10,6 +10,8 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import dev.herdr.mobile.ui.theme.Herdr
+import dev.herdr.mobile.ui.theme.HerdrType
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -106,7 +108,7 @@ fun ChatImage(vm: DashboardViewModel, paneId: String, id: String, modifier: Modi
                     contentScale = ContentScale.Fit,
                     // The outline shows a dark screenshot's bounds on the dark background.
                     modifier = modifier.heightIn(max = INLINE_MAX_HEIGHT).clip(RoundedCornerShape(8.dp))
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+                        .border(1.dp, Herdr.colors.surface0, RoundedCornerShape(8.dp))
                         .clickable { viewing = true },
                 )
             }
@@ -119,7 +121,7 @@ fun ChatImage(vm: DashboardViewModel, paneId: String, id: String, modifier: Modi
 private fun Placeholder(modifier: Modifier) {
     Box(
         modifier.size(width = 160.dp, height = 120.dp).clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            .background(Herdr.colors.base),
     )
 }
 
@@ -127,7 +129,7 @@ private fun Placeholder(modifier: Modifier) {
 private fun Unavailable(modifier: Modifier) {
     Text(
         "image unavailable", modifier,
-        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = HerdrType.meta, color = Herdr.colors.overlay2,
     )
 }
 

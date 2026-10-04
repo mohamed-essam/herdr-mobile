@@ -6,7 +6,6 @@ import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
@@ -16,12 +15,14 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.sp
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownColor
 import com.mikepenz.markdown.m3.markdownTypography
 import com.mikepenz.markdown.model.rememberMarkdownState
+import dev.herdr.mobile.ui.theme.Herdr
+import dev.herdr.mobile.ui.theme.HerdrType
 
 private val WEB_LINK = Regex("""https?://[^/?#\s]+\S*""", RegexOption.IGNORE_CASE)
 private val MAIL_LINK = Regex("""mailto:\S+""", RegexOption.IGNORE_CASE)
@@ -52,16 +53,17 @@ private class ChatLinkHandler(private val context: Context) : UriHandler {
 }
 
 /**
- * Assistant text as markdown, in the app's Catppuccin colours. Headings are
- * scaled down to chat size. Link taps go through [ChatLinkHandler], which opens
- * only http(s) and mailto links (see [isOpenableLink]).
+ * Assistant text as markdown: Geist body, JetBrains Mono code, in the app's
+ * Catppuccin colors. Headings are scaled down to chat size. Link taps go
+ * through [ChatLinkHandler], which opens only http(s) and mailto links (see
+ * [isOpenableLink]).
  */
 @Composable
 fun ChatMarkdown(text: String, modifier: Modifier = Modifier) {
-    val type = MaterialTheme.typography
-    val colors = MaterialTheme.colorScheme
-    val body = type.bodyMedium
-    val code = type.bodySmall.copy(fontFamily = FontFamily.Monospace)
+    val c = Herdr.colors
+    val body = HerdrType.body.copy(color = c.text)
+    val heading = HerdrType.title.copy(color = c.text)
+    val code = HerdrType.code.copy(color = c.text)
     val context = LocalContext.current
     val links = remember(context) { ChatLinkHandler(context) }
     // Parse in composition: an async parse first lays the item out empty, and
@@ -71,19 +73,19 @@ fun ChatMarkdown(text: String, modifier: Modifier = Modifier) {
         Markdown(
             state,
             colors = markdownColor(
-                text = colors.onBackground,
-                codeBackground = colors.surfaceContainer,
-                dividerColor = colors.outlineVariant,
-                tableBackground = colors.surfaceContainerLow,
+                text = c.text,
+                codeBackground = c.mantle,
+                dividerColor = c.surface0,
+                tableBackground = c.mantle,
             ),
             typography = markdownTypography(
-                h1 = type.titleLarge, h2 = type.titleMedium, h3 = type.titleSmall,
-                h4 = type.titleSmall, h5 = type.titleSmall, h6 = type.titleSmall,
+                h1 = heading.copy(fontSize = 19.sp, lineHeight = 25.sp), h2 = heading.copy(fontSize = 17.sp, lineHeight = 23.sp),
+                h3 = heading, h4 = heading, h5 = heading, h6 = heading,
                 text = body, paragraph = body, ordered = body, bullet = body, list = body, table = body,
                 code = code,
-                inlineCode = body.copy(fontFamily = FontFamily.Monospace),
-                quote = body.copy(color = colors.onSurfaceVariant),
-                textLink = TextLinkStyles(SpanStyle(color = colors.primary, textDecoration = TextDecoration.Underline)),
+                inlineCode = code.copy(fontSize = 13.sp),
+                quote = body.copy(color = c.overlay2),
+                textLink = TextLinkStyles(SpanStyle(color = c.blue, textDecoration = TextDecoration.Underline)),
             ),
             modifier = modifier.fillMaxWidth(),
         )
