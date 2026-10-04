@@ -16,6 +16,7 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
   const syncs: Sync[] = []
   const outbox: { id: string; text: string }[] = []
   const submitted: string[] = []
+  const answer = { resync: false }
   const current = { id: 'sess-1', history: [
     { role: 'user', content: [{ type: 'text', text: 'earlier question' }] },
     { role: 'assistant', content: [{ type: 'text', text: 'earlier answer' }] },
@@ -30,7 +31,9 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
     expect(e.init?.socketPath).toBe(opts.xdg ? `${opts.xdg}/herdr-mobile/chat.sock` : '/s/chat.sock')
     syncs.push(JSON.parse(String(e.init?.body)))
     const messages = outbox.splice(0)
-    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ messages }) } }
+    const body = answer.resync ? { messages, resync: true } : { messages }
+    answer.resync = false
+    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(body) } }
   })
   on('prompt.submit', async ($, e) => {
     await submitGate
@@ -38,7 +41,7 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
     return { text: e.text }
   })
   return {
-    clock, syncs, outbox, submitted, current,
+    clock, syncs, outbox, submitted, current, answer,
     hold() { let release!: () => void; submitGate = new Promise(r => (release = r)); return release },
     all: () => syncs.flatMap(s => s.events),
   }
@@ -197,5 +200,25 @@ describe('herdr-chat', () => {
     await w.clock.advance(1000)
     const last = w.syncs[w.syncs.length - 1]!.events.map(e => e.type === 'state' ? (e as any).state : e.type)
     expect(last).toEqual(['hello', 'snapshot', 'working'])
+  })
+
+  test('a resync request from the companion re-sends hello and snapshot next tick', async ($, on) => {
+    const w = world(on)
+    await start($)
+    await w.clock.advance(1000) // initial hello+snapshot
+    w.answer.resync = true // e.g. the companion restarted between ticks
+    await w.clock.advance(1000) // empty sync, answered with resync:true
+    await w.clock.advance(1000)
+    expect(w.syncs[1]!.events).toEqual([])
+    expect(w.syncs[2]!.events.map(e => e.type)).toEqual(['hello', 'snapshot'])
+    await w.clock.advance(1000)
+    expect(w.syncs[3]!.events).toEqual([])
+  })
+
+  test('a non-interactive session (claude -p, SDK) leaves the pane alone', async ($, on) => {
+    const w = world(on)
+    await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: false })
+    await w.clock.advance(3000)
+    expect(w.syncs.length).toBe(0)
   })
 })

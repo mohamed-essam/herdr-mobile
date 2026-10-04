@@ -73,7 +73,13 @@ async function tick($: EngineInterface, s: State) {
         s.pending = []
         await queueResync($, s)
       }
-      const { messages = [] } = JSON.parse(res.text) as { messages?: { id: string; text: string }[] }
+      const { messages = [], resync } = JSON.parse(res.text) as {
+        messages?: { id: string; text: string }[]
+        resync?: boolean
+      }
+      // The companion has no hello for this session (e.g. it restarted
+      // between two ticks): resend hello + snapshot on the next tick.
+      if (resync === true) s.needResync = true
       for (const m of messages) {
         // Not awaited: submit resolves only when Claude goes idle, and this
         // loop is the heartbeat that keeps the pane chat-capable meanwhile.
@@ -125,6 +131,9 @@ export const register: Register = on => {
 
   on('session.start', async ($, e, next) => {
     const r = await next(e)
+    // Headless children (claude -p, SDK) inherit HERDR_PANE_ID; only the
+    // interactive session owns the pane's chat and outbox.
+    if (e.isInteractive !== true) return r
     s.paneId = await $.env.get('HERDR_PANE_ID')
     if (!s.paneId) return r
     s.cwd = e.cwd
