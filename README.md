@@ -81,6 +81,27 @@ herdr-mobiled --listen "$(tailscale ip -4):8787"
 
 To run it as a user service, see [`companion/deploy/`](companion/deploy/).
 
+### Chat view for Claude Code panes (optional)
+
+herdr-mobile can show Claude Code panes as a chat instead of a terminal. It needs
+the `herdr-chat` Claude Code plugin (Claude Code 2.1.289 or newer), which streams
+the conversation to the companion over a private Unix socket.
+
+    claude plugin marketplace add /path/to/herdr-mobile/mod
+    claude plugin install herdr-chat@herdr-mobile
+
+Restart running Claude sessions (or run `/reload-plugins` in them). Claude
+sessions started inside herdr panes then open in chat on the phone; the top-bar
+button switches to the terminal. Sessions outside herdr are unaffected.
+
+The companion listens on `$XDG_RUNTIME_DIR/herdr-mobile/chat.sock` by default.
+Set `HERDR_MOBILE_CHAT_SOCK` to override this path, or pass `--chat-socket ''`
+to disable chat. If `HERDR_MOBILE_CHAT_SOCK` is not set and `$XDG_RUNTIME_DIR` is
+unavailable, the chat view is off (there is no `/tmp` fallback). A custom socket
+path must be in a directory only you can access (mode 0700 or stricter, owned by
+you); otherwise the companion refuses to listen and logs why. Set
+`HERDR_MOBILE_CHAT_SOCK` in the environment where Claude runs.
+
 ### App
 
 Download `app-debug.apk` from the [latest release](https://github.com/mohamed-essam/herdr-mobile/releases/latest)

@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## Unreleased
 
+- Chat view for Claude Code panes via the new herdr-chat Claude Code plugin (companion protocol 8).
+
 ## [1.0.0] - 2026-07-12
 
 Initial public release.
