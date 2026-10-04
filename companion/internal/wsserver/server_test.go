@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -720,5 +721,135 @@ func TestChatReopenDropsStaleFramesFromOldSubscription(t *testing.T) {
 	ev := readUntil(t, ctx, c, "chat_event")
 	if ev["seq"].(float64) != 2 {
 		t.Fatalf("stale frame after re-open snapshot: %v", ev)
+	}
+}
+
+// fakeChat is a ChatHub whose subscriptions are test-controlled channels.
+// cancel does not close the channel, so tests can push into a "cancelled"
+// subscription and prove the server no longer forwards it.
+type fakeChat struct {
+	mu   sync.Mutex
+	subs []chan chatbridge.Update
+}
+
+func (f *fakeChat) Subscribe(paneID string) (chatbridge.Snapshot, <-chan chatbridge.Update, func()) {
+	ch := make(chan chatbridge.Update, 16)
+	f.mu.Lock()
+	f.subs = append(f.subs, ch)
+	f.mu.Unlock()
+	return chatbridge.Snapshot{PaneID: paneID, State: "idle"}, ch, func() {}
+}
+
+func (f *fakeChat) Send(string, string) error { return nil }
+
+func (f *fakeChat) sub(i int) chan chatbridge.Update {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.subs[i]
+}
+
+func staleUpdate() chatbridge.Update {
+	return chatbridge.Update{Kind: "event", Epoch: 1, Entry: chatbridge.Entry{Seq: 99, Event: json.RawMessage(`{"type":"user_text","uuid":"stale","text":"stale"}`)}}
+}
+
+func dialFake(t *testing.T, f *fakeChat) (*websocket.Conn, context.Context) {
+	t.Helper()
+	s := NewServer(AllowAll{}, &stubRPC{})
+	s.SetChat(f)
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	ctx := context.Background()
+	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close(websocket.StatusNormalClosure, "") })
+	return c, ctx
+}
+
+func TestChatReopenIgnoresOldSubscriptionUpdates(t *testing.T) {
+	f := &fakeChat{}
+	c, ctx := dialFake(t, f)
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"chat_open","paneId":"w1:p1"}`))
+	readUntil(t, ctx, c, "chat_snapshot")
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"chat_open","paneId":"w1:p1"}`))
+	readUntil(t, ctx, c, "chat_snapshot")
+	f.sub(0) <- staleUpdate()
+	time.Sleep(150 * time.Millisecond) // a leaked stale frame would be enqueued by now
+	u := staleUpdate()
+	u.Entry.Seq = 1
+	f.sub(1) <- u
+	// The only chat_event that may arrive is the new subscription's (seq 1).
+	if ev := readUntil(t, ctx, c, "chat_event"); ev["seq"].(float64) != 1 {
+		t.Fatalf("stale frame from old subscription: %v", ev)
+	}
+}
+
+func TestChatCloseIgnoresLaterUpdates(t *testing.T) {
+	f := &fakeChat{}
+	c, ctx := dialFake(t, f)
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"chat_open","paneId":"w1:p1"}`))
+	readUntil(t, ctx, c, "chat_snapshot")
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"chat_close","paneId":"w1:p1"}`))
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"ping"}`))
+	readUntil(t, ctx, c, "pong")
+	f.sub(0) <- staleUpdate()
+	readNoneUntil(t, ctx, c, "chat_event", 300*time.Millisecond)
+}
+
+// After closeChat returns, nothing more may be enqueued by that subscription,
+// even when an update is racing the close.
+func TestChatCloseIsABarrierAgainstInFlightForwarding(t *testing.T) {
+	s := NewServer(AllowAll{}, &stubRPC{})
+	f := &fakeChat{}
+	s.SetChat(f)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	for i := 0; i < 3000; i++ {
+		c := &client{send: make(chan []byte, 64), chats: map[string]func(){}}
+		s.openChat(ctx, c, "p")
+		<-c.send // snapshot
+		f.sub(i) <- staleUpdate()
+		c.closeChat("p")
+		n := len(c.send)
+		for j := 0; j < 20; j++ {
+			runtime.Gosched()
+		}
+		if len(c.send) != n {
+			t.Fatalf("iteration %d: frame enqueued after closeChat returned", i)
+		}
+	}
+}
+
+// Deterministic version of the check-then-send race: the forwarder is parked
+// after taking an update; closeChat runs to completion; only then is the
+// forwarder released. It must not enqueue the stale frame.
+func TestChatCloseWinsAgainstParkedForwarder(t *testing.T) {
+	parked := make(chan struct{})
+	release := make(chan struct{})
+	hook := func() {
+		parked <- struct{}{}
+		<-release
+	}
+	chatForwardHook.Store(&hook)
+	defer chatForwardHook.Store(nil)
+
+	s := NewServer(AllowAll{}, &stubRPC{})
+	f := &fakeChat{}
+	s.SetChat(f)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	for i := 0; i < 200; i++ {
+		c := &client{send: make(chan []byte, 64), chats: map[string]func(){}}
+		s.openChat(ctx, c, "p")
+		<-c.send // snapshot
+		f.sub(i) <- staleUpdate()
+		<-parked
+		c.closeChat("p")
+		release <- struct{}{}
+		time.Sleep(time.Millisecond)
+		if len(c.send) != 0 {
+			t.Fatalf("iteration %d: stale frame enqueued after closeChat returned", i)
+		}
 	}
 }

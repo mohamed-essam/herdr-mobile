@@ -450,6 +450,10 @@ func (c *client) closeAll() {
 	}
 }
 
+// chatForwardHook is a test seam, called by a chat forwarder after it took an
+// update and before it locks to enqueue it. Nil in production.
+var chatForwardHook atomic.Pointer[func()]
+
 // openChat subscribes this client to a pane's chat: the snapshot first, then
 // live updates in order. Re-opening a pane replaces the previous subscription.
 func (s *Server) openChat(ctx context.Context, c *client, paneID string) {
@@ -460,19 +464,34 @@ func (s *Server) openChat(ctx context.Context, c *client, paneID string) {
 	snap, ch, cancel := s.chat.Subscribe(paneID)
 	// stopped is set BEFORE cancel closes the channel, so the forwarder never
 	// delivers updates still buffered for a closed/replaced subscription.
+	//
+	// mu serialises the forwarder's check+enqueue against the close path:
+	// the close path sets stopped, closes done (unblocking a parked forwarder),
+	// then takes and releases mu, so once it returns no send from this
+	// subscription can happen any more.
 	var stopped atomic.Bool
+	var mu sync.Mutex
 	done := make(chan struct{})
 	c.smu.Lock()
 	c.chats[paneID] = func() {
 		stopped.Store(true)
 		close(done)
+		mu.Lock()
+		mu.Unlock() //nolint:staticcheck // barrier: waits out an in-flight forwarder send
 		cancel()
 	}
 	c.smu.Unlock()
 	sendBlocking(ctx, c, proto.ChatSnapshot(snap))
 	go func() {
-		for u := range ch {
-			if stopped.Load() {
+		for {
+			var u chatbridge.Update
+			select {
+			case x, ok := <-ch:
+				if !ok {
+					return
+				}
+				u = x
+			case <-done:
 				return
 			}
 			var f []byte
@@ -486,13 +505,24 @@ func (s *Server) openChat(ctx context.Context, c *client, paneID string) {
 			default:
 				continue
 			}
+			if h := chatForwardHook.Load(); h != nil {
+				(*h)()
+			}
+			mu.Lock()
+			if stopped.Load() {
+				mu.Unlock()
+				return
+			}
 			select {
 			case c.send <- f:
 			case <-done:
+				mu.Unlock()
 				return
 			case <-ctx.Done():
+				mu.Unlock()
 				return
 			}
+			mu.Unlock()
 		}
 	}()
 }
