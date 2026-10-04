@@ -2,6 +2,8 @@ package dev.herdr.mobile.data
 
 import dev.herdr.mobile.net.ClientMsg
 import dev.herdr.mobile.net.ServerFrame
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -52,14 +54,26 @@ class ChatRepository(
         if (t.isEmpty()) return
         val id = "p${ids.incrementAndGet()}"
         flow(paneId).update { ChatReducer.addPending(it, id, t, now()) }
-        runCatching { sendChat(paneId, t) }
-            .onFailure { e -> flow(paneId).update { ChatReducer.failPending(it, id, e.message ?: "send failed") } }
+        try {
+            sendChat(paneId, t)
+        } catch (e: TimeoutCancellationException) {
+            // The message may still have been queued; leave it Queued so it can
+            // be confirmed by a late delivery or expire to NotDelivered.
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            flow(paneId).update { ChatReducer.failPending(it, id, e.message ?: "send failed") }
+        }
     }
 
     suspend fun retry(paneId: String, pendingId: String) {
-        val p = flow(paneId).value.pending.firstOrNull { it.id == pendingId } ?: return
-        flow(paneId).update { ChatReducer.removePending(it, pendingId) }
-        send(paneId, p.text)
+        var text: String? = null
+        flow(paneId).update { v ->
+            val p = v.pending.firstOrNull { it.id == pendingId && it.status != PendingStatus.Queued }
+            text = p?.text
+            if (p == null) v else ChatReducer.removePending(v, pendingId)
+        }
+        text?.let { send(paneId, it) }
     }
 
     fun expirePending() {

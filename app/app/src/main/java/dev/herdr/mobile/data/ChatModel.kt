@@ -34,7 +34,7 @@ object ChatReducer {
             state = f.state,
             entries = f.entries.takeLast(MAX_ENTRIES),
             lastSeq = f.entries.maxOfOrNull { it.seq } ?: 0,
-            pending = confirm(v.pending, f.entries.mapNotNull { userText(it) }),
+            pending = confirm(v.pending, snapshotCandidates(v, f)),
         )
         is ServerFrame.ChatEventFrame -> {
             val e = f.entry
@@ -64,6 +64,13 @@ object ChatReducer {
             if (it.status == PendingStatus.Queued && now - it.sentAt >= PENDING_TIMEOUT_MS) it.copy(status = PendingStatus.NotDelivered) else it
         })
     }
+
+    // Same epoch: only entries newer than what we already had can be new
+    // deliveries. New epoch / first load: only the trailing user_texts (one per
+    // outstanding bubble) can be ours; older history must not confirm anything.
+    private fun snapshotCandidates(v: ChatView, f: ServerFrame.ChatSnapshot): List<String> =
+        if (v.loaded && f.epoch == v.epoch) f.entries.filter { it.seq > v.lastSeq }.mapNotNull { userText(it) }
+        else f.entries.mapNotNull { userText(it) }.takeLast(v.pending.count { it.status != PendingStatus.Failed })
 
     private fun userText(e: ChatEntry): String? = (e.event as? ChatEvent.UserText)?.text?.trim()
 

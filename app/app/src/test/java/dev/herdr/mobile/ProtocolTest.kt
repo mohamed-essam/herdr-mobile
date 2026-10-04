@@ -207,4 +207,11 @@ class ProtocolTest {
         assertEquals("""{"t":"chat_close","paneId":"w1:p1"}""", ClientMsg.chatClose("w1:p1"))
         assertEquals("""{"t":"chat_send","reqId":"c1","paneId":"w1:p1","text":"hi \"there\""}""", ClientMsg.chatSend("c1", "w1:p1", "hi \"there\""))
     }
+
+    @Test fun jsonNullsAreNotTheStringNull() {
+        val r = parseServerFrame("""{"t":"chat_send_result","reqId":"c1","ok":true,"error":null}""") as ServerFrame.ChatSendResult
+        assertNull(r.error)
+        assertEquals("idle", (parseServerFrame("""{"t":"chat_state","paneId":"p","state":null}""") as ServerFrame.ChatState).state)
+        assertEquals("idle", (parseServerFrame("""{"t":"chat_snapshot","paneId":"p","epoch":1,"state":null,"events":[]}""") as ServerFrame.ChatSnapshot).state)
+    }
 }

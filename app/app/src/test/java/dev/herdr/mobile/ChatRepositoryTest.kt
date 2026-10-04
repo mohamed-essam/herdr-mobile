@@ -2,7 +2,10 @@ package dev.herdr.mobile
 
 import dev.herdr.mobile.data.*
 import dev.herdr.mobile.net.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -61,5 +64,26 @@ class ChatRepositoryTest {
         t = PENDING_TIMEOUT_MS
         repo.expirePending()
         assertEquals(PendingStatus.NotDelivered, repo.view("p").value.pending.single().status)
+    }
+
+    @Test fun timeoutLeavesBubbleQueued() = runTest {
+        val repo = ChatRepository(sendRaw = {}, sendChat = { _, _ -> withTimeout(1) { awaitCancellation() } })
+        repo.send("p", "x")
+        assertEquals(PendingStatus.Queued, repo.view("p").value.pending.single().status)
+    }
+
+    @Test fun cancellationRethrowsAndLeavesBubbleQueued() = runTest {
+        val repo = ChatRepository(sendRaw = {}, sendChat = { _, _ -> throw CancellationException("c") })
+        try { repo.send("p", "x"); fail("expected cancellation") } catch (e: CancellationException) {}
+        assertEquals(PendingStatus.Queued, repo.view("p").value.pending.single().status)
+    }
+
+    @Test fun retryOnQueuedDoesNothing() = runTest {
+        var calls = 0
+        val repo = ChatRepository(sendRaw = {}, sendChat = { _, _ -> calls++ })
+        repo.send("p", "x")
+        repo.retry("p", repo.view("p").value.pending.single().id)
+        assertEquals(1, calls)
+        assertEquals(1, repo.view("p").value.pending.size)
     }
 }

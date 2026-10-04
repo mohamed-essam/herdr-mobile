@@ -154,7 +154,7 @@ fun parseServerFrame(text: String): ServerFrame {
         "chat_snapshot" -> ServerFrame.ChatSnapshot(
             obj["paneId"]?.jsonPrimitive?.content ?: "",
             obj["epoch"]?.jsonPrimitive?.intOrNull ?: 0,
-            obj["state"]?.jsonPrimitive?.content ?: "idle",
+            obj["state"]?.jsonPrimitive?.contentOrNull ?: "idle",
             (obj["events"] as? JsonArray)?.mapNotNull(::parseChatEntry) ?: emptyList())
         "chat_event" -> ServerFrame.ChatEventFrame(
             obj["paneId"]?.jsonPrimitive?.content ?: "",
@@ -162,11 +162,11 @@ fun parseServerFrame(text: String): ServerFrame {
             parseChatEntry(obj))
         "chat_state" -> ServerFrame.ChatState(
             obj["paneId"]?.jsonPrimitive?.content ?: "",
-            obj["state"]?.jsonPrimitive?.content ?: "idle")
+            obj["state"]?.jsonPrimitive?.contentOrNull ?: "idle")
         "chat_send_result" -> ServerFrame.ChatSendResult(
             obj["reqId"]?.jsonPrimitive?.content ?: "",
             obj["ok"]?.jsonPrimitive?.boolean ?: false,
-            obj["error"]?.jsonPrimitive?.content)
+            obj["error"]?.jsonPrimitive?.contentOrNull)
         else -> ServerFrame.Unknown
     }
 }

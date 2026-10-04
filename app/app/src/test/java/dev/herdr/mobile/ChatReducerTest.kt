@@ -107,4 +107,32 @@ class ChatReducerTest {
         assertEquals("not delivered", pendingLabel(p.copy(status = PendingStatus.NotDelivered), "idle"))
         assertEquals("failed: no_mod", pendingLabel(p.copy(status = PendingStatus.Failed, error = "no_mod"), "idle"))
     }
+
+    @Test fun sameEpochSnapshotWithOldYesDoesNotConfirmNewPending() {
+        var v = ChatReducer.onFrame(ChatView(), snap(1, user(1, "yes")))
+        v = ChatReducer.addPending(v, "p1", "yes", 0)
+        v = ChatReducer.onFrame(v, snap(1, user(1, "yes")))
+        assertEquals(listOf("p1"), v.pending.map { it.id })
+    }
+
+    @Test fun sameEpochSnapshotWithNewYesConfirms() {
+        var v = ChatReducer.onFrame(ChatView(), snap(1, user(1, "yes")))
+        v = ChatReducer.addPending(v, "p1", "yes", 0)
+        v = ChatReducer.onFrame(v, snap(1, user(1, "yes"), user(2, "yes")))
+        assertTrue(v.pending.isEmpty())
+    }
+
+    @Test fun newEpochSnapshotConfirmsTrailingYes() {
+        var v = ChatReducer.onFrame(ChatView(), snap(1, user(1, "a")))
+        v = ChatReducer.addPending(v, "p1", "yes", 0)
+        v = ChatReducer.onFrame(v, snap(2, user(1, "x"), user(2, "yes")))
+        assertTrue(v.pending.isEmpty())
+    }
+
+    @Test fun newEpochSnapshotWithYesFarBackDoesNotConfirm() {
+        var v = ChatReducer.onFrame(ChatView(), snap(1, user(1, "a")))
+        v = ChatReducer.addPending(v, "p1", "yes", 0)
+        v = ChatReducer.onFrame(v, snap(2, user(1, "yes"), user(2, "x")))
+        assertEquals(1, v.pending.size)
+    }
 }
