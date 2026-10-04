@@ -47,8 +47,8 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
   const tail = { limit: 4194304 }
   let submitGate: Promise<void> = Promise.resolve()
   on('process.run', ($, e) => {
-    const [cmd, flag, from, path] = e.argv
-    expect([cmd, flag, e.argv.length]).toEqual(['tail', '-n', 4])
+    const [cmd, flag, from, dashes, path] = e.argv
+    expect([cmd, flag, dashes, e.argv.length]).toEqual(['tail', '-n', '--', 5])
     const line = Number(from!.slice(1))
     if (line === 1) reads.push(path!)
     if (path === 'boom') throw new Error('spawn failed')
@@ -64,7 +64,8 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
   on('classic.UserPromptSubmit', () => ({}))
   on('classic.Stop', () => ({}))
   on('session.id', () => ({ value: current.id }))
-  on('session.messages', () => ({ value: current.history as never }))
+  const counts = { messages: 0 }
+  on('session.messages', () => { counts.messages++; return { value: current.history as never } })
   on('http.fetch', ($, e) => {
     if (opts.down?.()) throw new Error('ECONNREFUSED')
     expect(e.url).toBe('http://chat/sync')
@@ -81,7 +82,7 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
     return { text: e.text }
   })
   return {
-    clock, syncs, outbox, submitted, current, answer, files, reads, runs, tail,
+    clock, syncs, outbox, submitted, current, answer, files, reads, runs, tail, counts,
     hold() { let release!: () => void; submitGate = new Promise(r => (release = r)); return release },
     all: () => syncs.flatMap(s => s.events),
   }
@@ -168,6 +169,7 @@ describe('herdr-chat', () => {
     on('turn.start', ($, e) => ({ turnId: e.turnId }))
     on('turn.complete', () => ({ text: 'answer' }))
     await start($)
+    await w.clock.advance(1000) // the start resync goes out first
     await $.turn.start({ text: 'hi', turnId: 't1' })
     await $.turn.complete({ answer: 'a', durationMs: 1, isAborted: false, turnId: 't1', agentId: 'sub', reason: 'completed' } as never)
     await $.turn.complete({ answer: 'a', durationMs: 1, isAborted: false, turnId: 't1', reason: 'completed' } as never)
@@ -305,6 +307,7 @@ describe('herdr-chat', () => {
     await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/p1.jsonl' })
     await $.classic.UserPromptSubmit({ prompt: 'hi', transcript_path: '' })
     await start($)
+    await w.clock.advance(1000)
     expect(w.reads).toEqual(['/t/p1.jsonl'])
   })
 
@@ -397,4 +400,38 @@ describe('herdr-chat', () => {
     expect(w.syncs[2]!.events).toEqual([])
     expect(w.reads).toEqual(['/t/p1.jsonl'])
   })
+
+  test('session.start itself reads nothing: the first tick does the resync', async ($, on) => {
+    const w = world(on)
+    w.files['/t/p1.jsonl'] = TRANSCRIPT
+    await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/p1.jsonl' })
+    await start($)
+    expect(w.reads).toEqual([])
+    expect(w.counts.messages).toBe(0)
+    await w.clock.advance(1000)
+    expect(w.reads).toEqual(['/t/p1.jsonl'])
+    expect(w.syncs[0]!.events.map(e => e.type)).toEqual(['hello', 'snapshot'])
+  })
+
+  for (const reason of ['clear', 'resume'] as const) {
+    test(`/${reason} forgets the old transcript until the new session names its own`, async ($, on) => {
+      const w = world(on)
+      on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+      w.files['/t/old.jsonl'] = TRANSCRIPT
+      w.files['/t/new.jsonl'] = TRANSCRIPT.replace('from the transcript', 'new session')
+      await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/old.jsonl' })
+      await start($)
+      await w.clock.advance(1000)
+      await $.session.end({ reason, sessionId: 'sess-1', resume: undefined as never })
+      w.current.id = 'sess-2'
+      await w.clock.advance(1000) // no path known: api-form fallback
+      expect(w.reads).toEqual(['/t/old.jsonl'])
+      expect((w.syncs[1]!.events[1] as any).events.map((e: any) => e.uuid)).toEqual(['snap-0', 'snap-1#0'])
+      await $.classic.SessionStart({ source: reason, transcript_path: '/t/new.jsonl' })
+      await w.clock.advance(1000) // upgrade resync from the new transcript
+      expect(w.reads).toEqual(['/t/old.jsonl', '/t/new.jsonl'])
+      expect(w.syncs[2]!.sessionId).toBe('sess-2')
+      expect((w.syncs[2]!.events[1] as any).events).toEqual([{ type: 'user_text', uuid: 'u1', text: 'new session', ts: 1791126614835 }])
+    })
+  }
 })

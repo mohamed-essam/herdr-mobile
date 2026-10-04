@@ -11,7 +11,7 @@ type Row = {
 
 // Chat history built line by line from the session's transcript file (JSON
 // lines), filtered as live rows are: main-thread `user`/`assistant` rows with
-// a role, no meta rows (skill bodies, image captions, "Tool loaded.", peer-
+// a role and a uuid, no meta rows (skill bodies, image captions, "Tool loaded.", peer-
 // agent messages). Each event carries the row's real uuid and its timestamp.
 // Lines that aren't JSON are skipped.
 export type TranscriptHistory = { events: ChatEvent[]; sawMessageRow: boolean }
@@ -33,8 +33,9 @@ export function addTranscriptLine(h: TranscriptHistory, line: string): void {
   if (row.isMeta === true || row.isSidechain === true) return
   const role = row.message?.role
   if (role !== 'user' && role !== 'assistant') return
+  if (typeof row.uuid !== 'string') return
   const ms = typeof row.timestamp === 'string' ? Date.parse(row.timestamp) : NaN
-  for (const ev of normalizeBlocks(role, row.message?.content, String(row.uuid), Number.isNaN(ms) ? undefined : ms)) {
+  for (const ev of normalizeBlocks(role, row.message?.content, row.uuid, Number.isNaN(ms) ? undefined : ms)) {
     h.events.push(ev)
   }
 }

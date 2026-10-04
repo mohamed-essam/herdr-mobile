@@ -31,6 +31,15 @@ describe('eventsFromTranscript', () => {
     expect(out).toEqual([{ type: 'user_text', uuid: 'u9', text: 'hi' }])
   })
 
+  test('rows without a string uuid are dropped', () => {
+    const out = eventsFromTranscript([
+      row({ type: 'user', timestamp: '2026-10-04T15:10:14.835Z', message: { role: 'user', content: 'no uuid' } }),
+      row({ type: 'user', uuid: 7, timestamp: '2026-10-04T15:10:14.835Z', message: { role: 'user', content: 'numeric uuid' } }),
+      row({ type: 'user', uuid: 'u1', timestamp: '2026-10-04T15:10:14.835Z', message: { role: 'user', content: 'kept' } }),
+    ].join('\n'))
+    expect(out).toEqual([{ type: 'user_text', uuid: 'u1', text: 'kept', ts: 1791126614835 }])
+  })
+
   test('rows whose message has no role are dropped', () => {
     const out = eventsFromTranscript([
       row({ type: 'user', uuid: 'x1', timestamp: '2026-10-04T15:10:14.835Z', message: { content: 'no role' } }),

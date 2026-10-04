@@ -53,7 +53,7 @@ async function readTranscript($: EngineInterface, path: string) {
   const h = newTranscriptHistory()
   let line = 1
   for (;;) {
-    const r = await $.process.run(['tail', '-n', `+${line}`, path])
+    const r = await $.process.run(['tail', '-n', `+${line}`, '--', path])
     if (r.exitCode !== 0) throw new Error(`tail exited ${r.exitCode}`)
     const piece = splitPiece(r.stdout, r.isStdoutTruncated)
     for (const l of piece.lines) addTranscriptLine(h, l)
@@ -211,7 +211,8 @@ export const register: Register = on => {
       s.paneId = undefined
       return r
     }
-    await queueResync($, s)
+    // Hooks do no I/O: the first tick reads the session and sends hello + snapshot.
+    s.needResync = true
     s.timer?.cancel()
     s.timer = $.clock.every(SYNC_MS, () => void tick($, s))
     return r
@@ -224,6 +225,9 @@ export const register: Register = on => {
     if (s.paneId && (e.reason === 'clear' || e.reason === 'resume')) {
       s.pending = []
       s.needResync = true
+      // The new session's transcript is named by its own classic event; until
+      // then the api form stands in (and that path's arrival upgrades it).
+      s.transcriptPath = undefined
     }
     return r
   })
