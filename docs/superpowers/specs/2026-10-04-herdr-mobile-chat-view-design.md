@@ -101,8 +101,9 @@ normalize the stored row and queue each resulting event (a row can yield several
 | `assistant_text` | `uuid, text` | each assistant text block |
 | `tool_use` | `uuid, toolUseId, tool, summary` | each `tool_use` block; `summary` is a one-line digest (`Bash: <command>`, `Edit: <path>`, `Read: <path>`, otherwise the tool name plus its first string input), cut to 120 chars |
 | `tool_result` | `toolUseId, isError, preview` | each `tool_result` block; `preview` is its text, first 400 chars |
+| `task_notice` | `uuid, status, summary` | a user-role `<task-notification>` document (a background task finishing), from its `<status>` and `<summary>` tags; drawn as a compact `⚙ <summary>` row, never confirms a pending bubble |
 
-Thinking blocks, images and documents are dropped. Any text field over 64 KB is
+`<system-reminder>…</system-reminder>` spans are stripped from user text (the api-form history merges injected context into user messages; seen live). Thinking blocks, images and documents are dropped. Any text field over 64 KB is
 truncated with a `…[truncated]` marker.
 
 **State.** `turn.start` queues `state {state:"working"}`; `turn.complete` queues

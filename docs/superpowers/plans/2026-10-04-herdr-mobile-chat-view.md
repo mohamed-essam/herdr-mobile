@@ -17,7 +17,7 @@
 - The mod is a no-op when `HERDR_PANE_ID` is unset.
 - The sync timer never awaits `$.prompt.submit` (it resolves only when Claude goes idle); submits go through an unawaited promise chain.
 - Socket path: `HERDR_MOBILE_CHAT_SOCK` if set, else `$XDG_RUNTIME_DIR/herdr-mobile/chat.sock`, else chat is disabled (no `/tmp` fallback — security ruling). Same rule in the mod and the companion. Parent dir 0700, socket 0600.
-- Event types on the wire: `user_text {uuid,text}`, `assistant_text {uuid,text}`, `tool_use {uuid,toolUseId,tool,summary}`, `tool_result {toolUseId,isError,preview}`; control types `hello {sessionId,cwd}`, `snapshot {events}`, `state {state}`.
+- Event types on the wire: `user_text {uuid,text}`, `assistant_text {uuid,text}`, `tool_use {uuid,toolUseId,tool,summary}`, `tool_result {toolUseId,isError,preview}`, `task_notice {uuid,status,summary}` (added after live validation); control types `hello {sessionId,cwd}`, `snapshot {events}`, `state {state}`.
 - Limits: text fields cut at 64 KB with `…[truncated]`; `preview` 400 chars; `summary` 120 chars; ring buffer 500 events; snapshot sends the last 500; outbox 20; `/sync` body 8 MB; liveness window 5 s; pending-message timeout 2 min.
 - Protocol changes are additive (`companionProtocol` 7 → 8). Pane JSON gains `chat` (omitempty).
 - WS error codes for `chat_send_result.error`: `no_mod`, `outbox_full`, `empty`.
