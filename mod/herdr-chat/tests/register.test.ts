@@ -1,8 +1,24 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { queueAppended, type State } from '../hooks/register'
+import { eventsFromTranscript } from '../hooks/transcript'
 
-const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], offline: false, inFlight: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined })
+const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], offline: false, inFlight: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined, historyLacksPath: false })
+
+// The first `limit` UTF-8 bytes of `s`, as text; a character the cut falls
+// inside is dropped (`dropped`).
+function cutUtf8(s: string, limit: number): { text: string; cut: boolean; dropped: boolean } {
+  let bytes = 0
+  let i = 0
+  while (i < s.length) {
+    const c = s.codePointAt(i)!
+    const n = c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4
+    if (bytes + n > limit) return { text: s.slice(0, i), cut: true, dropped: bytes < limit }
+    bytes += n
+    i += c > 0xffff ? 2 : 1
+  }
+  return { text: s, cut: false, dropped: false }
+}
 
 type Sync = { paneId: string; sessionId: string; events: { type: string; [k: string]: unknown }[] }
 
@@ -21,16 +37,26 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
     { role: 'user', content: [{ type: 'text', text: 'earlier question' }] },
     { role: 'assistant', content: [{ type: 'text', text: 'earlier answer' }] },
   ] as unknown[] }
-  // Transcript files the fake fs can read (any other path rejects) and the
-  // paths the plugin asked for.
+  // Transcript files a fake `tail -n +<line> <path>` serves (another path
+  // exits 1, `boom` makes the run reject), with stdout cut at `limit` bytes as
+  // the engine cuts at 4 MiB: a character straddling the cut is dropped.
+  // `reads` lists each read's path (its first run); `runs` every run.
   const files: Record<string, string> = {}
   const reads: string[] = []
+  const runs: { line: number; cut: boolean; dropped: boolean }[] = []
+  const tail = { limit: 4194304 }
   let submitGate: Promise<void> = Promise.resolve()
-  on('fs.read', ($, e) => {
-    reads.push(e.path)
-    const text = files[e.path]
-    if (text === undefined) throw new Error('ENOENT')
-    return { value: text }
+  on('process.run', ($, e) => {
+    const [cmd, flag, from, path] = e.argv
+    expect([cmd, flag, e.argv.length]).toEqual(['tail', '-n', 4])
+    const line = Number(from!.slice(1))
+    if (line === 1) reads.push(path!)
+    if (path === 'boom') throw new Error('spawn failed')
+    const file = files[path!]
+    if (file === undefined) return { value: { exitCode: 1, stdout: '', stderr: 'no such file', isStdoutTruncated: false, isStderrTruncated: false } }
+    const out = cutUtf8(file.split('\n').slice(line - 1).join('\n'), tail.limit)
+    runs.push({ line, cut: out.cut, dropped: out.dropped })
+    return { value: { exitCode: 0, stdout: out.text, stderr: '', isStdoutTruncated: out.cut, isStderrTruncated: false } }
   })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   // No settings hooks beneath: the classic events answer with no decision.
@@ -55,7 +81,7 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
     return { text: e.text }
   })
   return {
-    clock, syncs, outbox, submitted, current, answer, files, reads,
+    clock, syncs, outbox, submitted, current, answer, files, reads, runs, tail,
     hold() { let release!: () => void; submitGate = new Promise(r => (release = r)); return release },
     all: () => syncs.flatMap(s => s.events),
   }
@@ -312,5 +338,63 @@ describe('herdr-chat', () => {
       expect(typeof e.ts).toBe('number')
       expect(e.ts >= before && e.ts <= Date.now()).toBe(true)
     }
+  })
+
+  test('a transcript read in many cut pieces yields the same history as one read', async ($, on) => {
+    const w = world(on)
+    const rows: string[] = []
+    for (let i = 0; i < 30; i++) {
+      rows.push(JSON.stringify({ type: 'user', uuid: `u${i}`, isSidechain: false, timestamp: '2026-10-04T15:10:14.835Z', message: { role: 'user', content: `q${i} héllo wörld ✓ — 😀 ${'é'.repeat(i)}` } }))
+      rows.push(JSON.stringify({ type: 'assistant', uuid: `a${i}`, isSidechain: false, timestamp: '2026-10-04T15:10:15.000Z', message: { role: 'assistant', content: [{ type: 'text', text: `a${i} ünïcödé 日本語 ${'ß'.repeat(i)}` }] } }))
+    }
+    const file = rows.join('\n') + '\n'
+    w.files['/t/big.jsonl'] = file
+    w.tail.limit = 700
+    await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/big.jsonl' })
+    await start($)
+    await w.clock.advance(1000)
+    expect(w.runs.length > 5).toBe(true)
+    expect(w.runs.some(r => r.dropped)).toBe(true) // a character straddled a cut
+    const snap = w.syncs[0]!.events[1] as any
+    expect(snap.events.length).toBe(60)
+    expect(snap.events).toEqual(eventsFromTranscript(file))
+  })
+
+  test('a line longer than the read limit is skipped, the rest still read', async ($, on) => {
+    const w = world(on)
+    const row = (uuid: string, text: string) => JSON.stringify({ type: 'user', uuid, timestamp: '2026-10-04T15:10:14.835Z', message: { role: 'user', content: text } })
+    w.files['/t/p1.jsonl'] = [row('u1', 'before'), row('u2', 'x'.repeat(500)), row('u3', 'after')].join('\n')
+    w.tail.limit = 200
+    await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/p1.jsonl' })
+    await start($)
+    await w.clock.advance(1000)
+    expect((w.syncs[0]!.events[1] as any).events.map((e: any) => e.text)).toEqual(['before', 'after'])
+  })
+
+  test('a transcript run that rejects falls back to the api-form history', async ($, on) => {
+    const w = world(on)
+    await $.classic.SessionStart({ source: 'startup', transcript_path: 'boom' })
+    await start($)
+    await w.clock.advance(1000)
+    expect(w.reads).toEqual(['boom'])
+    expect((w.syncs[0]!.events[1] as any).events.map((e: any) => e.uuid)).toEqual(['snap-0', 'snap-1#0'])
+  })
+
+  test('the first transcript path after a path-less snapshot triggers one upgrade resync', async ($, on) => {
+    const w = world(on)
+    w.files['/t/p1.jsonl'] = TRANSCRIPT
+    w.files['/t/p2.jsonl'] = TRANSCRIPT
+    await start($)
+    await w.clock.advance(1000)
+    expect(w.reads).toEqual([])
+    expect((w.syncs[0]!.events[1] as any).events.map((e: any) => e.uuid)).toEqual(['snap-0', 'snap-1#0'])
+    await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/p1.jsonl' })
+    await w.clock.advance(1000)
+    expect(w.syncs[1]!.events.map(e => e.type)).toEqual(['hello', 'snapshot'])
+    expect((w.syncs[1]!.events[1] as any).events).toEqual([{ type: 'user_text', uuid: 'u1', text: 'from the transcript', ts: 1791126614835 }])
+    await $.classic.UserPromptSubmit({ prompt: 'hi', transcript_path: '/t/p2.jsonl' })
+    await w.clock.advance(1000)
+    expect(w.syncs[2]!.events).toEqual([])
+    expect(w.reads).toEqual(['/t/p1.jsonl'])
   })
 })

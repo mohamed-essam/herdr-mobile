@@ -1,6 +1,6 @@
 import type { EngineInterface, Register } from 'claude-code'
 import { normalizeBlocks, normalizeSnapshot, shouldForward, type ChatEvent } from './normalize'
-import { eventsFromTranscript } from './transcript'
+import { addTranscriptLine, finishTranscriptHistory, newTranscriptHistory, splitPiece } from './transcript'
 
 type Control =
   | { type: 'hello'; sessionId: string; cwd: string }
@@ -26,6 +26,9 @@ export type State = {
   // The session's transcript file, from the latest classic event carrying it
   // (it moves when the session enters a worktree).
   transcriptPath: string | undefined
+  // The last snapshot used the api-form history because no transcript path
+  // was known yet: the first path to arrive asks for one upgrade resync.
+  historyLacksPath: boolean
 }
 
 const SYNC_MS = 1000
@@ -39,18 +42,39 @@ async function resolveSocket($: EngineInterface): Promise<string> {
   return ''
 }
 
+// Reads the transcript in pieces (`$.fs.read` refuses files over 4 MiB, and
+// real transcripts grow far past that): each `tail -n +<line>` run's output is
+// cut at 4 MiB, its complete lines are parsed as they come, and the next run
+// starts at the first line not yet read. Reading by line, never by byte
+// offset, means a cut inside a multi-byte character only ever touches the
+// incomplete last line, which is read again whole by the next run. Rejects
+// when the file can't be read.
+async function readTranscript($: EngineInterface, path: string) {
+  const h = newTranscriptHistory()
+  let line = 1
+  for (;;) {
+    const r = await $.process.run(['tail', '-n', `+${line}`, path])
+    if (r.exitCode !== 0) throw new Error(`tail exited ${r.exitCode}`)
+    const piece = splitPiece(r.stdout, r.isStdoutTruncated)
+    for (const l of piece.lines) addTranscriptLine(h, l)
+    if (!r.isStdoutTruncated) break
+    line += piece.advance
+  }
+  return finishTranscriptHistory(h)
+}
+
 // History from the transcript file (real uuids, timestamps, meta rows
-// dropped); the api-form history when the path is unknown, the read rejects
-// (missing, over the read limit) or the file has no message rows.
+// dropped); the api-form history when the path is unknown, the read fails or
+// the file has no message rows.
 async function readHistory($: EngineInterface, s: State): Promise<ChatEvent[]> {
+  s.historyLacksPath = !s.transcriptPath
   if (s.transcriptPath) {
-    let text: string | undefined
+    let events: ChatEvent[] | null = null
     try {
-      text = await $.fs.read(s.transcriptPath)
+      events = await readTranscript($, s.transcriptPath)
     } catch {
-      text = undefined
+      events = null
     }
-    const events = text === undefined ? null : eventsFromTranscript(text)
     if (events) return events
   }
   const history = await $.session.messages({ as: 'api' })
@@ -149,11 +173,17 @@ export const register: Register = on => {
     lastState: undefined,
     timer: undefined,
     transcriptPath: undefined,
+    historyLacksPath: false,
   }
 
   // Only remembers the path; the read happens at the next resync.
   const trackTranscript = (path: string) => {
-    if (path) s.transcriptPath = path
+    if (!path) return
+    s.transcriptPath = path
+    if (s.historyLacksPath && s.paneId) {
+      s.historyLacksPath = false
+      s.needResync = true
+    }
   }
   on('classic.SessionStart', async ($, e, next) => {
     trackTranscript(e.transcript_path)

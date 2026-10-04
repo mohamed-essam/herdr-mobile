@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { eventsFromTranscript } from '../hooks/transcript'
+import { eventsFromTranscript, splitPiece } from '../hooks/transcript'
 
 const row = (o: object) => JSON.stringify(o)
 const base = { isSidechain: false, sessionId: 's1' }
@@ -46,5 +46,18 @@ describe('eventsFromTranscript', () => {
   test('a file of only non-message rows yields null', () => {
     const jsonl = [row({ type: 'queue-operation' }), row({ type: 'mode', mode: 'default' }), '{bad'].join('\n')
     expect(eventsFromTranscript(jsonl)).toBe(null)
+  })
+})
+
+describe('splitPiece', () => {
+  test('a whole piece yields every line', () => {
+    expect(splitPiece('a\nb\nc', false)).toEqual({ lines: ['a', 'b', 'c'], advance: 0 })
+  })
+  test('a cut piece yields its complete lines and advances past them', () => {
+    expect(splitPiece('a\nb\npart', true)).toEqual({ lines: ['a', 'b'], advance: 2 })
+    expect(splitPiece('a\n', true)).toEqual({ lines: ['a'], advance: 1 })
+  })
+  test('a cut piece without a newline skips that one over-long line', () => {
+    expect(splitPiece('xxxxxxxx', true)).toEqual({ lines: [], advance: 1 })
   })
 })
