@@ -34,7 +34,8 @@ object ChatReducer {
     /**
      * Applies a frame. [now] stamps a working -> idle transition. A chat_event
      * in the current epoch whose seq skips ahead (the companion dropped
-     * updates for a full subscriber) sets [ChatView.gap]; later events are
+     * updates for a full subscriber), or that belongs to a newer epoch (its
+     * snapshot was dropped), sets [ChatView.gap]; later events are
      * ignored until a snapshot heals the view. The caller re-opens the pane.
      */
     fun onFrame(v: ChatView, f: ServerFrame, now: Long): ChatView = when (f) {
@@ -49,7 +50,10 @@ object ChatReducer {
         is ServerFrame.ChatEventFrame -> {
             val e = f.entry
             when {
-                !v.loaded || f.epoch != v.epoch || e == null || e.seq <= v.lastSeq || v.gap -> v
+                !v.loaded || v.gap -> v
+                // The new epoch's snapshot was dropped: heal like a seq gap.
+                f.epoch > v.epoch -> v.copy(gap = true)
+                f.epoch != v.epoch || e == null || e.seq <= v.lastSeq -> v
                 e.seq != v.lastSeq + 1 -> v.copy(gap = true)
                 else -> v.copy(
                     entries = (v.entries + e).takeLast(MAX_ENTRIES),
@@ -117,3 +121,15 @@ fun pendingLabel(p: PendingMsg, state: String): String = when (p.status) {
     }
     PendingStatus.NotDelivered -> "not delivered"
 }
+
+/** The item to jump to when a chat screen is entered, or null (not ready / already done). */
+fun entryScrollTarget(loaded: Boolean, itemCount: Int, done: Boolean): Int? =
+    if (loaded && itemCount > 0 && !done) itemCount - 1 else null
+
+fun taskNoticeLabel(n: ChatEvent.TaskNotice): String = when {
+    n.summary.isNotBlank() -> "⚙ ${n.summary.trim()}"
+    n.status.isNotBlank() -> "⚙ background task ${n.status.trim()}"
+    else -> "⚙ background task"
+}
+
+fun taskNoticeIsError(n: ChatEvent.TaskNotice): Boolean = n.status == "failed" || n.status == "killed"

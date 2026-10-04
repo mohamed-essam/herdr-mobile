@@ -202,6 +202,14 @@ class ProtocolTest {
         assertEquals("no_mod", r.error)
     }
 
+    @Test fun parsesTaskNotice() {
+        val e = parseServerFrame("""{"t":"chat_event","paneId":"p","epoch":1,"seq":3,"event":{"type":"task_notice","uuid":"d#0","status":"completed","summary":"done"}}""") as ServerFrame.ChatEventFrame
+        assertEquals(ChatEntry(3, ChatEvent.TaskNotice("d#0", "completed", "done")), e.entry)
+        val f = parseServerFrame("""{"t":"chat_snapshot","paneId":"p","epoch":1,"state":"idle","events":[
+            {"seq":1,"event":{"type":"task_notice","uuid":"d#0"}}]}""") as ServerFrame.ChatSnapshot
+        assertEquals(ChatEvent.TaskNotice("d#0", "", ""), f.entries.single().event)
+    }
+
     @Test fun chatClientMessages() {
         assertEquals("""{"t":"chat_open","paneId":"w1:p1"}""", ClientMsg.chatOpen("w1:p1"))
         assertEquals("""{"t":"chat_close","paneId":"w1:p1"}""", ClientMsg.chatClose("w1:p1"))

@@ -104,6 +104,17 @@ class ChatRepositoryTest {
         assertEquals(listOf(ClientMsg.chatOpen("p"), ClientMsg.chatOpen("p")), sent)
     }
 
+    @Test fun newerEpochEventReopensOnce() {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> })
+        repo.open("p")
+        repo.onFrame(ServerFrame.ChatSnapshot("p", 1, "idle", listOf(ChatEntry(1, ChatEvent.UserText("u1", "a")))))
+        sent.clear()
+        repo.onFrame(ServerFrame.ChatEventFrame("p", 2, ChatEntry(1, ChatEvent.AssistantText("a1", "r"))))
+        repo.onFrame(ServerFrame.ChatEventFrame("p", 2, ChatEntry(2, ChatEvent.AssistantText("a2", "r"))))
+        assertEquals(listOf(ClientMsg.chatOpen("p")), sent)
+    }
+
     @Test fun workingPendingSurvivesLongTurnsViaTheRepositoryClock() = runTest {
         var t = 0L
         val repo = ChatRepository(sendRaw = {}, sendChat = { _, _ -> }, now = { t })

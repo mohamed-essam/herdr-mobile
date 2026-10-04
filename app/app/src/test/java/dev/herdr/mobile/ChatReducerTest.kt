@@ -195,4 +195,48 @@ class ChatReducerTest {
         assertEquals(listOf(1, 2, 3, 4, 5), v.entries.map { it.seq })
         assertTrue(v.pending.isEmpty())
     }
+
+    // L2: a task notice is an entry of its own and never confirms a bubble.
+    @Test fun taskNoticeIsKeptAndNeverConfirmsPending() {
+        var v = onFrame(ChatView(), snap(1, user(1, "a")))
+        v = ChatReducer.addPending(v, "p1", "done", 0)
+        v = onFrame(v, ev(1, ChatEntry(2, ChatEvent.TaskNotice("d#0", "completed", "done"))))
+        assertEquals(ChatEvent.TaskNotice("d#0", "completed", "done"), v.entries.last().event)
+        assertEquals(2, v.lastSeq)
+        assertEquals(listOf("p1"), v.pending.map { it.id })
+        v = onFrame(v, snap(2, ChatEntry(1, ChatEvent.TaskNotice("d#0", "completed", "done"))))
+        assertEquals(listOf("p1"), v.pending.map { it.id })
+    }
+
+    @Test fun taskNoticeLabels() {
+        assertEquals("⚙ Background command \"x\" completed", taskNoticeLabel(ChatEvent.TaskNotice("u", "completed", "Background command \"x\" completed")))
+        assertEquals("⚙ background task failed", taskNoticeLabel(ChatEvent.TaskNotice("u", "failed", " ")))
+        assertEquals("⚙ background task", taskNoticeLabel(ChatEvent.TaskNotice("u", "", "")))
+        assertTrue(taskNoticeIsError(ChatEvent.TaskNotice("u", "failed", "")))
+        assertTrue(taskNoticeIsError(ChatEvent.TaskNotice("u", "killed", "")))
+        assertFalse(taskNoticeIsError(ChatEvent.TaskNotice("u", "completed", "")))
+    }
+
+    // P2: the new-epoch snapshot was dropped; its events must flag a gap so
+    // the repository re-opens instead of freezing on the old epoch.
+    @Test fun newerEpochEventFlagsGap() {
+        var v = onFrame(ChatView(), snap(1, user(1, "a")))
+        v = onFrame(v, ev(2, reply(1, "new epoch")))
+        assertTrue(v.gap)
+        assertEquals(1, v.epoch)
+        assertEquals(listOf("a"), v.entries.map { (it.event as ChatEvent.UserText).text })
+        v = onFrame(v, snap(2, reply(1, "new epoch")))
+        assertFalse(v.gap)
+        v = onFrame(v, ev(2, reply(2, "next")))
+        assertEquals(listOf(1, 2), v.entries.map { it.seq })
+    }
+
+    // L3: entering the chat jumps to the newest item once, regardless of
+    // where the list happens to be laid out.
+    @Test fun entryScrollTargetIsTheLastItemOncePerEntry() {
+        assertNull(entryScrollTarget(loaded = false, itemCount = 5, done = false))
+        assertNull(entryScrollTarget(loaded = true, itemCount = 0, done = false))
+        assertEquals(4, entryScrollTarget(loaded = true, itemCount = 5, done = false))
+        assertNull(entryScrollTarget(loaded = true, itemCount = 5, done = true))
+    }
 }

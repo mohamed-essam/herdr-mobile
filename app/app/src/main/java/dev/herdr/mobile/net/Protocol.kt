@@ -59,6 +59,8 @@ sealed interface ChatEvent {
     data class AssistantText(val uuid: String, val text: String) : ChatEvent
     data class ToolUse(val uuid: String, val toolUseId: String, val tool: String, val summary: String) : ChatEvent
     data class ToolResult(val toolUseId: String, val isError: Boolean, val preview: String) : ChatEvent
+    /** A background task finished (Claude Code's task-notification). */
+    data class TaskNotice(val uuid: String, val status: String, val summary: String) : ChatEvent
 }
 
 data class ChatEntry(val seq: Int, val event: ChatEvent)
@@ -70,6 +72,7 @@ fun parseChatEvent(o: JsonObject): ChatEvent? {
         "user_text" -> ChatEvent.UserText(s("uuid"), s("text"))
         "assistant_text" -> ChatEvent.AssistantText(s("uuid"), s("text"))
         "tool_use" -> ChatEvent.ToolUse(s("uuid"), s("toolUseId"), s("tool"), s("summary"))
+        "task_notice" -> ChatEvent.TaskNotice(s("uuid"), s("status"), s("summary"))
         "tool_result" -> ChatEvent.ToolResult(s("toolUseId"), o["isError"]?.jsonPrimitive?.booleanOrNull ?: false, s("preview"))
         else -> null
     }

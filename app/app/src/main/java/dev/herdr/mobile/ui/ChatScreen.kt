@@ -21,11 +21,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.herdr.mobile.data.PendingMsg
 import dev.herdr.mobile.data.PendingStatus
+import dev.herdr.mobile.data.entryScrollTarget
 import dev.herdr.mobile.data.pendingLabel
+import dev.herdr.mobile.data.taskNoticeIsError
+import dev.herdr.mobile.data.taskNoticeLabel
 import dev.herdr.mobile.net.ChatEvent
 import dev.herdr.mobile.net.Pane
 import kotlinx.coroutines.delay
@@ -57,6 +61,15 @@ fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTermina
         derivedStateOf {
             val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
             last >= listState.layoutInfo.totalItemsCount - 2
+        }
+    }
+    // Entering the screen (or toggling back from the terminal) with a loaded
+    // view opens at the newest item, once; later updates use the follow rule.
+    var entryScrolled by remember(pane.paneId) { mutableStateOf(false) }
+    LaunchedEffect(pane.paneId, view.loaded) {
+        entryScrollTarget(view.loaded, itemCount, entryScrolled)?.let {
+            listState.scrollToItem(it)
+            entryScrolled = true
         }
     }
     LaunchedEffect(itemCount) {
@@ -113,6 +126,7 @@ fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTermina
                             is ChatEvent.ToolUse -> ToolCard(
                                 ev, results[ev.toolUseId], ev.toolUseId in expanded,
                             ) { expanded = if (ev.toolUseId in expanded) expanded - ev.toolUseId else expanded + ev.toolUseId }
+                            is ChatEvent.TaskNotice -> TaskNoticeRow(ev)
                             is ChatEvent.ToolResult -> {}
                         }
                     }
@@ -160,6 +174,19 @@ private fun UserBubble(text: String, pending: PendingMsg? = null, label: String?
             }
         }
     }
+}
+
+@Composable
+private fun TaskNoticeRow(n: ChatEvent.TaskNotice) {
+    Text(
+        taskNoticeLabel(n),
+        modifier = Modifier.fillMaxWidth().alpha(0.8f),
+        textAlign = TextAlign.Center,
+        style = MaterialTheme.typography.labelSmall,
+        color = if (taskNoticeIsError(n)) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 @Composable
