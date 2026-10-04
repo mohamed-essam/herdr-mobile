@@ -276,6 +276,12 @@ func (h *Hub) Drop(paneID string) {
 	p := h.panes[paneID]
 	delete(h.panes, paneID)
 	h.mu.Unlock()
+	// Forget the last delivered value so a later pane with this id notifies
+	// afresh (and the map stays bounded). Taken after mu is released: notify
+	// holds cbMu then takes mu.
+	h.cbMu.Lock()
+	delete(h.notified, paneID)
+	h.cbMu.Unlock()
 	if p == nil {
 		return
 	}

@@ -17,7 +17,8 @@ const maxBody = 8 << 20
 // HERDR_MOBILE_CHAT_SOCK, else $XDG_RUNTIME_DIR/herdr-mobile/chat.sock,
 // else "" meaning chat is disabled. There is deliberately no /tmp fallback: a
 // predictable shared path would let another local user pre-create it, read
-// conversations and inject prompts. The mod uses the same rule.
+// conversations and inject prompts. The mod uses the same rule. A custom
+// HERDR_MOBILE_CHAT_SOCK must live in a directory private to the user.
 func SocketPath() string {
 	if p := os.Getenv("HERDR_MOBILE_CHAT_SOCK"); p != "" {
 		return p
@@ -31,7 +32,8 @@ func SocketPath() string {
 // Listen prepares the socket's directory and listens with the socket
 // restricted to the user (0600). A directory Listen creates is 0700. A
 // pre-existing directory is never chmod'ed: it must be owned by the current
-// user and not group/world-writable. A stale socket is replaced; a live
+// user and grant nothing to group/other (no 0077 bits), so a custom
+// HERDR_MOBILE_CHAT_SOCK must live in a directory private to the user. A stale socket is replaced; a live
 // listener or a non-socket file at path is an error.
 func Listen(path string) (net.Listener, error) {
 	dir := filepath.Dir(path)
@@ -50,8 +52,8 @@ func Listen(path string) (net.Listener, error) {
 		if st, ok := fi.Sys().(*syscall.Stat_t); !ok || int(st.Uid) != os.Getuid() {
 			return nil, fmt.Errorf("%s is not owned by the current user", dir)
 		}
-		if fi.Mode().Perm()&0o022 != 0 {
-			return nil, fmt.Errorf("%s is group/world-writable", dir)
+		if fi.Mode().Perm()&0o077 != 0 {
+			return nil, fmt.Errorf("%s grants access to group/other; use a private (0700) directory", dir)
 		}
 	}
 	if li, err := os.Lstat(path); err == nil {
@@ -68,7 +70,12 @@ func Listen(path string) (net.Listener, error) {
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
+	// Create the socket under a restrictive umask so it is never briefly
+	// accessible to others. Listen runs once at startup, so the process-wide
+	// umask change is acceptable.
+	old := syscall.Umask(0o177)
 	l, err := net.Listen("unix", path)
+	syscall.Umask(old)
 	if err != nil {
 		return nil, err
 	}

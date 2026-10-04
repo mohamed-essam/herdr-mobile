@@ -91,13 +91,22 @@ func TestOutboxClearedOnSessionChange(t *testing.T) {
 func TestListenExistingDirNotChmodded(t *testing.T) {
 	dir := t.TempDir()
 	os.Chmod(dir, 0o755)
+	if l, err := Listen(filepath.Join(dir, "chat.sock")); err == nil {
+		l.Close()
+		t.Fatal("0755 dir must be rejected")
+	}
+	fi, _ := os.Stat(dir)
+	if fi.Mode().Perm() != 0o755 {
+		t.Fatalf("existing dir mode changed to %v", fi.Mode().Perm())
+	}
+	os.Chmod(dir, 0o700)
 	l, err := Listen(filepath.Join(dir, "chat.sock"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer l.Close()
-	fi, _ := os.Stat(dir)
-	if fi.Mode().Perm() != 0o755 {
+	fi, _ = os.Stat(dir)
+	if fi.Mode().Perm() != 0o700 {
 		t.Fatalf("existing dir mode changed to %v", fi.Mode().Perm())
 	}
 }
@@ -170,5 +179,17 @@ func TestListenRefusesLiveListener(t *testing.T) {
 	if l, err := Listen(path); err == nil {
 		l.Close()
 		t.Fatal("expected error: another companion listening")
+	}
+}
+
+func TestDropResetsLivenessNotification(t *testing.T) {
+	h := NewHub(nil)
+	var got []bool
+	h.SetOnLiveness(func(_ string, live bool) { got = append(got, live) })
+	h.Sync("p", "s", nil)
+	h.Drop("p")
+	h.Sync("p", "s", nil)
+	if len(got) != 2 || !got[0] || !got[1] {
+		t.Fatalf("callbacks = %v, want [true true]", got)
 	}
 }
