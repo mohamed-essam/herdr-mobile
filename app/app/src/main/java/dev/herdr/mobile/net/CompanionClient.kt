@@ -60,6 +60,7 @@ class CompanionClient(private val http: OkHttpClient = OkHttpClient()) {
                     is ServerFrame.TermOpened -> pending.remove(frame.reqId)?.complete(frame)
                     is ServerFrame.TermError -> if (frame.reqId.isNotEmpty()) pending.remove(frame.reqId)?.complete(frame)
                     is ServerFrame.ActionResult -> pending.remove(frame.reqId)?.complete(frame)
+                    is ServerFrame.ChatSendResult -> pending.remove(frame.reqId)?.complete(frame)
                     is ServerFrame.Created -> pending.remove(frame.reqId)?.complete(frame)
                     is ServerFrame.Agents -> pending.remove(frame.reqId)?.complete(frame)
                     is ServerFrame.CloseImpact -> pending.remove(frame.reqId)?.complete(frame)
@@ -161,6 +162,16 @@ class CompanionClient(private val http: OkHttpClient = OkHttpClient()) {
             is ServerFrame.ActionResult -> if (!f.ok) throw RuntimeException(f.error ?: "move failed")
             is ServerFrame.ErrorFrame -> throw RuntimeException(f.message)
             else -> throw RuntimeException("unexpected reply to move")
+        }
+    }
+
+    /** Queues text for the pane's Claude; throws with the companion's error code. */
+    suspend fun sendChat(paneId: String, text: String) {
+        val reqId = "c${seq.incrementAndGet()}"
+        when (val f = request(reqId, ClientMsg.chatSend(reqId, paneId, text))) {
+            is ServerFrame.ChatSendResult -> if (!f.ok) throw RuntimeException(f.error ?: "send failed")
+            is ServerFrame.ErrorFrame -> throw RuntimeException(f.message)
+            else -> throw RuntimeException("unexpected reply to chat_send")
         }
     }
 

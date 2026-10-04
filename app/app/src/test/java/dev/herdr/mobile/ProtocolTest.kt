@@ -168,4 +168,43 @@ class ProtocolTest {
         assertTrue(json.contains("\"workspaceId\":\"w1\""))
         assertTrue(json.contains("\"reqId\":\"i1\""))
     }
+
+    @Test fun paneChatFlagDefaultsFalse() {
+        val p = (parseServerFrame("""{"t":"pane_update","pane":{"paneId":"w1:p1"}}""") as ServerFrame.PaneUpdate).pane
+        assertFalse(p.chat)
+        val q = (parseServerFrame("""{"t":"pane_update","pane":{"paneId":"w1:p1","chat":true}}""") as ServerFrame.PaneUpdate).pane
+        assertTrue(q.chat)
+    }
+
+    @Test fun parsesChatSnapshotSkippingUnknownEvents() {
+        val f = parseServerFrame("""{"t":"chat_snapshot","paneId":"w1:p1","epoch":2,"state":"working","events":[
+            {"seq":1,"event":{"type":"user_text","uuid":"u1","text":"hi"}},
+            {"seq":2,"event":{"type":"mystery"}},
+            {"seq":3,"event":{"type":"tool_use","uuid":"a#1","toolUseId":"t1","tool":"Bash","summary":"Bash: ls"}},
+            {"seq":4,"event":{"type":"tool_result","toolUseId":"t1","isError":true,"preview":"boom"}}]}""") as ServerFrame.ChatSnapshot
+        assertEquals("w1:p1", f.paneId)
+        assertEquals(2, f.epoch)
+        assertEquals("working", f.state)
+        assertEquals(listOf(1, 3, 4), f.entries.map { it.seq })
+        assertEquals(ChatEvent.UserText("u1", "hi"), f.entries[0].event)
+        assertEquals(ChatEvent.ToolResult("t1", true, "boom"), f.entries[2].event)
+    }
+
+    @Test fun parsesChatEventStateAndSendResult() {
+        val e = parseServerFrame("""{"t":"chat_event","paneId":"p","epoch":1,"seq":9,"event":{"type":"assistant_text","uuid":"a","text":"yo"}}""") as ServerFrame.ChatEventFrame
+        assertEquals(ChatEntry(9, ChatEvent.AssistantText("a", "yo")), e.entry)
+        val unknown = parseServerFrame("""{"t":"chat_event","paneId":"p","epoch":1,"seq":10,"event":{"type":"new_kind"}}""") as ServerFrame.ChatEventFrame
+        assertNull(unknown.entry)
+        val s = parseServerFrame("""{"t":"chat_state","paneId":"p","state":"idle"}""") as ServerFrame.ChatState
+        assertEquals("idle", s.state)
+        val r = parseServerFrame("""{"t":"chat_send_result","reqId":"c1","ok":false,"error":"no_mod"}""") as ServerFrame.ChatSendResult
+        assertFalse(r.ok)
+        assertEquals("no_mod", r.error)
+    }
+
+    @Test fun chatClientMessages() {
+        assertEquals("""{"t":"chat_open","paneId":"w1:p1"}""", ClientMsg.chatOpen("w1:p1"))
+        assertEquals("""{"t":"chat_close","paneId":"w1:p1"}""", ClientMsg.chatClose("w1:p1"))
+        assertEquals("""{"t":"chat_send","reqId":"c1","paneId":"w1:p1","text":"hi \"there\""}""", ClientMsg.chatSend("c1", "w1:p1", "hi \"there\""))
+    }
 }

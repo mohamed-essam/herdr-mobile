@@ -15,6 +15,7 @@ data class Pane(
     val focused: Boolean = false,
     val agent: String? = null,
     val agentStatus: String? = null,
+    val chat: Boolean = false,
 )
 
 @Serializable
@@ -53,7 +54,38 @@ data class AlsoClose(
     val label: String = "",
 )
 
+sealed interface ChatEvent {
+    data class UserText(val uuid: String, val text: String) : ChatEvent
+    data class AssistantText(val uuid: String, val text: String) : ChatEvent
+    data class ToolUse(val uuid: String, val toolUseId: String, val tool: String, val summary: String) : ChatEvent
+    data class ToolResult(val toolUseId: String, val isError: Boolean, val preview: String) : ChatEvent
+}
+
+data class ChatEntry(val seq: Int, val event: ChatEvent)
+
+/** Null for an event type this app version doesn't know (skipped, not an error). */
+fun parseChatEvent(o: JsonObject): ChatEvent? {
+    fun s(k: String) = o[k]?.jsonPrimitive?.contentOrNull ?: ""
+    return when (s("type")) {
+        "user_text" -> ChatEvent.UserText(s("uuid"), s("text"))
+        "assistant_text" -> ChatEvent.AssistantText(s("uuid"), s("text"))
+        "tool_use" -> ChatEvent.ToolUse(s("uuid"), s("toolUseId"), s("tool"), s("summary"))
+        "tool_result" -> ChatEvent.ToolResult(s("toolUseId"), o["isError"]?.jsonPrimitive?.booleanOrNull ?: false, s("preview"))
+        else -> null
+    }
+}
+
+private fun parseChatEntry(el: JsonElement): ChatEntry? {
+    val o = el as? JsonObject ?: return null
+    val ev = (o["event"] as? JsonObject)?.let(::parseChatEvent) ?: return null
+    return ChatEntry(o["seq"]?.jsonPrimitive?.intOrNull ?: 0, ev)
+}
+
 sealed interface ServerFrame {
+    data class ChatSnapshot(val paneId: String, val epoch: Int, val state: String, val entries: List<ChatEntry>) : ServerFrame
+    data class ChatEventFrame(val paneId: String, val epoch: Int, val entry: ChatEntry?) : ServerFrame
+    data class ChatState(val paneId: String, val state: String) : ServerFrame
+    data class ChatSendResult(val reqId: String, val ok: Boolean, val error: String?) : ServerFrame
     data object Welcome : ServerFrame
     data class Panes(val panes: List<Pane>) : ServerFrame
     data class Workspaces(val workspaces: List<Workspace>) : ServerFrame
@@ -119,6 +151,22 @@ fun parseServerFrame(text: String): ServerFrame {
         "term_error" -> ServerFrame.TermError(
             obj["reqId"]?.jsonPrimitive?.content ?: "", obj["termId"]?.jsonPrimitive?.content ?: "",
             obj["message"]?.jsonPrimitive?.content ?: "")
+        "chat_snapshot" -> ServerFrame.ChatSnapshot(
+            obj["paneId"]?.jsonPrimitive?.content ?: "",
+            obj["epoch"]?.jsonPrimitive?.intOrNull ?: 0,
+            obj["state"]?.jsonPrimitive?.content ?: "idle",
+            (obj["events"] as? JsonArray)?.mapNotNull(::parseChatEntry) ?: emptyList())
+        "chat_event" -> ServerFrame.ChatEventFrame(
+            obj["paneId"]?.jsonPrimitive?.content ?: "",
+            obj["epoch"]?.jsonPrimitive?.intOrNull ?: 0,
+            parseChatEntry(obj))
+        "chat_state" -> ServerFrame.ChatState(
+            obj["paneId"]?.jsonPrimitive?.content ?: "",
+            obj["state"]?.jsonPrimitive?.content ?: "idle")
+        "chat_send_result" -> ServerFrame.ChatSendResult(
+            obj["reqId"]?.jsonPrimitive?.content ?: "",
+            obj["ok"]?.jsonPrimitive?.boolean ?: false,
+            obj["error"]?.jsonPrimitive?.content)
         else -> ServerFrame.Unknown
     }
 }
@@ -127,6 +175,10 @@ object ClientMsg {
     private fun obj(vararg pairs: Pair<String, JsonElement>) =
         JsonObject(pairs.toMap()).toString()
 
+    fun chatOpen(paneId: String) = obj("t" to JsonPrimitive("chat_open"), "paneId" to JsonPrimitive(paneId))
+    fun chatClose(paneId: String) = obj("t" to JsonPrimitive("chat_close"), "paneId" to JsonPrimitive(paneId))
+    fun chatSend(reqId: String, paneId: String, text: String) =
+        obj("t" to JsonPrimitive("chat_send"), "reqId" to JsonPrimitive(reqId), "paneId" to JsonPrimitive(paneId), "text" to JsonPrimitive(text))
     fun hello() = obj("t" to JsonPrimitive("hello"), "client" to JsonPrimitive("herdr-mobile"), "clientVersion" to JsonPrimitive("1.0.0"))
     fun registerPush(endpoint: String) = obj("t" to JsonPrimitive("register_push"), "endpoint" to JsonPrimitive(endpoint))
     fun readPane(reqId: String, paneId: String, source: String, lines: Int) =
