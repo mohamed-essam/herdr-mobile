@@ -20,6 +20,7 @@ function world(on: On, opts: { pane?: boolean } = {}) {
   const syncs: Sync[] = []
   const polls: Poll[] = []
   const replies: Reply[] = []
+  const answer = { resync: false }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: 'sess-1' }))
   on('session.messages', () => ({ value: [] as never }))
@@ -28,7 +29,9 @@ function world(on: On, opts: { pane?: boolean } = {}) {
     expect(e.init?.method).toBe('POST')
     if (e.url === 'http://chat/sync') {
       syncs.push(JSON.parse(String(e.init?.body)))
-      return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ messages: [] }) } }
+      const body = answer.resync ? { messages: [], resync: true } : { messages: [] }
+      answer.resync = false
+      return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(body) } }
     }
     expect(e.url).toBe('http://chat/answer')
     polls.push(JSON.parse(String(e.init?.body)))
@@ -46,7 +49,7 @@ function world(on: On, opts: { pane?: boolean } = {}) {
     return { result: { questions: e.questions, answers: { [e.questions[0]!.question]: label } } } as never
   })
   return {
-    clock, syncs, polls, replies, dialog, answerDialog,
+    clock, syncs, polls, replies, dialog, answerDialog, answer,
     hold() {
       let release!: (a: Record<string, string> | null) => void
       replies.push(new Promise(r => (release = a => r({ answer: a }))))
@@ -70,7 +73,11 @@ describe('AskUserQuestion from the phone', () => {
     await start($)
     await w.clock.advance(2000) // hello + snapshot out
     w.replies.push({ answer: null }, { answer: { 'Which color do you prefer?': 'Blue' } })
-    const r = await ask($)
+    const call = ask($)
+    await flush(w)
+    expect(w.polls.length).toBe(1)
+    await w.clock.advance(1000) // an instant null is re-polled a second after it started
+    const r = await call
     expect(w.dialog.calls).toBe(1)
     expect(w.polls.length).toBe(2)
     expect(w.polls[0]).toEqual({ paneId: 'w1:p1', toolUseId: w.dialog.toolUseId })
@@ -128,10 +135,76 @@ describe('AskUserQuestion from the phone', () => {
     const release = w.hold()
     const call = ask($)
     await flush(w)
+    await w.clock.advance(1000)
+    await flush(w)
     expect(w.polls.length).toBe(2)
     w.answerDialog('Red')
     expect((await call).result).toEqual({ questions: QUESTIONS, answers: { 'Which color do you prefer?': 'Red' } })
     release(null)
+  })
+
+  test('a companion answering null at once is polled about once per second', async ($, on) => {
+    const w = world(on)
+    await start($)
+    await w.clock.advance(2000)
+    const call = ask($)
+    await flush(w)
+    expect(w.polls.length).toBe(1)
+    for (let i = 0; i < 3; i++) {
+      await w.clock.advance(1000)
+      await flush(w)
+    }
+    expect(w.polls.length).toBe(4)
+    w.answerDialog('Red')
+    await call
+  })
+
+  test('a poll answered null after a long hold is re-polled at once', async ($, on) => {
+    const w = world(on)
+    await start($)
+    await w.clock.advance(2000)
+    const release = w.hold()
+    const second = w.hold()
+    const call = ask($)
+    await flush(w)
+    await w.clock.advance(20000) // the companion holds the poll
+    await flush(w)
+    expect(w.polls.length).toBe(1)
+    release(null)
+    await flush(w)
+    expect(w.polls.length).toBe(2) // no clock advance needed
+    w.answerDialog('Red')
+    await call
+    second(null)
+  })
+
+  test('a resync while the dialog is open re-sends the question after snapshot_end; not once it settled', async ($, on) => {
+    const w = world(on)
+    on('turn.start', ($, e) => ({ turnId: e.turnId }))
+    await start($)
+    await $.turn.start({ text: 'hi', turnId: 't1' })
+    await w.clock.advance(2000)
+    const release = w.hold()
+    const call = ask($)
+    await flush(w)
+    await w.clock.advance(1000) // the question goes out live
+    expect(w.all().filter(e => e.type === 'question').length).toBe(1)
+    w.answer.resync = true
+    await w.clock.advance(1000) // answered resync:true
+    await w.clock.advance(1000) // rebuilt (pending cleared)
+    await $.turn.start({ text: 'again', turnId: 't2' }) // a row queued meanwhile
+    await w.clock.advance(1000) // resent
+    const last = w.syncs[w.syncs.length - 1]!.events
+    expect(last.map(e => e.type)).toEqual(['hello', 'snapshot_begin', 'snapshot_end', 'state', 'question', 'state'])
+    expect(last[4]).toEqual({ type: 'question', uuid: w.dialog.toolUseId, toolUseId: w.dialog.toolUseId, questions: QUESTIONS, ts: expect.any(Number) })
+    w.answerDialog('Red')
+    await call
+    release(null)
+    await flush(w)
+    w.answer.resync = true
+    for (let i = 0; i < 3; i++) await w.clock.advance(1000)
+    const after = w.syncs[w.syncs.length - 1]!.events.map(e => e.type)
+    expect(after).toEqual(['hello', 'snapshot_begin', 'snapshot_end', 'state'])
   })
 
   test('without HERDR_PANE_ID the dialog alone answers', async ($, on) => {

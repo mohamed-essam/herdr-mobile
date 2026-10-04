@@ -49,6 +49,9 @@ export type State = {
   // The last snapshot used the api-form history because no transcript path
   // was known yet: the first path to arrive asks for one upgrade resync.
   historyLacksPath: boolean
+  // Question events whose dialog race has not settled, by toolUseId: every
+  // resync re-sends them (the history has no question events).
+  openQuestions: Map<string, Outgoing>
 }
 
 const SYNC_MS = 1000
@@ -148,6 +151,7 @@ async function buildHistory($: EngineInterface, s: State) {
     for (const chunk of chunkEvents(events)) head.push({ type: 'snapshot_chunk', events: chunk })
     head.push({ type: 'snapshot_end' })
     if (s.lastState) head.push({ type: 'state', state: s.lastState })
+    head.push(...s.openQuestions.values())
     s.pending = [...head, ...s.pending]
     // Entries keep history order (ids are never integer-like keys).
     s.imageQueue = [...Object.entries(images).slice(-HISTORY_IMAGES), ...s.imageQueue]
@@ -253,11 +257,15 @@ function answerOf(v: unknown): Record<string, string> | null {
 
 // Long-polls the companion for the phone's answer to `toolUseId` until one
 // comes or `race.over` (the dialog answered). The companion holds each poll up
-// to 25 s and answers `{answer: null}` on timeout: poll again at once. A poll
-// that fails (companion down, an older companion without /answer) is retried
-// after one sync interval. Never rejects; resolves null once the race is over.
+// to 25 s and answers `{answer: null}` on timeout. Polls start at most once
+// per SYNC_MS: a poll that ended (null, failed, an older companion without
+// /answer) sooner than that waits out the rest; one held longer is re-polled
+// at once. The pacing wait is a `$.clock.after` timer, an in-flight `$` call
+// the hook budget does not count (unlike `$.clock.sleep`). Never rejects;
+// resolves null once the race is over.
 async function pollAnswer($: EngineInterface, s: State, toolUseId: string, race: { over: boolean }): Promise<Record<string, string> | null> {
   while (!race.over) {
+    const started = await $.clock.now()
     try {
       const res = await $.http.fetch('http://chat/answer', {
         method: 'POST',
@@ -269,9 +277,11 @@ async function pollAnswer($: EngineInterface, s: State, toolUseId: string, race:
       const answer = answerOf((JSON.parse(res.text) as { answer?: unknown }).answer)
       if (answer && !race.over) return answer
     } catch {
-      if (race.over) break
-      await new Promise<void>(r => $.clock.after(SYNC_MS, r))
+      // Failed: paced below like a null answer.
     }
+    if (race.over) break
+    const rest = started + SYNC_MS - (await $.clock.now())
+    if (rest > 0) await new Promise<void>(r => $.clock.after(rest, r))
   }
   return null
 }
@@ -312,6 +322,7 @@ export const register: Register = on => {
     timer: undefined,
     transcriptPath: undefined,
     historyLacksPath: false,
+    openQuestions: new Map(),
   }
 
   // Only remembers the path; the read happens at the next resync.
@@ -384,7 +395,9 @@ export const register: Register = on => {
   // in-flight `$` calls, which the hook budget does not count.
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
     if (!s.paneId) return next(e)
-    s.pending.push({ type: 'question', uuid: e.tool_use_id, toolUseId: e.tool_use_id, questions: e.questions, ts: Date.now() })
+    const question: Outgoing = { type: 'question', uuid: e.tool_use_id, toolUseId: e.tool_use_id, questions: e.questions, ts: Date.now() }
+    s.pending.push(question)
+    s.openQuestions.set(e.tool_use_id, question)
     const race = { over: false }
     const dialog = next(e).then(r => ({ dialog: r }))
     const never = new Promise<never>(() => {})
@@ -395,6 +408,7 @@ export const register: Register = on => {
       return { result: { questions: e.questions, answers: first.phone } }
     } finally {
       race.over = true
+      s.openQuestions.delete(e.tool_use_id)
     }
   })
 
