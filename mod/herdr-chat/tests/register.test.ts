@@ -563,6 +563,17 @@ describe('herdr-chat', () => {
     expect(w.syncs[1]!.images!['i0#0']).toEqual({ mediaType: 'image/png', data: big })
   })
 
+  test('only the newest 30 history images are sent; every reference stays', async ($, on) => {
+    const w = world(on)
+    w.files['/t/img.jsonl'] = Array.from({ length: 40 }, (_, i) => imageRow(`i${i}`, 'QUJD')).join('\n')
+    await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/img.jsonl' })
+    await start($)
+    await w.clock.advance(3000)
+    expect(w.snapshots()[0]!.events.map((e: any) => e.images)).toEqual(Array.from({ length: 40 }, (_, i) => [`i${i}#0`]))
+    const sent = w.syncs.flatMap(s => Object.keys(s.images ?? {}))
+    expect(sent).toEqual(Array.from({ length: 30 }, (_, i) => `i${i + 10}#0`))
+  })
+
   test('an image over 5 MB is dropped, never sent, and does not block the rest', async ($, on) => {
     const w = world(on)
     w.files['/t/img.jsonl'] = [imageRow('huge', 'A'.repeat(6 * MB)), imageRow('small', 'QUJD')].join('\n')

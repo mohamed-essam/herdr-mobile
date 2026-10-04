@@ -17,6 +17,9 @@ type Outgoing = ChatEvent | Control
 export const CHUNK_BYTES = 2 * 1024 * 1024
 export const BODY_BYTES = 6 * 1024 * 1024
 export const IMAGE_BYTES = 5 * 1024 * 1024
+// Only the newest history images are sent: the companion keeps 30 per pane.
+// Older references stay in their events (answered `missing`).
+export const HISTORY_IMAGES = 30
 
 // Per-load mutable state. Helpers are top-level functions (the engine only
 // follows `$` into functions declared at the top of this file), so the state
@@ -144,7 +147,8 @@ async function buildHistory($: EngineInterface, s: State) {
     head.push({ type: 'snapshot_end' })
     if (s.lastState) head.push({ type: 'state', state: s.lastState })
     s.pending = [...head, ...s.pending]
-    s.imageQueue = [...Object.entries(images), ...s.imageQueue]
+    // Entries keep history order (ids are never integer-like keys).
+    s.imageQueue = [...Object.entries(images).slice(-HISTORY_IMAGES), ...s.imageQueue]
   } catch {
     // A failed session read: retry on the next tick.
     s.needResync = true
