@@ -108,7 +108,8 @@ The chat shows assistant replies as Markdown (long-press to select and copy) wit
 timestamps, and loads older history as you scroll to the top: the companion keeps
 the last 5000 events per pane and the app shows the latest 300 first. Images Claude
 reads, and images in your prompts, render inline; tap one for full-screen
-pinch-zoom. The companion keeps the latest 30 images per pane, and older ones show
+pinch-zoom. The companion keeps the latest 30 images (up to 40 MB) per pane, and
+older ones, like any image over about 2.6 MB (3.5 MB base64, never sent), show
 "image unavailable". When Claude asks a question (`AskUserQuestion`) the phone
 shows a question card; answer from the phone or the terminal, whichever comes
 first, and the card collapses to the answer. Only `http`, `https` and `mailto`
