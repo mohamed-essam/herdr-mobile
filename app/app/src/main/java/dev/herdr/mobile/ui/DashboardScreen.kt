@@ -1,5 +1,6 @@
 package dev.herdr.mobile.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -39,6 +40,7 @@ import dev.herdr.mobile.net.QuestionItem
 import dev.herdr.mobile.ui.theme.Herdr
 import dev.herdr.mobile.ui.theme.HerdrRadius
 import dev.herdr.mobile.ui.theme.HerdrType
+import dev.herdr.mobile.ui.theme.MonoFamily
 import dev.herdr.mobile.ui.theme.SansFamily
 import dev.herdr.mobile.ui.theme.statusColor
 import dev.herdr.mobile.ui.theme.statusGlyph
@@ -103,6 +105,7 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?, companionUrl
         // `selected` is a snapshot from when it was tapped; read the live pane
         // so the chat flag (and the chat-unavailable banner) stays current.
         val live = panes.firstOrNull { it.paneId == pane.paneId } ?: pane
+        BackHandler { selected = null }   // system back returns here, like the header's ←
         PaneScreen(vm, live) { selected = null }
         return   // the pane screen replaces the dashboard while open
     }
@@ -513,7 +516,7 @@ private fun ResumedRow(label: String, number: Int, answer: String, modifier: Mod
             Modifier.size(28.dp).shadow(8.dp, CircleShape, ambientColor = c.green, spotColor = c.green)
                 .clip(CircleShape).background(c.green),
             contentAlignment = Alignment.Center,
-        ) { Text("✓", style = HerdrType.title, color = c.crust) }
+        ) { Text("✓", style = HerdrType.title.copy(fontFamily = MonoFamily), color = c.crust) }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text("$label resumed", style = HerdrType.title, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)

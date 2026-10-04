@@ -50,6 +50,7 @@ import dev.herdr.mobile.net.ServerFrame
 import dev.herdr.mobile.ui.theme.Herdr
 import dev.herdr.mobile.ui.theme.HerdrRadius
 import dev.herdr.mobile.ui.theme.HerdrType
+import dev.herdr.mobile.ui.theme.MonoFamily
 import dev.herdr.mobile.ui.theme.statusColor
 import kotlinx.coroutines.launch
 
@@ -266,7 +267,7 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onCha
                             Modifier.fillMaxWidth().clip(HerdrRadius.card).background(c.base).padding(24.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
-                            Text("⚠", style = HerdrType.headline, color = statusColor("blocked", dark))
+                            Text("⚠", style = HerdrType.headline.copy(fontFamily = MonoFamily), color = statusColor("blocked", dark))
                             Spacer(Modifier.height(8.dp))
                             Text(exit?.title ?: "session ended", style = HerdrType.title, color = c.text, textAlign = TextAlign.Center)
                             Spacer(Modifier.height(4.dp))

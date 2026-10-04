@@ -216,7 +216,7 @@ private fun CloseConfirmation(
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text("⚠", style = HerdrType.small, color = c.peach)
+                Text("⚠", style = HerdrType.small.copy(fontFamily = MonoFamily), color = c.peach)
                 Text(
                     buildAnnotatedString {
                         append(if (alsoCloses.size == 1) "Also closes linked worktree workspace " else "Also closes linked worktree workspaces ")

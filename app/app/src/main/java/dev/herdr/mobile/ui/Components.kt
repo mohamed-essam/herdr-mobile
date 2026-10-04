@@ -25,6 +25,7 @@ import dev.herdr.mobile.ui.theme.AvatarInk
 import dev.herdr.mobile.ui.theme.Herdr
 import dev.herdr.mobile.ui.theme.HerdrRadius
 import dev.herdr.mobile.ui.theme.HerdrType
+import dev.herdr.mobile.ui.theme.MonoFamily
 import dev.herdr.mobile.ui.theme.badgeColor
 
 /*
@@ -218,7 +219,7 @@ fun HerdrToast(
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("✓", color = Color(0xFF40A02B), style = HerdrType.title)
+        Text("✓", color = Color(0xFF40A02B), style = HerdrType.title.copy(fontFamily = MonoFamily))
         Spacer(Modifier.width(12.dp))
         Text(text, color = c.crust, style = HerdrType.body, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         if (actionLabel != null) {

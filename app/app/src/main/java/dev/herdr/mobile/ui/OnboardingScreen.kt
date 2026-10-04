@@ -245,7 +245,7 @@ fun FirstConnectionScreen(vm: DashboardViewModel, hostPort: String, onConnected:
             ) {
                 Text(
                     if (ok) "✓" else spinnerFrame(),
-                    style = if (ok) HerdrType.display.copy(fontSize = 32.sp) else HerdrType.stat,
+                    style = if (ok) HerdrType.stat.copy(fontSize = 32.sp) else HerdrType.stat,
                     color = if (ok) c.crust else c.yellow,
                 )
             }

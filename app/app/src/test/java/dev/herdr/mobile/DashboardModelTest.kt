@@ -60,6 +60,17 @@ class DashboardModelTest {
         assertEquals(listOf("i1", "s1"), s.idle.map { it.paneId })
     }
 
+    @Test fun aPendingQuestionNeedsYouWhateverHerdrSays() {
+        val panes = listOf(agent("w", "working", 100, ask("q", choice)), agent("i", "idle", ask = ask("q2", choice)), agent("d", "done"))
+        val s = dashboardSections(panes)
+        assertEquals(listOf("w", "i"), s.needsYou.map { it.paneId })
+        assertTrue(s.working.isEmpty())
+        assertEquals(listOf("d"), s.done.map { it.paneId })
+        assertTrue(s.idle.isEmpty())
+        val c = statusCounts(panes)
+        assertEquals(listOf(2, 0, 1), listOf(c.blocked, c.working, c.done))
+    }
+
     @Test fun noPaneDisappears() {
         val panes = listOf(agent("a", "blocked"), agent("b", "unknown"), shell("c"), agent("d", "working"))
         val s = dashboardSections(panes)

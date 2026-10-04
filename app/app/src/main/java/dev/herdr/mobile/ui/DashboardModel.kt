@@ -30,18 +30,21 @@ private fun Pane.activityTs(): Long = activity?.ts ?: 0L
  */
 fun dashboardSections(panes: List<Pane>, answers: InlineAnswers = emptyMap()): DashboardSections {
     val knownFirst = compareBy<Pane> { if (it.activityTs() > 0) 0 else 1 }
-    val blocked = panes.filter { it.agent != null && it.agentStatus == "blocked" && !resumedHides(it, answers) }
+    val blocked = panes.filter { needsYou(it) && !resumedHides(it, answers) }
         .sortedWith(knownFirst.thenBy { it.activityTs() }.thenBy { it.paneId })
     val recentFirst = knownFirst.thenByDescending<Pane> { it.activityTs() }.thenBy { it.paneId }
-    val working = panes.filter { it.agent != null && it.agentStatus == "working" }.sortedWith(recentFirst)
-    val done = panes.filter { it.agent != null && it.agentStatus == "done" }.sortedWith(recentFirst)
+    val working = panes.filter { it.agent != null && !needsYou(it) && it.agentStatus == "working" }.sortedWith(recentFirst)
+    val done = panes.filter { it.agent != null && !needsYou(it) && it.agentStatus == "done" }.sortedWith(recentFirst)
     val placed = (blocked + working + done).map { it.paneId }.toSet()
-    val hidden = panes.filter { it.agent != null && it.agentStatus == "blocked" && resumedHides(it, answers) }
+    val hidden = panes.filter { needsYou(it) && resumedHides(it, answers) }
         .map { it.paneId }.toSet()
     val idle = panes.filter { it.paneId !in placed && it.paneId !in hidden }
         .sortedWith(compareBy<Pane> { if (it.agent != null) 0 else 1 }.thenBy { it.paneId })
     return DashboardSections(blocked, working, done, idle)
 }
+
+/** Blocked, or asking a question herdr's status detection hasn't flagged (yet). */
+private fun needsYou(p: Pane): Boolean = p.agent != null && (p.agentStatus == "blocked" || p.ask != null)
 
 /** A blocked pane whose question was just answered here hides behind its "resumed" row,
  *  unless a new question has arrived since. */
@@ -242,8 +245,8 @@ data class StatusCounts(val blocked: Int, val working: Int, val done: Int)
 fun statusCounts(panes: List<Pane>): StatusCounts {
     val agents = panes.filter { it.agent != null }
     return StatusCounts(
-        agents.count { it.agentStatus == "blocked" },
-        agents.count { it.agentStatus == "working" },
-        agents.count { it.agentStatus == "done" },
+        agents.count { needsYou(it) },
+        agents.count { !needsYou(it) && it.agentStatus == "working" },
+        agents.count { !needsYou(it) && it.agentStatus == "done" },
     )
 }
