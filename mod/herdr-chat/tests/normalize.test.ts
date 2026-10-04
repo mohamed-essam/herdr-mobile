@@ -53,6 +53,67 @@ describe('normalizeBlocks', () => {
   })
 })
 
+describe('normalizeBlocks: injected context (L1)', () => {
+  const reminders =
+    '<system-reminder>\nSessionStart:clear hook success: ok\n</system-reminder>\n' +
+    '<system-reminder>\nAs you answer the user\'s questions, use this context.\n</system-reminder>\n\n'
+  test('a reminder-only user message yields no user_text', () => {
+    expect(normalizeBlocks('user', [{ type: 'text', text: reminders }], 'u1')).toEqual([])
+  })
+  test('reminders + real text yields just the real text', () => {
+    const out = normalizeBlocks('user', [{ type: 'text', text: reminders + 'Reply with exactly: before-restart' }], 'u2')
+    expect(out).toEqual([{ type: 'user_text', uuid: 'u2', text: 'Reply with exactly: before-restart' }])
+  })
+  test('reminders are stripped from every text block, string content too', () => {
+    const out = normalizeBlocks('user', 'a <system-reminder>x</system-reminder>b', 'u3')
+    expect(out).toEqual([{ type: 'user_text', uuid: 'u3', text: 'a b' }])
+  })
+  test('text without reminders is unchanged', () => {
+    expect(normalizeBlocks('user', [{ type: 'text', text: '  keep <b>me</b>\n' }], 'u4')).toEqual([
+      { type: 'user_text', uuid: 'u4', text: 'keep <b>me</b>' },
+    ])
+  })
+  test('assistant text is not touched', () => {
+    const t = '<system-reminder>x</system-reminder> hi'
+    expect(normalizeBlocks('assistant', [{ type: 'text', text: t }], 'a1')).toEqual([
+      { type: 'assistant_text', uuid: 'a1#0', text: t },
+    ])
+  })
+})
+
+describe('normalizeBlocks: task notifications (L2)', () => {
+  const notice = (status: string, summary?: string) =>
+    '<task-notification>\n<task-id>bf3npqvu3</task-id>\n<tool-use-id>toolu_1</tool-use-id>\n' +
+    '<output-file>/x/tasks/bf3npqvu3.output</output-file>\n' +
+    (status ? `<status>${status}</status>\n` : '') +
+    (summary !== undefined ? `<summary>${summary}</summary>\n` : '') +
+    '</task-notification>'
+  test('a notification-only user message yields one task_notice and no user_text', () => {
+    const s = 'Background command "Sleep for 25 seconds" completed (exit code 0)'
+    expect(normalizeBlocks('user', [{ type: 'text', text: notice('completed', s) }], 'd1')).toEqual([
+      { type: 'task_notice', uuid: 'd1#0', status: 'completed', summary: s },
+    ])
+  })
+  test('missing status/summary become empty strings', () => {
+    expect(normalizeBlocks('user', notice(''), 'd2')).toEqual([{ type: 'task_notice', uuid: 'd2#0', status: '', summary: '' }])
+  })
+  test('text outside the notification still becomes user_text', () => {
+    const out = normalizeBlocks('user', [{ type: 'text', text: notice('failed', 'boom') + '\n\nnow fix it' }], 'd3')
+    expect(out).toEqual([
+      { type: 'user_text', uuid: 'd3', text: 'now fix it' },
+      { type: 'task_notice', uuid: 'd3#0', status: 'failed', summary: 'boom' },
+    ])
+  })
+  test('reminders around a notification are stripped first', () => {
+    const out = normalizeBlocks('user', '<system-reminder>r</system-reminder>\n' + notice('killed', 'k'), 'd4')
+    expect(out).toEqual([{ type: 'task_notice', uuid: 'd4#0', status: 'killed', summary: 'k' }])
+  })
+  test('two notifications in one block get distinct uuids', () => {
+    const out = normalizeBlocks('user', notice('completed', 'a') + '\n' + notice('completed', 'b'), 'd5')
+    expect(out.map((e) => (e as { uuid: string }).uuid)).toEqual(['d5#0', 'd5#0.1'])
+  })
+})
+
 describe('summarize and cap', () => {
   test('known tools show their key argument', () => {
     expect(summarize('Edit', { file_path: 'src/a.kt', old_string: 'x' })).toBe('Edit: src/a.kt')

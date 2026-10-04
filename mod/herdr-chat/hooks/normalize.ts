@@ -3,6 +3,7 @@ export type ChatEvent =
   | { type: 'assistant_text'; uuid: string; text: string }
   | { type: 'tool_use'; uuid: string; toolUseId: string; tool: string; summary: string }
   | { type: 'tool_result'; toolUseId: string; isError: boolean; preview: string }
+  | { type: 'task_notice'; uuid: string; status: string; summary: string }
 
 export const MAX_TEXT = 64 * 1024
 export const PREVIEW = 400
@@ -55,6 +56,16 @@ function resultText(content: unknown): string {
     .join('\n')
 }
 
+// Claude Code merges injected context into the api-form history's user text.
+const SYSTEM_REMINDER = /<system-reminder>[\s\S]*?<\/system-reminder>/g
+// A background task finishing is delivered as a user-role row of this shape.
+const TASK_NOTIFICATION = /<task-notification>([\s\S]*?)<\/task-notification>/g
+
+function tag(doc: string, name: string): string {
+  const m = new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(doc)
+  return m?.[1]?.trim() ?? ''
+}
+
 export function normalizeBlocks(role: 'user' | 'assistant', content: unknown, uuid: string): ChatEvent[] {
   const blocks: Block[] =
     typeof content === 'string' ? [{ type: 'text', text: content }] : Array.isArray(content) ? content : []
@@ -62,7 +73,20 @@ export function normalizeBlocks(role: 'user' | 'assistant', content: unknown, uu
   const userTexts: string[] = []
   blocks.forEach((b, i) => {
     if (b.type === 'text' && typeof b.text === 'string') {
-      if (role === 'user') userTexts.push(b.text)
+      if (role === 'user') {
+        let k = 0
+        const rest = b.text.replace(SYSTEM_REMINDER, '').replace(TASK_NOTIFICATION, (_, doc: string) => {
+          out.push({
+            type: 'task_notice',
+            uuid: k === 0 ? `${uuid}#${i}` : `${uuid}#${i}.${k}`,
+            status: tag(doc, 'status'),
+            summary: cap(tag(doc, 'summary')),
+          })
+          k++
+          return ''
+        })
+        if (rest.trim()) userTexts.push(rest)
+      }
       else if (b.text.trim()) out.push({ type: 'assistant_text', uuid: `${uuid}#${i}`, text: cap(b.text) })
     } else if (b.type === 'tool_use' && role === 'assistant') {
       const tool = String(b.name)
