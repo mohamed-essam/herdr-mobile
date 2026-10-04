@@ -20,8 +20,8 @@ data class RowAction(
     val isAgent: Boolean = false,
     val hasAgent: Boolean = false,
     val workspaceId: String = "",
-    // For a promoted pane (its tab was elided), the parent tab's action so the
-    // pane's sheet can pivot to tab operations. Null for normal panes.
+    // For a pane, its tab's action so the pane's sheet can pivot to tab
+    // operations. Null when the tab is unknown.
     val mergedTab: RowAction? = null,
 )
 
@@ -33,23 +33,4 @@ fun needsCloseConfirm(a: RowAction): Boolean = when (a.kind) {
     NodeKind.PANE -> a.isAgent
     NodeKind.TAB -> a.paneCount > 1 || a.hasAgent
     NodeKind.WORKSPACE -> true
-}
-
-/** Confirmation body copy, scaled to the blast radius. */
-fun closeConfirmMessage(a: RowAction): String = when (a.kind) {
-    NodeKind.PANE -> "Close this agent pane? The running agent will be terminated."
-    NodeKind.TAB -> "Close tab '${a.label}'? This ends ${a.paneCount} pane(s)."
-    NodeKind.WORKSPACE ->
-        "Close workspace '${a.label}'? This ends ${a.paneCount} pane(s) across ${a.tabCount} tab(s)."
-}
-
-/**
- * Confirm copy augmented with the sibling worktree-workspaces that herdr will
- * also close (cascade). Falls back to the plain copy when there are none.
- */
-fun closeConfirmMessageWith(a: RowAction, alsoCloses: List<String>): String {
-    val base = closeConfirmMessage(a)
-    if (alsoCloses.isEmpty()) return base
-    return base +
-        "\n\nAlso closes ${alsoCloses.size} linked worktree workspace(s): ${alsoCloses.joinToString(", ")}."
 }
