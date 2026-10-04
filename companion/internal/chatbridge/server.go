@@ -90,6 +90,18 @@ type syncReq struct {
 	PaneID    string            `json:"paneId"`
 	SessionID string            `json:"sessionId"`
 	Events    []json.RawMessage `json:"events"`
+	Images    map[string]Image  `json:"images"`
+}
+
+type answerReq struct {
+	PaneID    string `json:"paneId"`
+	ToolUseID string `json:"toolUseId"`
+}
+
+// answerRes is the /answer reply: the phone's answers, or null when none
+// came within the hold.
+type answerRes struct {
+	Answer map[string]string `json:"answer"`
 }
 
 // syncRes is the /sync answer. Resync asks the mod to send hello + snapshot
@@ -99,7 +111,8 @@ type syncRes struct {
 	Resync   bool     `json:"resync,omitempty"`
 }
 
-// Handler serves the mod's one endpoint, POST /sync.
+// Handler serves the mod's endpoints: POST /sync, and POST /answer, a
+// long-poll for the phone's answer to an AskUserQuestion.
 func (h *Hub) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /sync", func(w http.ResponseWriter, r *http.Request) {
@@ -108,9 +121,20 @@ func (h *Hub) Handler() http.Handler {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
-		msgs, resync := h.SyncResync(req.PaneID, req.SessionID, req.Events)
+		msgs, resync := h.SyncBody(req.PaneID, req.SessionID, req.Events, req.Images)
 		w.Header().Set("content-type", "application/json")
 		_ = json.NewEncoder(w).Encode(syncRes{Messages: msgs, Resync: resync})
+	})
+	mux.HandleFunc("POST /answer", func(w http.ResponseWriter, r *http.Request) {
+		var req answerReq
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil || req.PaneID == "" || req.ToolUseID == "" {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		h.Heartbeat(req.PaneID)
+		ans, _ := h.WaitAnswer(r.Context(), req.PaneID, req.ToolUseID, h.answerWait)
+		w.Header().Set("content-type", "application/json")
+		_ = json.NewEncoder(w).Encode(answerRes{Answer: ans})
 	})
 	return mux
 }

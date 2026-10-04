@@ -73,8 +73,12 @@ func TestRingCap(t *testing.T) {
 	h.Sync("p", "s", evs)
 	snap, _, cancel := h.Subscribe("p")
 	defer cancel()
-	if len(snap.Events) != RingCap || snap.Events[0].Seq != 11 {
-		t.Fatalf("ring: len=%d first=%d", len(snap.Events), snap.Events[0].Seq)
+	// The snapshot carries the newest SnapshotTail; the ring's oldest is 11.
+	if len(snap.Events) != SnapshotTail || snap.Events[len(snap.Events)-1].Seq != RingCap+10 || !snap.HasMore {
+		t.Fatalf("ring: len=%d last=%d", len(snap.Events), snap.Events[len(snap.Events)-1].Seq)
+	}
+	if page, _, _ := h.History("p", snap.Epoch, 12, 5); len(page) != 1 || page[0].Seq != 11 {
+		t.Fatalf("oldest in ring: %+v", page)
 	}
 }
 
