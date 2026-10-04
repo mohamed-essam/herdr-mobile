@@ -122,6 +122,12 @@ fun pendingLabel(p: PendingMsg, state: String): String = when (p.status) {
     PendingStatus.NotDelivered -> "not delivered"
 }
 
+/**
+ * scrollToItem offset that lands on the END of an item (Compose clamps it), so a long
+ * last message shows its tail rather than its top.
+ */
+const val BOTTOM_OFFSET = Int.MAX_VALUE
+
 /** The item to jump to when a chat screen is entered, or null (not ready / already done). */
 fun entryScrollTarget(loaded: Boolean, itemCount: Int, done: Boolean): Int? =
     if (loaded && itemCount > 0 && !done) itemCount - 1 else null

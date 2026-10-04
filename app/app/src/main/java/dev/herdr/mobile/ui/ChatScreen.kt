@@ -26,6 +26,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.herdr.mobile.data.PendingMsg
 import dev.herdr.mobile.data.PendingStatus
+import dev.herdr.mobile.data.BOTTOM_OFFSET
 import dev.herdr.mobile.data.entryScrollTarget
 import dev.herdr.mobile.data.pendingLabel
 import dev.herdr.mobile.data.taskNoticeIsError
@@ -68,12 +69,12 @@ fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTermina
     var entryScrolled by remember(pane.paneId) { mutableStateOf(false) }
     LaunchedEffect(pane.paneId, view.loaded) {
         entryScrollTarget(view.loaded, itemCount, entryScrolled)?.let {
-            listState.scrollToItem(it)
+            listState.scrollToItem(it, BOTTOM_OFFSET)
             entryScrolled = true
         }
     }
     LaunchedEffect(itemCount) {
-        if (itemCount > 0 && atBottom) listState.scrollToItem(itemCount - 1)
+        if (itemCount > 0 && atBottom) listState.scrollToItem(itemCount - 1, BOTTOM_OFFSET)
     }
 
     val title = pane.cwd.substringAfterLast('/').ifBlank { pane.workspaceId.ifBlank { pane.paneId } }
