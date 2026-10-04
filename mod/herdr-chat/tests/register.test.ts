@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { queueAppended, type State } from '../hooks/register'
 
-const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], offline: false, inFlight: false, submitChain: Promise.resolve() })
+const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], offline: false, inFlight: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined })
 
 type Sync = { paneId: string; sessionId: string; events: { type: string; [k: string]: unknown }[] }
 
@@ -16,15 +16,14 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
   const syncs: Sync[] = []
   const outbox: { id: string; text: string }[] = []
   const submitted: string[] = []
+  const current = { id: 'sess-1', history: [
+    { role: 'user', content: [{ type: 'text', text: 'earlier question' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'earlier answer' }] },
+  ] as unknown[] }
   let submitGate: Promise<void> = Promise.resolve()
   on('session.start', ($, e) => ({ cwd: e.cwd }))
-  on('session.id', () => ({ value: 'sess-1' }))
-  on('session.messages', () => ({
-    value: [
-      { role: 'user', content: [{ type: 'text', text: 'earlier question' }] },
-      { role: 'assistant', content: [{ type: 'text', text: 'earlier answer' }] },
-    ],
-  }))
+  on('session.id', () => ({ value: current.id }))
+  on('session.messages', () => ({ value: current.history as never }))
   on('http.fetch', ($, e) => {
     if (opts.down?.()) throw new Error('ECONNREFUSED')
     expect(e.url).toBe('http://chat/sync')
@@ -39,7 +38,7 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
     return { text: e.text }
   })
   return {
-    clock, syncs, outbox, submitted,
+    clock, syncs, outbox, submitted, current,
     hold() { let release!: () => void; submitGate = new Promise(r => (release = r)); return release },
     all: () => syncs.flatMap(s => s.events),
   }
@@ -166,13 +165,37 @@ describe('herdr-chat', () => {
     expect(last).toEqual(['hello', 'snapshot'])
   })
 
-  test('/clear re-sends hello and snapshot', async ($, on) => {
-    const w = world(on)
-    on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  for (const reason of ['clear', 'resume'] as const) {
+    test(`/${reason} resyncs under the new session id with the new history`, async ($, on) => {
+      const w = world(on)
+      on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+      await start($)
+      await w.clock.advance(1000)
+      await $.session.end({ reason, sessionId: 'sess-1', resume: undefined as never })
+      w.current.id = 'sess-2'
+      w.current.history = [{ role: 'user', content: [{ type: 'text', text: 'fresh question' }] }]
+      await w.clock.advance(1000)
+      const sync = w.syncs[1]!
+      expect(sync.sessionId).toBe('sess-2')
+      expect(sync.events.map(e => e.type)).toEqual(['hello', 'snapshot'])
+      expect(sync.events[0]).toEqual({ type: 'hello', sessionId: 'sess-2', cwd: '/repo' })
+      expect((sync.events[1] as any).events).toEqual([{ type: 'user_text', uuid: 'snap-0', text: 'fresh question' }])
+    })
+  }
+
+  test('recovery after an outage re-sends the last turn state after the snapshot', async ($, on) => {
+    let down = false
+    const w = world(on, { down: () => down })
+    on('turn.start', ($, e) => ({ turnId: e.turnId }))
     await start($)
+    await $.turn.start({ text: 'hi', turnId: 't1' })
     await w.clock.advance(1000)
-    await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+    down = true
     await w.clock.advance(1000)
-    expect(w.syncs[1]?.events.map(e => e.type)).toEqual(['hello', 'snapshot'])
+    down = false
+    await w.clock.advance(1000)
+    await w.clock.advance(1000)
+    const last = w.syncs[w.syncs.length - 1]!.events.map(e => e.type === 'state' ? (e as any).state : e.type)
+    expect(last).toEqual(['hello', 'snapshot', 'working'])
   })
 })

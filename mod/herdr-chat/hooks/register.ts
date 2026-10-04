@@ -19,6 +19,9 @@ export type State = {
   offline: boolean
   inFlight: boolean
   submitChain: Promise<unknown>
+  needResync: boolean
+  lastState: 'working' | 'idle' | undefined
+  timer: { cancel: () => void } | undefined
 }
 
 const SYNC_MS = 1000
@@ -32,40 +35,57 @@ async function resolveSocket($: EngineInterface): Promise<string> {
   return ''
 }
 
+// Reads the session fresh and puts hello + snapshot (+ the last known state)
+// ahead of rows queued while the reads were awaited. Callers clear `pending`
+// first when what is queued is already covered by the snapshot.
 async function queueResync($: EngineInterface, s: State) {
   s.sessionId = await $.session.id()
   const history = await $.session.messages({ as: 'api' })
   const events = Array.isArray(history) ? normalizeSnapshot(history) : []
-  s.pending.push({ type: 'hello', sessionId: s.sessionId, cwd: s.cwd }, { type: 'snapshot', events })
+  const head: Outgoing[] = [{ type: 'hello', sessionId: s.sessionId, cwd: s.cwd }, { type: 'snapshot', events }]
+  if (s.lastState) head.push({ type: 'state', state: s.lastState })
+  // Rows appended during the awaits above stay after the snapshot.
+  s.pending = [...head, ...s.pending]
 }
 
 async function tick($: EngineInterface, s: State) {
   if (s.inFlight || !s.paneId) return
   s.inFlight = true
-  const batch = s.offline ? [] : s.pending
-  if (!s.offline) s.pending = []
   try {
-    const res = await $.http.fetch('http://chat/sync', {
-      method: 'POST',
-      socketPath: s.socketPath,
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ paneId: s.paneId, sessionId: s.sessionId, events: batch }),
-    })
-    if (!res.ok) throw new Error(`sync ${res.status}`)
-    if (s.offline) {
-      s.offline = false
+    if (s.needResync && !s.offline) {
+      s.needResync = false
       s.pending = []
       await queueResync($, s)
     }
-    const { messages = [] } = JSON.parse(res.text) as { messages?: { id: string; text: string }[] }
-    for (const m of messages) {
-      // Not awaited: submit resolves only when Claude goes idle, and this
-      // loop is the heartbeat that keeps the pane chat-capable meanwhile.
-      s.submitChain = s.submitChain.then(() => $.prompt.submit({ text: m.text, asUser: true })).catch(() => {})
+    const batch = s.offline ? [] : s.pending
+    if (!s.offline) s.pending = []
+    try {
+      const res = await $.http.fetch('http://chat/sync', {
+        method: 'POST',
+        socketPath: s.socketPath,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ paneId: s.paneId, sessionId: s.sessionId, events: batch }),
+      })
+      if (!res.ok) throw new Error(`sync ${res.status}`)
+      if (s.offline) {
+        s.offline = false
+        s.needResync = false
+        s.pending = []
+        await queueResync($, s)
+      }
+      const { messages = [] } = JSON.parse(res.text) as { messages?: { id: string; text: string }[] }
+      for (const m of messages) {
+        // Not awaited: submit resolves only when Claude goes idle, and this
+        // loop is the heartbeat that keeps the pane chat-capable meanwhile.
+        s.submitChain = s.submitChain.then(() => $.prompt.submit({ text: m.text, asUser: true })).catch(() => {})
+      }
+    } catch {
+      s.offline = true
+      s.pending = []
     }
   } catch {
-    s.offline = true
-    s.pending = []
+    // A failed session read: retry the resync on the next tick.
+    s.needResync = true
   } finally {
     s.inFlight = false
   }
@@ -98,6 +118,9 @@ export const register: Register = on => {
     offline: false,
     inFlight: false,
     submitChain: Promise.resolve(),
+    needResync: false,
+    lastState: undefined,
+    timer: undefined,
   }
 
   on('session.start', async ($, e, next) => {
@@ -111,15 +134,18 @@ export const register: Register = on => {
       return r
     }
     await queueResync($, s)
-    $.clock.every(SYNC_MS, () => void tick($, s))
+    s.timer?.cancel()
+    s.timer = $.clock.every(SYNC_MS, () => void tick($, s))
     return r
   })
 
   on('session.end', async ($, e, next) => {
     const r = await next(e)
-    if (s.paneId && e.reason === 'clear') {
+    // /clear and /resume continue the process under another session id; the
+    // resync (fresh id + history) happens at the next tick, not here.
+    if (s.paneId && (e.reason === 'clear' || e.reason === 'resume')) {
       s.pending = []
-      await queueResync($, s)
+      s.needResync = true
     }
     return r
   })
@@ -132,13 +158,19 @@ export const register: Register = on => {
 
   on('turn.start', async ($, e, next) => {
     const r = await next(e)
-    if (s.paneId) s.pending.push({ type: 'state', state: 'working' })
+    if (s.paneId) {
+      s.lastState = 'working'
+      s.pending.push({ type: 'state', state: 'working' })
+    }
     return r
   })
 
   on('turn.complete', async ($, e, next) => {
     const r = await next(e)
-    if (s.paneId && !e.agentId) s.pending.push({ type: 'state', state: 'idle' })
+    if (s.paneId && !e.agentId) {
+      s.lastState = 'idle'
+      s.pending.push({ type: 'state', state: 'idle' })
+    }
     return r
   })
 }
