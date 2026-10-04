@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 
 class DashboardViewModel(
@@ -34,6 +35,18 @@ class DashboardViewModel(
 ) : ViewModel() {
     val panes: StateFlow<List<Pane>> = repo.panes
     val connected: StateFlow<Boolean> = client.connected
+
+    private val _disconnectedSince = MutableStateFlow<Long?>(null)
+    /** When the companion connection last dropped (epoch ms); null while connected. */
+    val disconnectedSince: StateFlow<Long?> = _disconnectedSince.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            client.connected.collect { up ->
+                _disconnectedSince.value = if (up) null else _disconnectedSince.value ?: System.currentTimeMillis()
+            }
+        }
+    }
 
     val terminalFontSize: StateFlow<Int?> =
         fontSizeStore.stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -73,6 +86,17 @@ class DashboardViewModel(
                 .onFailure { _actionErrors.tryEmit(answerErrorLabel(it.message)) }
         }
     }
+
+    /**
+     * [answerChat] for a caller that shows its own progress: the result, with the
+     * error also on [actionErrors]. Runs in the view model so leaving the screen
+     * doesn't cancel the send.
+     */
+    suspend fun answerChatResult(paneId: String, toolUseId: String, answers: Map<String, String>): Result<Unit> =
+        viewModelScope.async {
+            runCatching { chat.answer(paneId, toolUseId, answers) }
+                .onFailure { _actionErrors.tryEmit(answerErrorLabel(it.message)) }
+        }.await()
 
     private val _lastOpenedPaneId = MutableStateFlow<String?>(null)
     val lastOpenedPaneId: StateFlow<String?> = _lastOpenedPaneId
