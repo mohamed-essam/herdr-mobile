@@ -169,3 +169,25 @@ describe('normalizeSnapshot', () => {
     expect(out.length).toBeLessThan(33)
   })
 })
+
+describe('normalizeBlocks: local-command envelopes (M1)', () => {
+  const caveat =
+    '<local-command-caveat>The command below was run directly in Claude Code, not sent to you as a request.</local-command-caveat>'
+  test('a caveat-only user message yields nothing', () => {
+    expect(normalizeBlocks('user', [{ type: 'text', text: caveat }], 'c1')).toEqual([])
+  })
+  test('caveat + command-name + stdout yields nothing', () => {
+    const t = `${caveat}\n<command-name>/reload-plugins</command-name>\n<command-message>reload-plugins</command-message>\n<command-args></command-args>\n<local-command-stdout>Reloaded\nok</local-command-stdout>\n<local-command-stderr></local-command-stderr>`
+    expect(normalizeBlocks('user', t, 'c2')).toEqual([])
+  })
+  test('real text mixed with a caveat yields only the real text', () => {
+    expect(normalizeBlocks('user', `${caveat}\nhello there`, 'c3')).toEqual([
+      { type: 'user_text', uuid: 'c3', text: 'hello there' },
+    ])
+  })
+  test('an unclosed tag is left as-is', () => {
+    expect(normalizeBlocks('user', '<command-name>/x', 'c4')).toEqual([
+      { type: 'user_text', uuid: 'c4', text: '<command-name>/x' },
+    ])
+  })
+})

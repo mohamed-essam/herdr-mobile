@@ -58,6 +58,9 @@ function resultText(content: unknown): string {
 
 // Claude Code merges injected context into the api-form history's user text.
 const SYSTEM_REMINDER = /<system-reminder>[\s\S]*?<\/system-reminder>/g
+// Slash-command envelopes recorded as user messages (local-command output).
+const LOCAL_COMMAND =
+  /<(local-command-caveat|command-name|command-message|command-args|local-command-stdout|local-command-stderr)>[\s\S]*?<\/\1>/g
 // A background task finishing is delivered as a user-role row of this shape.
 const TASK_NOTIFICATION = /<task-notification>([\s\S]*?)<\/task-notification>/g
 
@@ -75,7 +78,7 @@ export function normalizeBlocks(role: 'user' | 'assistant', content: unknown, uu
     if (b.type === 'text' && typeof b.text === 'string') {
       if (role === 'user') {
         let k = 0
-        const rest = b.text.replace(SYSTEM_REMINDER, '').replace(TASK_NOTIFICATION, (_, doc: string) => {
+        const rest = b.text.replace(SYSTEM_REMINDER, '').replace(LOCAL_COMMAND, '').replace(TASK_NOTIFICATION, (_, doc: string) => {
           out.push({
             type: 'task_notice',
             uuid: k === 0 ? `${uuid}#${i}` : `${uuid}#${i}.${k}`,
