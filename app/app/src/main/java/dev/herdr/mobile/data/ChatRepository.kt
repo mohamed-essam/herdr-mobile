@@ -22,6 +22,8 @@ const val IMAGE_CACHE_SIZE = 30
 const val MAX_IMAGE_REQUESTS = 3
 /** An image can reach the companion after its event: a `missing` is retried once after this. */
 const val IMAGE_RETRY_MS = 3_000L
+/** A chat_image / chat_history reply not seen by then is treated as lost. */
+const val REPLY_TIMEOUT_MS = 15_000L
 
 /**
  * Per-pane chat state. Opened panes are re-subscribed after a reconnect; the
@@ -83,8 +85,9 @@ class ChatRepository(
 
     /**
      * Requests the page before the oldest loaded entry. A no-op unless the view
-     * is loaded, the companion has more and no page is already in flight; a
-     * lost reply is healed by the next snapshot (which clears loadingOlder).
+     * is loaded, the companion has more and no page is already in flight. A
+     * reply that doesn't come within [REPLY_TIMEOUT_MS] (or a snapshot) clears
+     * the request so paging can resume.
      */
     fun loadOlder(paneId: String) {
         val reqId = "h${ids.incrementAndGet()}"
@@ -96,10 +99,15 @@ class ChatRepository(
             } else {
                 val before = v.entries.firstOrNull()?.seq ?: (v.lastSeq + 1)
                 msg = ClientMsg.chatHistory(reqId, paneId, v.epoch, before, HISTORY_PAGE_LIMIT)
-                ChatReducer.startLoadingOlder(v)
+                ChatReducer.startLoadingOlder(v, reqId)
             }
         }
-        msg?.let(sendRaw)
+        val m = msg ?: return
+        sendRaw(m)
+        scope.launch {
+            delay(REPLY_TIMEOUT_MS)
+            flow(paneId).update { ChatReducer.olderTimedOut(it, reqId) }
+        }
     }
 
     suspend fun send(paneId: String, text: String) {
@@ -169,7 +177,9 @@ class ChatRepository(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<ImgKey, ImgEntry>?) = size > IMAGE_CACHE_SIZE
     }
     private val imgQueue = ArrayDeque<ImgKey>()
-    private val imgInFlight = HashSet<ImgKey>()
+    /** In-flight requests, each with a token so a stale timeout can't touch a newer request. */
+    private val imgInFlight = HashMap<ImgKey, Long>()
+    private var imgTokens = 0L
 
     /** The image's state; the first call for an id (or after eviction) requests it. */
     fun imageState(paneId: String, id: String): StateFlow<ImageState> {
@@ -217,17 +227,26 @@ class ChatRepository(
         try { ImageState.Ready(Base64.getDecoder().decode(data)) } catch (e: IllegalArgumentException) { ImageState.Missing }
 
     /** Moves queued ids into free request slots; returns what to send (outside the lock). */
-    private fun pumpLocked(): List<ImgKey> {
-        val out = mutableListOf<ImgKey>()
+    private fun pumpLocked(): List<Pair<ImgKey, Long>> {
+        val out = mutableListOf<Pair<ImgKey, Long>>()
         while (imgInFlight.size < MAX_IMAGE_REQUESTS && imgQueue.isNotEmpty()) {
             val k = imgQueue.removeFirst()
             // Not images[k]: a lookup would count as a use in the access-ordered LRU.
             if (k in imgInFlight || !images.containsKey(k)) continue
-            imgInFlight += k
-            out += k
+            val token = ++imgTokens
+            imgInFlight[k] = token
+            out += k to token
         }
         return out
     }
 
-    private fun sendImages(keys: List<ImgKey>) = keys.forEach { sendRaw(ClientMsg.chatImage(it.paneId, it.id)) }
+    /** Sends the requests; one unanswered within [REPLY_TIMEOUT_MS] counts as a `missing` reply. */
+    private fun sendImages(reqs: List<Pair<ImgKey, Long>>) = reqs.forEach { (k, token) ->
+        sendRaw(ClientMsg.chatImage(k.paneId, k.id))
+        scope.launch {
+            delay(REPLY_TIMEOUT_MS)
+            val lost = synchronized(imgLock) { imgInFlight[k] == token }
+            if (lost) onImage(ServerFrame.ChatImageData(k.paneId, k.id, null, null, missing = true))
+        }
+    }
 }

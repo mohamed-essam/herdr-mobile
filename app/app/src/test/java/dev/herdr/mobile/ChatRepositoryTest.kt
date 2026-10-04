@@ -162,6 +162,34 @@ class ChatRepositoryTest {
         assertTrue(historyMsgs(sent)[1].contains("\"beforeSeq\":300"))
     }
 
+    @Test fun loadOlderWithNoReplyTimesOut() = runTest {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> }, scope = backgroundScope)
+        repo.onFrame(snapMore(1, true, 5))
+        repo.loadOlder("p")
+        advanceTimeBy(REPLY_TIMEOUT_MS - 1); runCurrent()
+        assertTrue(repo.view("p").value.loadingOlder)
+        repo.loadOlder("p")
+        assertEquals(1, historyMsgs(sent).size)
+        advanceTimeBy(1); runCurrent()
+        assertFalse(repo.view("p").value.loadingOlder)
+        assertNull(repo.view("p").value.olderReqId)
+        repo.loadOlder("p")
+        assertEquals(2, historyMsgs(sent).size)
+    }
+
+    @Test fun oldRequestTimeoutDoesNotClearANewerRequest() = runTest {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> }, scope = backgroundScope)
+        repo.onFrame(snapMore(1, true, 5))
+        repo.loadOlder("p")
+        advanceTimeBy(REPLY_TIMEOUT_MS - 10); runCurrent()
+        repo.onFrame(snapMore(1, true, 5)) // re-snapshot drops the first request
+        repo.loadOlder("p")
+        advanceTimeBy(10); runCurrent() // the first request's timer fires
+        assertTrue(repo.view("p").value.loadingOlder)
+    }
+
     @Test fun loadOlderDoesNothingWithoutHasMore() {
         val sent = mutableListOf<String>()
         val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> })
@@ -282,6 +310,34 @@ class ChatRepositoryTest {
         assertEquals("late", String((st.value as ImageState.Ready).bytes))
     }
 
+    @Test fun unansweredImageRequestTimesOutLikeMissing() = runTest {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> }, scope = backgroundScope)
+        for (i in 0 until 4) repo.imageState("p", "i$i")
+        val st = repo.imageState("p", "i0")
+        assertEquals(3, imageMsgs(sent).size)
+        advanceTimeBy(REPLY_TIMEOUT_MS - 1); runCurrent()
+        assertEquals(3, imageMsgs(sent).size)
+        advanceTimeBy(1); runCurrent()
+        // Slots freed: the queued i3 goes out; i0..i2 are retried once after IMAGE_RETRY_MS.
+        assertEquals(ClientMsg.chatImage("p", "i3"), imageMsgs(sent)[3])
+        assertEquals(ImageState.Loading, st.value)
+        advanceTimeBy(IMAGE_RETRY_MS); runCurrent()
+        assertEquals(ClientMsg.chatImage("p", "i0"), imageMsgs(sent).filter { it.contains("\"i0\"") }.last())
+        assertEquals(2, imageMsgs(sent).count { it.contains("\"i0\"") })
+        // The retry also goes unanswered: settle on Missing.
+        advanceTimeBy(REPLY_TIMEOUT_MS); runCurrent()
+        assertEquals(ImageState.Missing, st.value)
+    }
+
+    @Test fun lateReplyAfterRetryIsStillAccepted() = runTest {
+        val repo = ChatRepository(sendRaw = {}, sendChat = { _, _ -> }, scope = backgroundScope)
+        val st = repo.imageState("p", "u#0")
+        advanceTimeBy(REPLY_TIMEOUT_MS); runCurrent()
+        repo.onFrame(ServerFrame.ChatImageData("p", "u#0", "image/png", b64("late"), false))
+        assertEquals("late", String((st.value as ImageState.Ready).bytes))
+    }
+
     @Test fun undecodableImageIsMissing() = runTest {
         val repo = ChatRepository(sendRaw = {}, sendChat = { _, _ -> }, scope = backgroundScope)
         val st = repo.imageState("p", "u#0")
@@ -325,6 +381,19 @@ class ChatRepositoryTest {
         }
         assertEquals(setOf("tq"), seen)
         assertEquals(emptySet<String>(), repo.view("p").value.answering)
+    }
+
+    @Test fun answerForAnsweredQuestionIsIgnored() = runTest {
+        var calls = 0
+        val repo = ChatRepository(sendRaw = {}, sendChat = { _, _ -> }, sendAnswer = { _, _, _ -> calls++ })
+        repo.onFrame(ServerFrame.ChatSnapshot("p", 1, "idle", listOf(
+            ChatEntry(1, ChatEvent.Question("q", "tq", emptyList(), null)),
+            ChatEntry(2, ChatEvent.ToolResult("tq", false, "Red")))))
+        val before = repo.view("p").value
+        assertEquals(setOf("tq"), before.answered)
+        repo.answer("p", "tq", mapOf("Q" to "A"))
+        assertEquals(0, calls)
+        assertEquals(before, repo.view("p").value)
     }
 
     @Test fun answerWhileInFlightIsIgnored() = runTest {

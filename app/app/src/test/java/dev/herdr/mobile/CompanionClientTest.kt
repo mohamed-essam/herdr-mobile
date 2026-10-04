@@ -4,6 +4,7 @@ import dev.herdr.mobile.net.CompanionClient
 import dev.herdr.mobile.net.ServerFrame
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.runBlocking
 import okhttp3.*
 import okhttp3.mockwebserver.*
@@ -139,11 +140,13 @@ class CompanionClientTest {
         client = CompanionClient(http)
         val frames = java.util.concurrent.CopyOnWriteArrayList<ServerFrame>()
         val images = java.util.concurrent.CopyOnWriteArrayList<ServerFrame>()
-        val j1 = launch(Dispatchers.Default) { client.frames.collect { frames.add(it) } }
-        val j2 = launch(Dispatchers.Default) { client.images.collect { images.add(it) } }
+        val sub1 = CompletableDeferred<Unit>()
+        val sub2 = CompletableDeferred<Unit>()
+        val j1 = launch(Dispatchers.Default) { client.frames.onSubscription { sub1.complete(Unit) }.collect { frames.add(it) } }
+        val j2 = launch(Dispatchers.Default) { client.images.onSubscription { sub2.complete(Unit) }.collect { images.add(it) } }
+        withTimeout(3000) { sub1.await(); sub2.await() }
         client.connect(server.url("/").toString().replace("http", "ws"))
         withTimeout(3000) { while (!client.connected.value) delay(20) }
-        delay(100) // let both collectors subscribe
         client.send(dev.herdr.mobile.net.ClientMsg.chatImage("p", "u#0"))
         withTimeout(3000) { while (frames.none { it is ServerFrame.Welcome } || images.isEmpty()) delay(20) }
         assertEquals("u#0", (images.single() as ServerFrame.ChatImageData).id)

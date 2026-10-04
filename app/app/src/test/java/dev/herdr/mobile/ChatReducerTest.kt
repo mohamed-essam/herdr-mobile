@@ -251,24 +251,65 @@ class ChatReducerTest {
         assertFalse(onFrame(v, snap(1, user(5, "a"))).hasMore)
     }
 
-    @Test fun historyPagePrependsOlderEntriesWithDedup() {
+    private fun loading(v: ChatView) = ChatReducer.startLoadingOlder(v, "h")
+
+    @Test fun historyPagePrependsOlderEntries() {
         var v = onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", listOf(user(4, "d"), reply(5, "e")), hasMore = true))
-        v = ChatReducer.startLoadingOlder(v)
+        v = loading(v)
         assertTrue(v.loadingOlder)
-        v = onFrame(v, page(1, user(2, "b"), reply(3, "c"), user(4, "dup"), reply(5, "dup"), hasMore = true))
+        assertEquals("h", v.olderReqId)
+        v = onFrame(v, page(1, user(2, "b"), reply(3, "c"), hasMore = true))
         assertEquals(listOf(2, 3, 4, 5), v.entries.map { it.seq })
-        assertEquals("d", (v.entries[2].event as ChatEvent.UserText).text)
         assertEquals(5, v.lastSeq)
         assertTrue(v.hasMore)
         assertFalse(v.loadingOlder)
-        v = onFrame(ChatReducer.startLoadingOlder(v), page(1, user(1, "a"), hasMore = false))
+        assertNull(v.olderReqId)
+        v = onFrame(loading(v), page(1, user(1, "a"), hasMore = false))
         assertEquals(listOf(1, 2, 3, 4, 5), v.entries.map { it.seq })
         assertFalse(v.hasMore)
         assertFalse(v.loadingOlder)
     }
 
+    @Test fun pageWithoutAMatchingRequestIsIgnored() {
+        val base = onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", listOf(user(4, "d")), hasMore = true))
+        // No request in flight.
+        assertEquals(base, onFrame(base, page(1, user(3, "c"))))
+        // A different request is in flight: it stays in flight.
+        val other = ChatReducer.startLoadingOlder(base, "h2")
+        assertEquals(other, onFrame(other, page(1, user(3, "c"))))
+    }
+
+    // A page requested before a same-epoch re-snapshot must not be prepended
+    // to the new entries: it would leave a silent hole in the history.
+    @Test fun latePageAfterSameEpochSnapshotIsIgnored() {
+        var v = onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", (1000..1002).map { reply(it, "r") }, hasMore = true))
+        v = loading(v)
+        v = onFrame(v, ServerFrame.ChatSnapshot("p", 1, "idle", (1750..1752).map { reply(it, "r") }, hasMore = true))
+        assertFalse(v.loadingOlder)
+        assertNull(v.olderReqId)
+        v = onFrame(v, page(1, *(700..999).map { reply(it, "old") }.toTypedArray(), hasMore = true))
+        assertEquals(listOf(1750, 1751, 1752), v.entries.map { it.seq })
+    }
+
+    @Test fun nonContiguousPageIsDroppedAndClearsLoading() {
+        var v = loading(onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", listOf(user(10, "d")), hasMore = true)))
+        v = onFrame(v, page(1, user(7, "a"), user(8, "b"), hasMore = true))
+        assertEquals(listOf(10), v.entries.map { it.seq })
+        assertFalse(v.loadingOlder)
+        assertNull(v.olderReqId)
+        assertTrue(v.hasMore)
+    }
+
+    @Test fun olderTimeoutClearsOnlyItsOwnRequest() {
+        val v = loading(onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", listOf(user(10, "d")), hasMore = true)))
+        assertEquals(v, ChatReducer.olderTimedOut(v, "other"))
+        val t = ChatReducer.olderTimedOut(v, "h")
+        assertFalse(t.loadingOlder)
+        assertNull(t.olderReqId)
+    }
+
     @Test fun staleOrOtherEpochPageOnlyClearsLoadingOlder() {
-        val base = ChatReducer.startLoadingOlder(
+        val base = loading(
             onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 2, "idle", listOf(user(4, "d")), hasMore = true)))
         val other = onFrame(base, page(1, user(1, "x"), hasMore = false))
         assertEquals(listOf(4), other.entries.map { it.seq })
@@ -288,14 +329,17 @@ class ChatReducerTest {
     }
 
     @Test fun snapshotClearsLoadingOlder() {
-        val v = ChatReducer.startLoadingOlder(onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", listOf(user(4, "d")), hasMore = true)))
-        assertFalse(onFrame(v, snap(2, user(1, "n"))).loadingOlder)
+        val v = loading(onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", listOf(user(4, "d")), hasMore = true)))
+        val s = onFrame(v, snap(2, user(1, "n")))
+        assertFalse(s.loadingOlder)
+        assertNull(s.olderReqId)
     }
 
     @Test fun historyPageDoesNotConfirmPending() {
         var v = onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", listOf(user(4, "d")), hasMore = true))
-        v = ChatReducer.addPending(v, "p1", "yes", 0)
+        v = ChatReducer.addPending(loading(v), "p1", "yes", 0)
         v = onFrame(v, page(1, user(3, "yes")))
+        assertEquals(listOf(3, 4), v.entries.map { it.seq })
         assertEquals(listOf("p1"), v.pending.map { it.id })
     }
 
@@ -323,7 +367,7 @@ class ChatReducerTest {
         assertEquals(setOf("t1"), v.answered)
         v = onFrame(v, ServerFrame.ChatSnapshot("p", 2, "idle", listOf(result(10, "t0"), question(11, "t3")), hasMore = true))
         assertEquals(emptySet<String>(), v.answered)
-        v = onFrame(v, page(2, question(9, "t0")))
+        v = onFrame(loading(v), page(2, question(9, "t0")))
         assertEquals(setOf("t0"), v.answered)
     }
 
@@ -335,7 +379,7 @@ class ChatReducerTest {
         v = onFrame(v, snap(1, question(1, "tq"), user(2, "x"), question(3, "tq")))
         assertEquals(listOf(1, 2), v.entries.map { it.seq })
         v = onFrame(v, ServerFrame.ChatSnapshot("p", 2, "idle", listOf(question(5, "tz")), hasMore = true))
-        v = onFrame(v, page(2, question(4, "tz")))
+        v = onFrame(loading(v), page(2, question(4, "tz")))
         assertEquals(listOf(4), v.entries.map { it.seq })
     }
 

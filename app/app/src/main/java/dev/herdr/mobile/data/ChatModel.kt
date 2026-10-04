@@ -33,6 +33,8 @@ data class ChatView(
     val hasMore: Boolean = false,
     /** A chat_history request is in flight. */
     val loadingOlder: Boolean = false,
+    /** reqId of the chat_history request in flight; only its page is accepted. */
+    val olderReqId: String? = null,
     /** toolUseIds of shown questions whose tool_result arrived (the card collapses). */
     val answered: Set<String> = emptySet(),
     /** toolUseIds with an answer sent from the phone and no tool_result yet. */
@@ -72,6 +74,7 @@ object ChatReducer {
                 gap = false,
                 hasMore = f.hasMore || entries.size < all.size,
                 loadingOlder = false,
+                olderReqId = null,
                 answered = answered,
                 // A new epoch (companion restart / new session) dropped any held answer.
                 answering = if (v.loaded && f.epoch == v.epoch) v.answering - answeredResults(entries) else emptySet(),
@@ -88,19 +91,27 @@ object ChatReducer {
                 else -> append(v, e)
             }
         }
-        is ServerFrame.ChatHistoryPage -> when {
-            !v.loaded -> v
-            f.stale || f.epoch != v.epoch -> v.copy(loadingOlder = false)
-            else -> {
-                val first = v.entries.firstOrNull()?.seq ?: (v.lastSeq + 1)
-                val entries = dedupQuestions(f.entries.filter { it.seq < first }.sortedBy { it.seq } + v.entries)
-                v.copy(
-                    entries = entries,
-                    hasMore = f.hasMore,
-                    loadingOlder = false,
-                    answered = answeredIds(entries),
-                    answering = v.answering - answeredResults(entries),
-                )
+        is ServerFrame.ChatHistoryPage -> {
+            val first = v.entries.firstOrNull()?.seq ?: (v.lastSeq + 1)
+            when {
+                // Only the reply to the request in flight counts: a snapshot
+                // since then replaced the entries the page was meant to extend.
+                !v.loaded || !v.loadingOlder || f.reqId != v.olderReqId -> v
+                f.stale || f.epoch != v.epoch -> v.copy(loadingOlder = false, olderReqId = null)
+                // A page must end right before the first entry, or it would leave a hole.
+                f.entries.isNotEmpty() && f.entries.maxOf { it.seq } != first - 1 ->
+                    v.copy(loadingOlder = false, olderReqId = null)
+                else -> {
+                    val entries = dedupQuestions(f.entries.filter { it.seq < first }.sortedBy { it.seq } + v.entries)
+                    v.copy(
+                        entries = entries,
+                        hasMore = f.hasMore,
+                        loadingOlder = false,
+                        olderReqId = null,
+                        answered = answeredIds(entries),
+                        answering = v.answering - answeredResults(entries),
+                    )
+                }
             }
         }
         is ServerFrame.ChatState -> withState(v, f.state, now)
@@ -129,7 +140,11 @@ object ChatReducer {
         )
     }
 
-    fun startLoadingOlder(v: ChatView): ChatView = v.copy(loadingOlder = true)
+    fun startLoadingOlder(v: ChatView, reqId: String): ChatView = v.copy(loadingOlder = true, olderReqId = reqId)
+
+    /** The page for [reqId] never came: allow paging again (a later reply is ignored). */
+    fun olderTimedOut(v: ChatView, reqId: String): ChatView =
+        if (v.loadingOlder && v.olderReqId == reqId) v.copy(loadingOlder = false, olderReqId = null) else v
 
     fun markAnswering(v: ChatView, toolUseId: String): ChatView = v.copy(answering = v.answering + toolUseId)
 
