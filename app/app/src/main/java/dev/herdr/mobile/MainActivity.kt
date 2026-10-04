@@ -82,6 +82,7 @@ class MainActivity : ComponentActivity() {
             var session by remember { mutableStateOf(newSession()) }
             var route by remember { mutableStateOf<Route>(Route.Loading) }
             var pushOn by remember { mutableStateOf(false) }
+            var companionUrl by remember { mutableStateOf<String?>(null) }
             // What the connect screen shows again after a failed first attempt.
             var draftInput by remember { mutableStateOf("") }
             var draftPush by remember { mutableStateOf(false) }
@@ -92,6 +93,7 @@ class MainActivity : ComponentActivity() {
                     route = Route.Connect
                     return@LaunchedEffect
                 }
+                companionUrl = stored
                 route = Route.Dashboard
                 session.vm.start(stored)
                 if (pushEnabled(settings.pushEnabledChoice.first(), hasCompanionUrl = true)) {
@@ -140,11 +142,11 @@ class MainActivity : ComponentActivity() {
                                 }
                                 if (r.push) { enablePush(); pushOn = true }
                             },
-                            onContinue = { route = Route.Dashboard },
+                            onContinue = { companionUrl = r.address.url; route = Route.Dashboard },
                             onBack = ::back,
                         )
                     }
-                    Route.Dashboard -> DashboardScreen(session.vm, initialPane)
+                    Route.Dashboard -> DashboardScreen(session.vm, initialPane, companionUrl)
                 }
             }
         }
