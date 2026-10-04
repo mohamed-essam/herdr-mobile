@@ -1,6 +1,7 @@
 package dev.herdr.mobile.data
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -13,6 +14,14 @@ private val URL_KEY = stringPreferencesKey("companion_url")
 private val PUSH_ENDPOINT_KEY = stringPreferencesKey("push_endpoint")
 private val FONT_SIZE_KEY = intPreferencesKey("terminal_font_size")
 private val RECENT_AGENTS_KEY = stringPreferencesKey("recent_agents")
+private val PUSH_ENABLED_KEY = booleanPreferencesKey("push_enabled")
+
+/**
+ * Whether UnifiedPush should be registered. Installs from before the opt-in
+ * toggle never stored a choice: they keep push if they already had a
+ * companion, so an upgrade doesn't silently stop notifications.
+ */
+fun pushEnabled(stored: Boolean?, hasCompanionUrl: Boolean): Boolean = stored ?: hasCompanionUrl
 
 /** MRU update: most-recent first, de-duplicated, capped. */
 fun updatedMru(current: List<String>, picked: String, cap: Int = 5): List<String> =
@@ -24,6 +33,10 @@ class Settings(private val context: Context) {
 
     val pushEndpoint: Flow<String?> = context.dataStore.data.map { it[PUSH_ENDPOINT_KEY] }
     suspend fun setPushEndpoint(endpoint: String) { context.dataStore.edit { it[PUSH_ENDPOINT_KEY] = endpoint } }
+
+    /** The raw opt-in; null when never chosen. Resolve with [pushEnabled]. */
+    val pushEnabledChoice: Flow<Boolean?> = context.dataStore.data.map { it[PUSH_ENABLED_KEY] }
+    suspend fun setPushEnabled(enabled: Boolean) { context.dataStore.edit { it[PUSH_ENABLED_KEY] = enabled } }
 
     val terminalFontSize: Flow<Int?> = context.dataStore.data.map { it[FONT_SIZE_KEY] }
     suspend fun setTerminalFontSize(px: Int) { context.dataStore.edit { it[FONT_SIZE_KEY] = px } }
