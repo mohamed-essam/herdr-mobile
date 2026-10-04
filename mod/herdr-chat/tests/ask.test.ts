@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
+import { askPhone, type State } from '../hooks/register'
 
 type Sync = { paneId: string; sessionId: string; events: { type: string; [k: string]: unknown }[] }
 type Poll = { paneId: string; toolUseId: string }
@@ -23,7 +24,11 @@ function world(on: On, opts: { pane?: boolean } = {}) {
   const answer = { resync: false }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: 'sess-1' }))
-  on('session.messages', () => ({ value: [] as never }))
+  let readGate: Promise<void> = Promise.resolve()
+  on('session.messages', async () => {
+    await readGate
+    return { value: [] as never }
+  })
   on('http.fetch', async ($, e) => {
     expect(e.init?.socketPath).toBe('/s/chat.sock')
     expect(e.init?.method).toBe('POST')
@@ -55,9 +60,12 @@ function world(on: On, opts: { pane?: boolean } = {}) {
       replies.push(new Promise(r => (release = a => r({ answer: a }))))
       return release
     },
+    holdReads() { let release!: () => void; readGate = new Promise(r => (release = r)); return release },
     all: () => syncs.flatMap(s => s.events),
   }
 }
+
+const state = (): State => ({ paneId: 'w1:p1', sessionId: '', cwd: '', socketPath: '/s/chat.sock', pending: [], imageQueue: [], offline: false, inFlight: false, building: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined, historyLacksPath: false, openQuestions: new Map() })
 
 const start = ($: any) => $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
 const ask = ($: any) => $.tool.call({ tool: 'AskUserQuestion', questions: QUESTIONS })
@@ -218,5 +226,63 @@ describe('AskUserQuestion from the phone', () => {
     expect(r.result).toEqual({ questions: QUESTIONS, answers: { 'Which color do you prefer?': 'Red' } })
     expect(w.polls.length).toBe(0)
     expect(w.syncs.length).toBe(0)
+  })
+
+  test('a question raised while the history is being built goes out once, after snapshot_end', async ($, on) => {
+    const w = world(on)
+    await start($)
+    await w.clock.advance(2000)
+    w.answer.resync = true
+    await w.clock.advance(1000) // answered resync:true
+    const releaseRead = w.holdReads()
+    await w.clock.advance(1000) // the rebuild starts and waits on the read
+    const release = w.hold()
+    const call = ask($) // queued while the build runs
+    await flush(w)
+    releaseRead()
+    await flush(w)
+    await w.clock.advance(1000)
+    const last = w.syncs[w.syncs.length - 1]!.events.map(e => e.type)
+    expect(last).toEqual(['hello', 'snapshot_begin', 'snapshot_end', 'question'])
+    expect(w.all().filter(e => e.type === 'question').length).toBe(1)
+    w.answerDialog('Red')
+    await call
+    release(null)
+  })
+
+  // The kit cannot abandon a tool.call from above (test hooks sit beneath),
+  // so askPhone is driven directly with a hand-made `$`: a clock the test
+  // moves and an /answer that holds every poll until released.
+  test('an abandoned dialog (next.signal aborted) ends the race at once and stops polling', async () => {
+    const s = state()
+    const polls: string[] = []
+    const held: Array<() => void> = []
+    const timers: Array<() => void> = []
+    const $ = {
+      clock: { now: async () => 0, after: (ms: number, fn: () => void) => (timers.push(fn), { cancel() {} }) },
+      http: {
+        fetch: async (url: string, init: { body: string }) => {
+          polls.push(url)
+          expect(JSON.parse(init.body)).toEqual({ paneId: 'w1:p1', toolUseId: 'tu-1' })
+          await new Promise<void>(r => held.push(r))
+          return { status: 200, ok: true, headers: {}, text: JSON.stringify({ answer: null }) }
+        },
+      },
+    }
+    const ctl = new AbortController()
+    const outcome = askPhone($ as any, s, 'tu-1', QUESTIONS, new Promise<never>(() => {}), ctl.signal)
+    for (let i = 0; i < 5; i++) await Promise.resolve()
+    expect(polls).toEqual(['http://chat/answer'])
+    expect([...s.openQuestions.keys()]).toEqual(['tu-1'])
+    expect(s.pending.map(e => e.type)).toEqual(['question'])
+    ctl.abort()
+    expect(await outcome).toEqual({ aborted: true })
+    expect(s.openQuestions.size).toBe(0)
+    held.splice(0).forEach(r => r()) // the poll in flight answers null
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+    timers.splice(0).forEach(f => f())
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+    expect(polls.length).toBe(1)
+    expect(timers.length).toBe(0)
   })
 })

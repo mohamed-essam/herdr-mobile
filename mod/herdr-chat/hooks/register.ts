@@ -152,7 +152,9 @@ async function buildHistory($: EngineInterface, s: State) {
     head.push({ type: 'snapshot_end' })
     if (s.lastState) head.push({ type: 'state', state: s.lastState })
     head.push(...s.openQuestions.values())
-    s.pending = [...head, ...s.pending]
+    // A question queued during the build is in both: send it once, here.
+    const queued = s.pending.filter(ev => !(ev.type === 'question' && s.openQuestions.has(ev.toolUseId)))
+    s.pending = [...head, ...queued]
     // Entries keep history order (ids are never integer-like keys).
     s.imageQueue = [...Object.entries(images).slice(-HISTORY_IMAGES), ...s.imageQueue]
   } catch {
@@ -260,9 +262,13 @@ function answerOf(v: unknown): Record<string, string> | null {
 // to 25 s and answers `{answer: null}` on timeout. Polls start at most once
 // per SYNC_MS: a poll that ended (null, failed, an older companion without
 // /answer) sooner than that waits out the rest; one held longer is re-polled
-// at once. The pacing wait is a `$.clock.after` timer, an in-flight `$` call
-// the hook budget does not count (unlike `$.clock.sleep`). Never rejects;
-// resolves null once the race is over.
+// at once. Never rejects; resolves null once the race is over.
+//
+// Budget: a `$.clock` wait (this pacing timer included) counts against the
+// hook's 10 s budget on its own; `$.http.fetch` and `next(e)` do not. The
+// loop is safe only because askPhone's caller starts the dialog's `next(e)`
+// before the first poll and the loop stops (nothing more is awaited) once the
+// race settles, so `next(e)` is in flight for every wait here.
 async function pollAnswer($: EngineInterface, s: State, toolUseId: string, race: { over: boolean }): Promise<Record<string, string> | null> {
   while (!race.over) {
     const started = await $.clock.now()
@@ -284,6 +290,33 @@ async function pollAnswer($: EngineInterface, s: State, toolUseId: string, race:
     if (rest > 0) await new Promise<void>(r => $.clock.after(rest, r))
   }
   return null
+}
+
+export type AskOutcome<R> = { dialog: R } | { phone: Record<string, string> } | { aborted: true }
+
+// Queues the question (kept open for resyncs until the race settles) and
+// races the terminal dialog, already started by the caller, against the
+// phone's long-poll. `signal` (the hook's `next.signal`) aborting ends the
+// race at once and stops the polling. Exported so tests can abort it: the
+// kit has no way to abandon a tool.call from above.
+export async function askPhone<R>($: EngineInterface, s: State, toolUseId: string, questions: unknown[], dialog: Promise<R>, signal: AbortSignal): Promise<AskOutcome<R>> {
+  const question: Outgoing = { type: 'question', uuid: toolUseId, toolUseId, questions, ts: Date.now() }
+  s.pending.push(question)
+  s.openQuestions.set(toolUseId, question)
+  const race = { over: false }
+  let onAbort = () => {}
+  const aborted = new Promise<AskOutcome<R>>(r => (onAbort = () => r({ aborted: true })))
+  if (signal.aborted) onAbort()
+  else signal.addEventListener('abort', onAbort, { once: true })
+  const never = new Promise<never>(() => {})
+  const phone = pollAnswer($, s, toolUseId, race).then(a => (a ? { phone: a } : never))
+  try {
+    return await Promise.race([dialog.then(r => ({ dialog: r })), phone, aborted])
+  } finally {
+    race.over = true
+    s.openQuestions.delete(toolUseId)
+    signal.removeEventListener('abort', onAbort)
+  }
 }
 
 type Appended = {
@@ -391,25 +424,21 @@ export const register: Register = on => {
   // The terminal dialog races the phone: the question rides the next sync and
   // whichever answers first wins. A phone answer closes the dialog (a hook
   // that returns while its `next` is pending aborts what runs beneath); when
-  // the dialog wins, a poll still in flight is ignored. The waits are
-  // in-flight `$` calls, which the hook budget does not count.
+  // the dialog wins, a poll still in flight is ignored.
+  //
+  // Budget: the hook's 10 s clock stops only while a `next(e)` or a non-clock
+  // `$` call is in flight; a `$.clock` wait alone would count. `next(e)` is
+  // started here, before askPhone's first poll, and stays in flight until the
+  // race settles, after which nothing more is awaited; so the whole wait,
+  // poll pacing timers included, costs the hook nothing.
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
     if (!s.paneId) return next(e)
-    const question: Outgoing = { type: 'question', uuid: e.tool_use_id, toolUseId: e.tool_use_id, questions: e.questions, ts: Date.now() }
-    s.pending.push(question)
-    s.openQuestions.set(e.tool_use_id, question)
-    const race = { over: false }
-    const dialog = next(e).then(r => ({ dialog: r }))
-    const never = new Promise<never>(() => {})
-    const phone = pollAnswer($, s, e.tool_use_id, race).then(a => (a ? { phone: a } : never))
-    try {
-      const first = await Promise.race([dialog, phone])
-      if ('dialog' in first) return first.dialog
-      return { result: { questions: e.questions, answers: first.phone } }
-    } finally {
-      race.over = true
-      s.openQuestions.delete(e.tool_use_id)
-    }
+    const won = await askPhone($, s, e.tool_use_id, e.questions, next(e), next.signal)
+    if ('dialog' in won) return won.dialog
+    if ('phone' in won) return { result: { questions: e.questions, answers: won.phone } }
+    // Abandoned (interrupted, or a hook above settled): the engine has gone
+    // on without this answer.
+    return { deny: 'interrupted' }
   })
 
   on('turn.start', async ($, e, next) => {
