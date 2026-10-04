@@ -1,0 +1,7 @@
+{
+  "name": "herdr-mobile",
+  "owner": { "name": "herdr-mobile" },
+  "plugins": [
+    { "name": "herdr-chat", "source": "./herdr-chat", "description": "Streams Claude Code conversations in herdr panes to herdr-mobile's chat view" }
+  ]
+}

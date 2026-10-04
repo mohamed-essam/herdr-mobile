@@ -19,3 +19,4 @@ RELEASE_NOTES.md
 /.superpowers/
 # misc
 .DS_Store
+mod/herdr-chat/.claude-plugin/types/
