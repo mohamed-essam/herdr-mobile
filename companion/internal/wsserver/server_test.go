@@ -689,3 +689,36 @@ func TestChatSendWithoutHubIsNoMod(t *testing.T) {
 		t.Fatalf("%v", r)
 	}
 }
+
+func TestChatReopenDropsStaleFramesFromOldSubscription(t *testing.T) {
+	hub := chatbridge.NewHub(nil)
+	hub.Sync("w1:p1", "s", nil)
+	c, ctx := dialChat(t, hub)
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"chat_open","paneId":"w1:p1"}`))
+	readUntil(t, ctx, c, "chat_snapshot")
+	// Queue updates for the first subscription, then re-open straight away.
+	hub.Sync("w1:p1", "s", []json.RawMessage{json.RawMessage(`{"type":"user_text","uuid":"old","text":"old"}`), json.RawMessage(`{"type":"state","state":"working"}`)})
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"chat_open","paneId":"w1:p1"}`))
+	// Read until the second snapshot (the one containing the old event);
+	// anything before it is allowed.
+	for {
+		rctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		_, b, err := c.Read(rctx)
+		cancel()
+		if err != nil {
+			t.Fatal("second chat_snapshot never arrived")
+		}
+		var m map[string]any
+		json.Unmarshal(b, &m)
+		if m["t"] == "chat_snapshot" {
+			if evs, _ := m["events"].([]any); len(evs) == 1 {
+				break
+			}
+		}
+	}
+	hub.Sync("w1:p1", "s", []json.RawMessage{json.RawMessage(`{"type":"assistant_text","uuid":"new","text":"new"}`)})
+	ev := readUntil(t, ctx, c, "chat_event")
+	if ev["seq"].(float64) != 2 {
+		t.Fatalf("stale frame after re-open snapshot: %v", ev)
+	}
+}

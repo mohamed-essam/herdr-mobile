@@ -458,12 +458,23 @@ func (s *Server) openChat(ctx context.Context, c *client, paneID string) {
 	}
 	c.closeChat(paneID)
 	snap, ch, cancel := s.chat.Subscribe(paneID)
+	// stopped is set BEFORE cancel closes the channel, so the forwarder never
+	// delivers updates still buffered for a closed/replaced subscription.
+	var stopped atomic.Bool
+	done := make(chan struct{})
 	c.smu.Lock()
-	c.chats[paneID] = cancel
+	c.chats[paneID] = func() {
+		stopped.Store(true)
+		close(done)
+		cancel()
+	}
 	c.smu.Unlock()
 	sendBlocking(ctx, c, proto.ChatSnapshot(snap))
 	go func() {
 		for u := range ch {
+			if stopped.Load() {
+				return
+			}
 			var f []byte
 			switch u.Kind {
 			case "event":
@@ -475,7 +486,13 @@ func (s *Server) openChat(ctx context.Context, c *client, paneID string) {
 			default:
 				continue
 			}
-			sendBlocking(ctx, c, f)
+			select {
+			case c.send <- f:
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
 }
