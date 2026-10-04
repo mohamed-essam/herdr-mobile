@@ -64,9 +64,11 @@ Rejected alternatives:
 unset, register no further behaviour. `sessionId` is the Claude session id
 (`$.session.id()`); `cwd` from `$.session.cwd()`.
 
-**Socket path.** `$XDG_RUNTIME_DIR/herdr-mobile/chat.sock`, falling back to
-`/tmp/herdr-mobile-$UID/chat.sock` when `XDG_RUNTIME_DIR` is unset. The companion
-uses the same rule. The mod makes exactly one kind of request,
+**Socket path.** `HERDR_MOBILE_CHAT_SOCK` if set, else
+`$XDG_RUNTIME_DIR/herdr-mobile/chat.sock`. If neither is set, chat is off: the mod
+is a no-op and the companion does not listen. There is deliberately no `/tmp`
+fallback: a predictable shared path would let another local user create it first,
+read the conversation and inject prompts. The companion uses the same rule. The mod makes exactly one kind of request,
 `$.http.fetch("http://chat/sync", { method: "POST", socketPath, body })`, from a
 timer (see **Sync loop**). Hooks never do I/O themselves: they only append to an
 in-memory `pending` list, so a hook never waits on the companion and no request
