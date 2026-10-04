@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { cap, normalizeBlocks, normalizeSnapshot, shouldForward, summarize, MAX_TEXT } from '../hooks/normalize'
+import { cap, normalizeBlocks, normalizeSnapshot, shouldForward, summarize, MAX_TEXT, SNAPSHOT_BYTES } from '../hooks/normalize'
 
 describe('shouldForward', () => {
   const row = (over: object) => ({ door: 'prompt', message: { role: 'user' }, ...over })
@@ -87,5 +87,24 @@ describe('normalizeSnapshot', () => {
     const out = normalizeSnapshot(msgs)
     expect(out.length).toBe(500)
     expect(out[0]).toEqual({ type: 'user_text', uuid: 'snap-100', text: 'm100' })
+  })
+  test('caps the serialized events at 4 MB, keeping the newest', () => {
+    const big = 'x'.repeat(MAX_TEXT)
+    const msgs = Array.from({ length: 500 }, (_, i) => ({ role: 'user' as const, content: `${i} ${big}` }))
+    const out = normalizeSnapshot(msgs)
+    expect(SNAPSHOT_BYTES).toBe(4 * 1024 * 1024)
+    expect(JSON.stringify(out).length).toBeLessThanOrEqual(SNAPSHOT_BYTES)
+    expect(out.length).toBeGreaterThan(50)
+    expect(out[out.length - 1]!.type === 'user_text' && (out[out.length - 1] as any).uuid).toBe('snap-499')
+    const uuids = out.map(e => (e as any).uuid)
+    expect(uuids[0]).toBe(`snap-${500 - out.length}`)
+  })
+  test('counts multi-byte characters by their UTF-8 size', () => {
+    const big = 'é'.repeat(MAX_TEXT) // 2 bytes each in UTF-8
+    const msgs = Array.from({ length: 100 }, (_, i) => ({ role: 'user' as const, content: big }))
+    const out = normalizeSnapshot(msgs)
+    const bytes = out.reduce((n, e) => n + JSON.stringify(e).length + JSON.stringify(e).replace(/[^é]/g, '').length + 1, 1)
+    expect(bytes).toBeLessThanOrEqual(SNAPSHOT_BYTES)
+    expect(out.length).toBeLessThan(33)
   })
 })

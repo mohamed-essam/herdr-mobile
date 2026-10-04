@@ -8,6 +8,7 @@ export const MAX_TEXT = 64 * 1024
 export const PREVIEW = 400
 export const SUMMARY = 120
 export const SNAPSHOT_LIMIT = 500
+export const SNAPSHOT_BYTES = 4 * 1024 * 1024
 
 const FORWARDED_DOORS = new Set(['prompt', 'response', 'tool-result', 'delivery'])
 
@@ -81,8 +82,30 @@ export function normalizeBlocks(role: 'user' | 'assistant', content: unknown, uu
   return out
 }
 
+// UTF-8 size of a string (surrogate pairs count 2 + 2 = 4 bytes).
+function utf8Bytes(s: string): number {
+  let n = 0
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    n += c < 0x80 ? 1 : c < 0x800 ? 2 : c >= 0xd800 && c <= 0xdfff ? 2 : 3
+  }
+  return n
+}
+
+// The last SNAPSHOT_LIMIT events, then the newest of those whose serialized
+// array fits in SNAPSHOT_BYTES (well under the companion's 8 MB body limit;
+// an oversized snapshot would be rejected and re-sent forever).
 export function normalizeSnapshot(
   messages: readonly { role: 'user' | 'assistant'; content: unknown }[],
 ): ChatEvent[] {
-  return messages.flatMap((m, i) => normalizeBlocks(m.role, m.content, `snap-${i}`)).slice(-SNAPSHOT_LIMIT)
+  const all = messages.flatMap((m, i) => normalizeBlocks(m.role, m.content, `snap-${i}`)).slice(-SNAPSHOT_LIMIT)
+  let bytes = 2 // [ ]
+  let start = all.length
+  while (start > 0) {
+    const size = utf8Bytes(JSON.stringify(all[start - 1])) + (start < all.length ? 1 : 0)
+    if (bytes + size > SNAPSHOT_BYTES) break
+    bytes += size
+    start--
+  }
+  return all.slice(start)
 }
