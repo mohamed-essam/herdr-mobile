@@ -47,27 +47,21 @@ Eight follow-ups from using v1 on the phone:
 - New frames: app → `chat_history {paneId, epoch, beforeSeq, limit}` (limit ≤ 300); companion → `chat_history_page {paneId, epoch, events, hasMore}`. A page for a stale epoch is ignored by the app.
 - App: when the first list item becomes visible and `hasMore`, request the previous page once (no request while one is in flight), show a "loading earlier…" row, prepend the page and keep the visible item anchored.
 
-## 4. AskUserQuestion from the phone (spike-gated)
+## 4. AskUserQuestion from the phone
 
-**Spike first** (a throwaway mod in the scratchpad, not shipped): verify in a real session whether a `tool.call` hook on `AskUserQuestion` can
-(a) run `next(e)` (the terminal dialog) while concurrently waiting on the phone through an in-flight `$.http.fetch` long-poll (in-flight `$` calls don't count against the hook budget), and
-(b) when the phone answers first, settle the call with the answers (e.g. `next({ ...e, answers })` in place of the pending dialog, or answering without `next`) and have the terminal dialog close.
+**Spike result (2026-10-04, Claude Code 2.1.289, real session in a herdr pane): passed.** A throwaway mod hooked `tool.call` for `AskUserQuestion`, started `next(e)` (the terminal dialog appeared) and raced it against an in-flight `$.http.fetch` to a local server that answered after 8 s. When the server answered first, the hook returned `{ result: { questions: e.questions, answers: { "<question>": "<label>" } } }`; the terminal dialog closed on its own (a hook that returns while its `next` is pending aborts what runs beneath), and the model received `Your questions have been answered: "Which color do you prefer?"="Blue"`. When the terminal answered first, the hook returned `next`'s result unchanged and the still-pending fetch finished later with no effect. The 8 s wait did not hit the hook budget (in-flight `$` calls don't count).
 
-**Path A (spike passes).**
-- Mod: on `tool.call` for `AskUserQuestion`, queue a `question {uuid, toolUseId, questions}` event (questions as the tool input gives them: `question`, `header`, `options[{label, description}]`, `multiSelect`), then race the terminal dialog against `GET /answer?pane&toolUseId` (long-poll, companion holds up to 30 s, the mod re-polls). First answer wins; the other side is cancelled/ignored.
-- Companion: app → `chat_answer {reqId, paneId, toolUseId, answers}` (`answers`: question text → chosen label(s) or free text); stored per pane until the mod collects it; `chat_answer_result {reqId, ok, error?}` (`no_mod`, `no_question`).
-- App: a question card (see §5).
-
-**Path B (spike fails: the dialog can't be settled from a hook).** The card still shows; answering sends key presses to the pane through herdr's existing `send_keys` (arrow keys to the option, space for multi-select, Enter; "Other" types the text). The companion maps `chat_answer` to the key sequence using the question's option order.
-
-Either way, the card collapses to the chosen answer when the `tool_result` for that `toolUseId` arrives (answered on either side).
+**Design.**
+- **Mod:** on `tool.call` for `AskUserQuestion`, queue a `question {uuid, toolUseId, questions}` event (the tool input's questions: `question`, `header`, `kind?` (`choice` default, `text`, `number` with `min`/`max`/`step`/`unit`), `options[{label, description?}]`, `multiSelect`), then race `next(e)` against a long-poll `POST /answer {paneId, toolUseId}` (the companion holds it up to 25 s and answers `{answer: null}` on timeout; the mod re-polls while the dialog is pending). First answer wins. A phone answer is returned as `{ result: { questions, answers } }` where `answers` maps question text → label (multi-select: labels joined with ", ") or the typed text / number. When the terminal wins, the mod abandons its poll (ignores the late response) and returns `next`'s result unchanged.
+- **Companion:** app → `chat_answer {reqId, paneId, toolUseId, answers}` (answers: question text → string); held per pane per toolUseId until the mod's long-poll collects it (a waiting poll is answered immediately); `chat_answer_result {reqId, ok, error?}` with `no_mod` (pane not live) or `no_question` (no pending question with that toolUseId; the companion learns pending questions from `question` events and forgets one when its `tool_result` arrives or after 1 h).
+- **App:** a question card (§5). The card collapses to the answer when the `tool_result` for that `toolUseId` arrives, whichever side answered.
 
 ## 5. App UI
 
 - **Markdown (1).** Add `com.mikepenz:multiplatform-markdown-renderer-m3` (latest release compatible with the project's Compose BOM; pinned in `libs.versions.toml`) and render assistant text with it, colours and typography from the Catppuccin theme, code blocks monospace on `surfaceContainer`. Replaces `splitFences` / `TextSegment`. User bubbles stay plain text.
 - **Selection (2).** User bubbles and assistant messages are wrapped in `SelectionContainer`; long-press selects with the system copy toolbar. Expanded tool output is selectable too. Tool card headers stay tap-to-expand.
 - **Timestamps (3).** A dim `labelSmall` line under each user bubble and each assistant message: `HH:mm` if today, `MMM d HH:mm` otherwise (device locale and time zone); nothing when `ts` is absent. Tool cards, notices and pending bubbles show none (pending keeps its status label).
-- **Question card (8).** Header chip, question text, one button per option (description as secondary text), checkboxes + "Submit" for multi-select, an "Other…" field, all questions of one call in one card. Disabled while disconnected or while an answer is in flight. Collapses to the answer (dimmed) once the matching `tool_result` arrives.
+- **Question card (8).** Header chip, question text, one button per option (description as secondary text), checkboxes + "Submit" for multi-select, an "Other…" field, a text field for `kind: text`, a number field within min..max for `kind: number`, all questions of one call in one card (one Submit when there is more than one question). Disabled while disconnected or while an answer is in flight. Collapses to the answer (dimmed) once the matching `tool_result` arrives.
 
 ## 6. Failure cases (new)
 
@@ -81,8 +75,8 @@ Either way, the card collapses to the chosen answer when the `tool_result` for t
 
 ## 7. Testing
 
-- **Mod:** transcript parsing and filtering (isMeta, sidechain, non-message types, bad lines, compaction), `ts`, image extraction and ids, chunking under the byte budget, fallback path, transcript path refresh from classic events, question event (Path A) — via `claude plugin test`.
-- **Companion:** chunked snapshot swap semantics, ring 5000, `chat_history` paging, image LRU + `chat_image`, answer store + long-poll (Path A) or key-sequence mapping (Path B).
+- **Mod:** transcript parsing and filtering (isMeta, sidechain, non-message types, bad lines, compaction), `ts`, image extraction and ids, chunking under the byte budget, fallback path, transcript path refresh from classic events, question event + race (phone wins / terminal wins) — via `claude plugin test`.
+- **Companion:** chunked snapshot swap semantics, ring 5000, `chat_history` paging, image LRU + `chat_image`, answer store + long-poll (immediate, timeout, no_question, cleanup on tool_result).
 - **App:** reducer (paging prepend/anchor data, stale epoch pages, `ts`, image cache state, question state), protocol parsing; live on the emulator: Markdown, long-press copy, timestamps, an image Read by Claude, scroll-to-top paging in a long session, an AskUserQuestion answered from the phone.
 
 ## Out of scope
