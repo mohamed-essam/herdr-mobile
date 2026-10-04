@@ -37,7 +37,12 @@ func serve(t *testing.T, h *Hub) (string, *http.Client) {
 func TestSocketModesAndStaleRemoval(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d", "chat.sock")
 	os.MkdirAll(filepath.Dir(path), 0o700)
-	os.WriteFile(path, []byte("stale"), 0o600)
+	old, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old.(*net.UnixListener).SetUnlinkOnClose(false)
+	old.Close() // leaves a stale socket file behind
 	l, err := Listen(path)
 	if err != nil {
 		t.Fatal(err)

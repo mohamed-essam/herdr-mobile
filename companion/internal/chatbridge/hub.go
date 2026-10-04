@@ -69,13 +69,18 @@ type Hub struct {
 	onLiveness func(paneID string, live bool)
 	nextSub    int
 	nextMsg    int
+
+	// cbMu serializes liveness delivery; notified is the last value delivered
+	// per pane. Callbacks must not call back into the Hub.
+	cbMu     sync.Mutex
+	notified map[string]bool
 }
 
 func NewHub(now func() time.Time) *Hub {
 	if now == nil {
 		now = time.Now
 	}
-	return &Hub{panes: map[string]*pane{}, now: now, onLiveness: func(string, bool) {}}
+	return &Hub{panes: map[string]*pane{}, now: now, onLiveness: func(string, bool) {}, notified: map[string]bool{}}
 }
 
 // SetOnLiveness registers the callback for chat-capable flips. It is called
@@ -106,7 +111,7 @@ func (h *Hub) Sync(paneID, sessionID string, events []json.RawMessage) []OutMsg 
 	p.outbox = nil
 	h.mu.Unlock()
 	if flipped {
-		h.onLiveness(paneID, true)
+		h.notify(paneID)
 	}
 	if out == nil {
 		out = []OutMsg{}
@@ -124,15 +129,22 @@ func isChatEvent(t string) bool {
 
 func (p *pane) apply(paneID, sessionID string, raw json.RawMessage) {
 	var head struct {
-		Type   string            `json:"type"`
-		State  string            `json:"state"`
-		Events []json.RawMessage `json:"events"`
+		Type      string            `json:"type"`
+		SessionID string            `json:"sessionId"`
+		State     string            `json:"state"`
+		Events    []json.RawMessage `json:"events"`
 	}
 	if json.Unmarshal(raw, &head) != nil {
 		return
 	}
 	switch {
 	case head.Type == "hello":
+		if head.SessionID != "" {
+			sessionID = head.SessionID
+		}
+		if p.sessionID != "" && p.sessionID != sessionID {
+			p.outbox = nil // queued for the previous session
+		}
 		p.sessionID = sessionID
 	case head.Type == "snapshot":
 		p.epoch++
@@ -248,12 +260,13 @@ func (h *Hub) Tick() {
 	for id, p := range h.panes {
 		if p.live && now.Sub(p.lastSeen) >= LiveWindow {
 			p.live = false
+			p.outbox = nil // never deliver stale messages to a later session
 			dead = append(dead, id)
 		}
 	}
 	h.mu.Unlock()
 	for _, id := range dead {
-		h.onLiveness(id, false)
+		h.notify(id)
 	}
 }
 
@@ -270,4 +283,18 @@ func (h *Hub) Drop(paneID string) {
 		delete(p.subs, id)
 		close(ch)
 	}
+}
+
+// notify delivers the pane's current liveness to the observer. Delivery is
+// serialized and re-reads the truth under the delivery lock, so a stale flip
+// can never land after a newer one.
+func (h *Hub) notify(paneID string) {
+	h.cbMu.Lock()
+	defer h.cbMu.Unlock()
+	live := h.Live(paneID)
+	if h.notified[paneID] == live {
+		return
+	}
+	h.notified[paneID] = live
+	h.onLiveness(paneID, live)
 }

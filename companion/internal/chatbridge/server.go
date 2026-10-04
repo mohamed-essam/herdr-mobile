@@ -2,10 +2,13 @@ package chatbridge
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"syscall"
+	"time"
 )
 
 const maxBody = 8 << 20
@@ -25,17 +28,44 @@ func SocketPath() string {
 	return ""
 }
 
-// Listen creates the socket's directory (0700), removes a stale socket and
-// listens with the socket restricted to the user (0600).
+// Listen prepares the socket's directory and listens with the socket
+// restricted to the user (0600). A directory Listen creates is 0700. A
+// pre-existing directory is never chmod'ed: it must be owned by the current
+// user and not group/world-writable. A stale socket is replaced; a live
+// listener or a non-socket file at path is an error.
 func Listen(path string) (net.Listener, error) {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	fi, err := os.Stat(dir)
+	switch {
+	case os.IsNotExist(err):
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, err
+		}
+	case err != nil:
 		return nil, err
+	default:
+		if !fi.IsDir() {
+			return nil, fmt.Errorf("%s is not a directory", dir)
+		}
+		if st, ok := fi.Sys().(*syscall.Stat_t); !ok || int(st.Uid) != os.Getuid() {
+			return nil, fmt.Errorf("%s is not owned by the current user", dir)
+		}
+		if fi.Mode().Perm()&0o022 != 0 {
+			return nil, fmt.Errorf("%s is group/world-writable", dir)
+		}
 	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		return nil, err
-	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+	if li, err := os.Lstat(path); err == nil {
+		if li.Mode()&os.ModeSocket == 0 {
+			return nil, fmt.Errorf("%s exists and is not a socket", path)
+		}
+		if c, err := net.DialTimeout("unix", path, time.Second); err == nil {
+			c.Close()
+			return nil, fmt.Errorf("another companion is listening on %s", path)
+		}
+		if err := os.Remove(path); err != nil {
+			return nil, err
+		}
+	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
 	l, err := net.Listen("unix", path)
