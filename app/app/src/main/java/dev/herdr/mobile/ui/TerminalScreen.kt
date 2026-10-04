@@ -16,9 +16,6 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -50,6 +47,9 @@ import com.termux.terminal.TerminalSession
 import com.termux.view.TerminalView
 import dev.herdr.mobile.net.Pane
 import dev.herdr.mobile.net.ServerFrame
+import dev.herdr.mobile.ui.theme.Herdr
+import dev.herdr.mobile.ui.theme.HerdrRadius
+import dev.herdr.mobile.ui.theme.HerdrType
 import dev.herdr.mobile.ui.theme.statusColor
 import kotlinx.coroutines.launch
 
@@ -87,7 +87,10 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onCha
         (rootView.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
             ?.hideSoftInputFromWindow(rootView.windowToken, 0)
     }
-    val title = pane.cwd.substringAfterLast('/').ifBlank { pane.workspaceId.ifBlank { pane.paneId } }
+    val repoTree by vm.repoTree.collectAsState()
+    val ctx = paneContexts(repoTree)[pane.paneId] ?: fallbackContext(pane)
+    val c = Herdr.colors
+    val dark = isSystemInDarkTheme()
 
     suspend fun attachOnce() {
         if (attaching) return
@@ -199,27 +202,18 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onCha
         onDispose { hideKeyboard(); termId?.let { vm.closeTerminal(it) } }
     }
 
+    val headerStatus = terminalHeaderStatus(status, takenOver)
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = c.crust,
         topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                navigationIcon = {
-                    IconButton(onClick = { hideKeyboard(); onExit() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back") }
-                },
-                title = {
-                    Column {
-                        Text(title, style = MaterialTheme.typography.titleMedium)
-                        Text(status, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                },
-                actions = {
-                    if (onChat != null) {
-                        IconButton(onClick = { hideKeyboard(); onChat() }) {
-                            Icon(Icons.AutoMirrored.Filled.Chat, "chat view")
-                        }
-                    }
-                },
+            PaneHeader(
+                ctx = ctx,
+                breadcrumb = paneBreadcrumb(ctx, includeAgent = false),
+                status = headerStatus.label,
+                statusColor = statusColor(headerStatus.tone, dark),
+                onBack = { hideKeyboard(); onExit() },
+                toggleLabel = if (onChat != null) "chat" else null,
+                onToggle = { hideKeyboard(); onChat?.invoke() },
             )
         },
     ) { pad ->
@@ -264,25 +258,25 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onCha
                     },
                 )
                 if (takenOver) {
-                    Column(
-                        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
+                    Box(
+                        modifier = Modifier.fillMaxSize().background(c.crust).padding(24.dp),
+                        contentAlignment = Alignment.Center,
                     ) {
-                        Text("⚠", style = MaterialTheme.typography.headlineMedium, color = statusColor("blocked", isSystemInDarkTheme()))
-                        Spacer(Modifier.height(8.dp))
-                        Text(exit?.title ?: "session ended",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp))
-                        Spacer(Modifier.height(4.dp))
-                        Text(exit?.detail ?: "",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp))
-                        Spacer(Modifier.height(16.dp))
-                        Button(onClick = { exit = null; scope.launch { attachOnce() } }, shape = MaterialTheme.shapes.small) {
-                            Text("Reattach")
+                        Column(
+                            Modifier.fillMaxWidth().clip(HerdrRadius.card).background(c.base).padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text("⚠", style = HerdrType.headline, color = statusColor("blocked", dark))
+                            Spacer(Modifier.height(8.dp))
+                            Text(exit?.title ?: "session ended", style = HerdrType.title, color = c.text, textAlign = TextAlign.Center)
+                            Spacer(Modifier.height(4.dp))
+                            Text(exit?.detail ?: "", style = HerdrType.small, color = c.overlay2, textAlign = TextAlign.Center)
+                            Spacer(Modifier.height(24.dp))
+                            PrimaryButton(
+                                "Reattach",
+                                onClick = { exit = null; scope.launch { attachOnce() } },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
                         }
                     }
                 }
@@ -290,23 +284,18 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onCha
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.background.copy(alpha = 0.6f))
+                            .background(c.crust.copy(alpha = 0.6f))
                             // Swallow taps so a dead terminal doesn't pop the soft keyboard.
                             .pointerInput(Unit) { detectTapGestures {} },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                spinnerFrame(),
-                                color = statusColor("working", isSystemInDarkTheme()),
-                                style = MaterialTheme.typography.titleMedium,
-                            )
+                        Row(
+                            Modifier.clip(HerdrRadius.card).background(c.base).padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(spinnerFrame(), color = statusColor("working", dark), style = HerdrType.badge)
                             Spacer(Modifier.width(8.dp))
-                            Text(
-                                status,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
+                            Text(status, color = c.subtext1, style = HerdrType.code)
                         }
                     }
                 }
@@ -325,6 +314,23 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onCha
  */
 fun showReconnectOverlay(emulatorReady: Boolean, takenOver: Boolean, status: String): Boolean =
     emulatorReady && !takenOver && status != "connected"
+
+/** The header's status word and the [statusColor] tone it takes. */
+data class TerminalHeaderStatus(val label: String, val tone: String)
+
+/**
+ * The terminal's state as the header breadcrumb shows it: "attached" (green)
+ * while live, the exit title (red) once ended, "failed" (red) when the attach
+ * was refused, "paused" (idle) while backgrounded, otherwise the in-flight
+ * state (connecting… / reconnecting…, yellow).
+ */
+fun terminalHeaderStatus(status: String, takenOver: Boolean): TerminalHeaderStatus = when {
+    takenOver -> TerminalHeaderStatus(status, "blocked")
+    status == "connected" -> TerminalHeaderStatus("attached", "done")
+    status.startsWith("failed") -> TerminalHeaderStatus("failed", "blocked")
+    status == "paused" -> TerminalHeaderStatus("paused", "idle")
+    else -> TerminalHeaderStatus(status, "working")
+}
 
 /** The key bar's taps only reach the PTY when we hold a live attach on a live
  *  socket; otherwise sendInput no-ops. Gate the bar's interactivity on this so a
