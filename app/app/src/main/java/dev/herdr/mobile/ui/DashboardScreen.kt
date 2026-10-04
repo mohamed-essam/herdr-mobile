@@ -47,8 +47,11 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?) {
     }
 
     selected?.let { pane ->
-        TerminalScreen(vm, pane) { selected = null }
-        return   // full-screen terminal replaces the dashboard while open
+        // `selected` is a snapshot from when it was tapped; read the live pane
+        // so the chat flag (and the chat-unavailable banner) stays current.
+        val live = panes.firstOrNull { it.paneId == pane.paneId } ?: pane
+        PaneScreen(vm, live) { selected = null }
+        return   // the pane screen replaces the dashboard while open
     }
 
     val repoTree by vm.repoTree.collectAsState()

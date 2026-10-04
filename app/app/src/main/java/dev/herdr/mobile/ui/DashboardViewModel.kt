@@ -2,6 +2,8 @@ package dev.herdr.mobile.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.herdr.mobile.data.ChatRepository
+import dev.herdr.mobile.data.ChatView
 import dev.herdr.mobile.data.PaneRepository
 import dev.herdr.mobile.net.CompanionClient
 import dev.herdr.mobile.net.Pane
@@ -14,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -51,11 +54,20 @@ class DashboardViewModel(
     val collapsed: StateFlow<Set<String>> = _collapsed
     fun toggleExpanded(id: String) = _collapsed.update { if (id in it) it - id else it + id }
 
+    private val chat = ChatRepository(sendRaw = client::send, sendChat = client::sendChat)
+    fun chatView(paneId: String): StateFlow<ChatView> = chat.view(paneId)
+    fun openChat(paneId: String) { _lastOpenedPaneId.value = paneId; chat.open(paneId) }
+    fun closeChat(paneId: String) = chat.close(paneId)
+    fun sendChat(paneId: String, text: String) { viewModelScope.launch { chat.send(paneId, text) } }
+    fun retryChat(paneId: String, pendingId: String) { viewModelScope.launch { chat.retry(paneId, pendingId) } }
+    fun expireChat() = chat.expirePending()
+
     private val _lastOpenedPaneId = MutableStateFlow<String?>(null)
     val lastOpenedPaneId: StateFlow<String?> = _lastOpenedPaneId
 
     fun start(url: String) {
-        viewModelScope.launch { client.frames.collect { repo.onFrame(it) } }
+        viewModelScope.launch { client.frames.collect { repo.onFrame(it); chat.onFrame(it) } }
+        viewModelScope.launch { client.connected.filter { it }.collect { chat.onReconnected() } }
         client.connect(url)
     }
 

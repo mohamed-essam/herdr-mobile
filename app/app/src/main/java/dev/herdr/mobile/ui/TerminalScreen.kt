@@ -18,6 +18,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -54,7 +55,7 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
+fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onChat: (() -> Unit)? = null) {
     val connected by vm.connected.collectAsState()
     var termId by remember { mutableStateOf<String?>(null) }
     var session by remember { mutableStateOf<RemoteTerminalSession?>(null) }
@@ -210,6 +211,13 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
                     Column {
                         Text(title, style = MaterialTheme.typography.titleMedium)
                         Text(status, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
+                actions = {
+                    if (onChat != null) {
+                        IconButton(onClick = { hideKeyboard(); onChat() }) {
+                            Icon(Icons.AutoMirrored.Filled.Chat, "chat view")
+                        }
                     }
                 },
             )
