@@ -47,6 +47,28 @@ class ChatReducerTest {
         assertTrue(v.entries.isEmpty())
     }
 
+    @Test fun unknownEventAdvancesSeqSoTheNextIsNoGap() {
+        var v = onFrame(ChatView(), snap(1, user(1, "a")))
+        v = onFrame(v, ServerFrame.ChatEventFrame("p", 1, null, seq = 2))
+        assertEquals(2, v.lastSeq)
+        v = onFrame(v, ev(1, reply(3, "b")))
+        assertFalse(v.gap)
+        assertEquals(listOf(1, 3), v.entries.map { it.seq })
+    }
+
+    @Test fun unknownEventPastAGapStillGaps() {
+        var v = onFrame(ChatView(), snap(1, user(1, "a")))
+        v = onFrame(v, ServerFrame.ChatEventFrame("p", 1, null, seq = 3))
+        assertTrue(v.gap)
+    }
+
+    @Test fun snapshotEndingInAnUnknownEventCountsItsSeq() {
+        var v = onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", listOf(user(1, "a")), maxSeq = 2))
+        assertEquals(2, v.lastSeq)
+        v = onFrame(v, ev(1, reply(3, "b")))
+        assertFalse(v.gap)
+    }
+
     @Test fun stateFrameUpdatesState() {
         val v = onFrame(ChatView(), ServerFrame.ChatState("p", "working"))
         assertEquals("working", v.state)

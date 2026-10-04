@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** Decoded images kept in memory (LRU), across panes. */
 const val IMAGE_CACHE_SIZE = 30
-/** chat_image requests in flight at once; each reply can be ~5 MB. */
+/** chat_image requests in flight at once; each reply can be up to ~3.5 MB. */
 const val MAX_IMAGE_REQUESTS = 3
 /** An image can reach the companion after its event: a `missing` is retried once after this. */
 const val IMAGE_RETRY_MS = 3_000L
@@ -59,6 +59,15 @@ class ChatRepository(
         flow(paneId).update { v -> ChatReducer.onFrame(v, f, t).also { gapped = !v.gap && it.gap } }
         // A seq gap: re-open once; the companion answers with a fresh snapshot.
         if (gapped && paneId in opened) sendRaw(ClientMsg.chatOpen(paneId))
+        // The companion may hold images now that it lacked before (a resync
+        // re-sends the history's newest): give this pane's missing ones another go.
+        if (f is ServerFrame.ChatSnapshot) {
+            val toSend = synchronized(imgLock) {
+                resetMissingLocked(paneId).forEach { if (it !in imgQueue && it !in imgInFlight) imgQueue.addLast(it) }
+                pumpLocked()
+            }
+            sendImages(toSend)
+        }
     }
 
     fun open(paneId: String) {
@@ -77,6 +86,7 @@ class ChatRepository(
         val toSend = synchronized(imgLock) {
             imgInFlight.clear()
             imgQueue.clear()
+            resetMissingLocked(null)
             images.forEach { (k, e) -> if (e.flow.value == ImageState.Loading) imgQueue.addLast(k) }
             pumpLocked()
         }
@@ -221,6 +231,30 @@ class ChatRepository(
             }
             sendImages(again)
         }
+    }
+
+    /**
+     * Gives the Missing images of [paneId] (every pane when null) another
+     * chance: one on screen goes back to Loading, with the retry-once rule
+     * afresh, and is returned for the caller to request; any other is dropped
+     * from the cache, so its next [imageState] requests it.
+     */
+    private fun resetMissingLocked(paneId: String?): List<ImgKey> {
+        val again = mutableListOf<ImgKey>()
+        // Iterating the entries is no access in the access-ordered LRU.
+        val it = images.entries.iterator()
+        while (it.hasNext()) {
+            val (k, e) = it.next()
+            if ((paneId != null && k.paneId != paneId) || e.flow.value != ImageState.Missing) continue
+            if (e.flow.subscriptionCount.value > 0) {
+                e.retried = false
+                e.flow.value = ImageState.Loading
+                again += k
+            } else {
+                it.remove()
+            }
+        }
+        return again
     }
 
     private fun decode(data: String): ImageState =

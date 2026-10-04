@@ -69,7 +69,7 @@ object ChatReducer {
                 loaded = true,
                 epoch = f.epoch,
                 entries = entries,
-                lastSeq = f.entries.maxOfOrNull { it.seq } ?: 0,
+                lastSeq = maxOf(f.entries.maxOfOrNull { it.seq } ?: 0, f.maxSeq),
                 pending = confirm(v.pending, snapshotCandidates(v, f)),
                 gap = false,
                 hasMore = f.hasMore || entries.size < all.size,
@@ -86,8 +86,11 @@ object ChatReducer {
                 !v.loaded || v.gap -> v
                 // The new epoch's snapshot was dropped: heal like a seq gap.
                 f.epoch > v.epoch -> v.copy(gap = true)
-                f.epoch != v.epoch || e == null || e.seq <= v.lastSeq -> v
-                e.seq != v.lastSeq + 1 -> v.copy(gap = true)
+                f.epoch != v.epoch || f.seq <= v.lastSeq -> v
+                f.seq != v.lastSeq + 1 -> v.copy(gap = true)
+                // An event of a type this app doesn't know: not shown, but
+                // its seq counts, so the next event is no gap.
+                e == null -> v.copy(lastSeq = f.seq)
                 else -> append(v, e)
             }
         }

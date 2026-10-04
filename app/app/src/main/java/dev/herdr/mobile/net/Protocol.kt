@@ -142,14 +142,20 @@ private fun parseChatEntry(el: JsonElement): ChatEntry? {
     return ChatEntry(o["seq"]?.jsonPrimitive?.intOrNull ?: 0, ev)
 }
 
+/** The highest seq among [events], counting entries [parseChatEntry] leaves out. */
+private fun maxSeq(events: JsonArray?): Int =
+    events?.maxOfOrNull { ((it as? JsonObject)?.get("seq") as? JsonPrimitive)?.intOrNull ?: 0 } ?: 0
+
 sealed interface ServerFrame {
-    data class ChatSnapshot(val paneId: String, val epoch: Int, val state: String, val entries: List<ChatEntry>, val hasMore: Boolean = false) : ServerFrame
+    /** [maxSeq]: the highest seq among all its events, including ones of an unknown type (left out of [entries]). */
+    data class ChatSnapshot(val paneId: String, val epoch: Int, val state: String, val entries: List<ChatEntry>, val hasMore: Boolean = false, val maxSeq: Int = 0) : ServerFrame
     /** A [stale] page (the epoch moved on) carries no entries and hasMore false. */
     data class ChatHistoryPage(val reqId: String, val paneId: String, val epoch: Int, val entries: List<ChatEntry>, val hasMore: Boolean, val stale: Boolean = false) : ServerFrame
     /** [data] is base64; null with [missing] when the companion doesn't have the image. */
     data class ChatImageData(val paneId: String, val id: String, val mediaType: String?, val data: String?, val missing: Boolean) : ServerFrame
     data class ChatAnswerResult(val reqId: String, val ok: Boolean, val error: String?) : ServerFrame
-    data class ChatEventFrame(val paneId: String, val epoch: Int, val entry: ChatEntry?) : ServerFrame
+    /** [entry] is null for an event of an unknown type; [seq] is the frame's seq either way. */
+    data class ChatEventFrame(val paneId: String, val epoch: Int, val entry: ChatEntry?, val seq: Int = entry?.seq ?: 0) : ServerFrame
     data class ChatState(val paneId: String, val state: String) : ServerFrame
     data class ChatSendResult(val reqId: String, val ok: Boolean, val error: String?) : ServerFrame
     data object Welcome : ServerFrame
@@ -222,7 +228,8 @@ fun parseServerFrame(text: String): ServerFrame {
             obj["epoch"]?.jsonPrimitive?.intOrNull ?: 0,
             obj["state"]?.jsonPrimitive?.contentOrNull ?: "idle",
             (obj["events"] as? JsonArray)?.mapNotNull(::parseChatEntry) ?: emptyList(),
-            obj.bool("hasMore"))
+            obj.bool("hasMore"),
+            maxSeq(obj["events"] as? JsonArray))
         "chat_history_page" -> ServerFrame.ChatHistoryPage(
             obj.str("reqId"), obj.str("paneId"),
             obj["epoch"]?.jsonPrimitive?.intOrNull ?: 0,
@@ -234,7 +241,8 @@ fun parseServerFrame(text: String): ServerFrame {
         "chat_event" -> ServerFrame.ChatEventFrame(
             obj["paneId"]?.jsonPrimitive?.content ?: "",
             obj["epoch"]?.jsonPrimitive?.intOrNull ?: 0,
-            parseChatEntry(obj))
+            parseChatEntry(obj),
+            (obj["seq"] as? JsonPrimitive)?.intOrNull ?: 0)
         "chat_state" -> ServerFrame.ChatState(
             obj["paneId"]?.jsonPrimitive?.content ?: "",
             obj["state"]?.jsonPrimitive?.contentOrNull ?: "idle")

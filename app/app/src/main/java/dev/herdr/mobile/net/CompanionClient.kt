@@ -18,7 +18,7 @@ class CompanionClient(private val http: OkHttpClient = OkHttpClient()) {
     // the immediate welcome/panes frames (avoids a subscribe-vs-onMessage race).
     private val _frames = MutableSharedFlow<ServerFrame>(replay = 16, extraBufferCapacity = 64)
     val frames: SharedFlow<ServerFrame> = _frames.asSharedFlow()
-    // Image replies (up to ~5 MB each) bypass [frames] so its replay buffer
+    // Image replies (up to ~3.5 MB each) bypass [frames] so its replay buffer
     // never pins them. At most MAX_IMAGE_REQUESTS are in flight, so the buffer
     // never overflows for one collector.
     private val _images = MutableSharedFlow<ServerFrame.ChatImageData>(extraBufferCapacity = 8)

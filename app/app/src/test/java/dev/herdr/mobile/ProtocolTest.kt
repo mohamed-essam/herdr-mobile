@@ -195,6 +195,10 @@ class ProtocolTest {
         assertEquals(ChatEntry(9, ChatEvent.AssistantText("a", "yo")), e.entry)
         val unknown = parseServerFrame("""{"t":"chat_event","paneId":"p","epoch":1,"seq":10,"event":{"type":"new_kind"}}""") as ServerFrame.ChatEventFrame
         assertNull(unknown.entry)
+        assertEquals(10, unknown.seq)
+        val snap = parseServerFrame("""{"t":"chat_snapshot","paneId":"p","epoch":1,"state":"idle","events":[{"seq":1,"event":{"type":"assistant_text","uuid":"a","text":"yo"}},{"seq":2,"event":{"type":"new_kind"}}]}""") as ServerFrame.ChatSnapshot
+        assertEquals(1, snap.entries.size)
+        assertEquals(2, snap.maxSeq)
         val s = parseServerFrame("""{"t":"chat_state","paneId":"p","state":"idle"}""") as ServerFrame.ChatState
         assertEquals("idle", s.state)
         val r = parseServerFrame("""{"t":"chat_send_result","reqId":"c1","ok":false,"error":"no_mod"}""") as ServerFrame.ChatSendResult

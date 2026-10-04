@@ -4,6 +4,7 @@ import dev.herdr.mobile.data.*
 import dev.herdr.mobile.net.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -353,6 +354,71 @@ class ChatRepositoryTest {
         sent.clear()
         repo.onReconnected()
         assertEquals((1 until 4).map { ClientMsg.chatImage("p", "i$it") }, imageMsgs(sent))
+    }
+
+    /** Answers [id] missing twice (the first is retried after IMAGE_RETRY_MS): it settles on Missing. */
+    private fun kotlinx.coroutines.test.TestScope.settleMissing(repo: ChatRepository, pane: String, id: String) {
+        repo.onFrame(ServerFrame.ChatImageData(pane, id, null, null, true))
+        advanceTimeBy(IMAGE_RETRY_MS); runCurrent()
+        repo.onFrame(ServerFrame.ChatImageData(pane, id, null, null, true))
+    }
+
+    @Test fun missingImageIsRequestedAgainAfterANewSnapshot() = runTest {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> }, scope = backgroundScope)
+        repo.imageState("p", "u#0")
+        settleMissing(repo, "p", "u#0")
+        assertEquals(ImageState.Missing, repo.imageState("p", "u#0").value)
+        assertEquals(2, imageMsgs(sent).size)
+        repo.onFrame(ServerFrame.ChatSnapshot("p", 2, "idle", emptyList()))
+        val st = repo.imageState("p", "u#0")
+        assertEquals(ImageState.Loading, st.value)
+        assertEquals(3, imageMsgs(sent).size)
+        repo.onFrame(ServerFrame.ChatImageData("p", "u#0", "image/png", b64("now"), false))
+        assertEquals("now", String((st.value as ImageState.Ready).bytes))
+    }
+
+    @Test fun observedMissingImageIsReRequestedOnSnapshot() = runTest {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> }, scope = backgroundScope)
+        val st = repo.imageState("p", "u#0")
+        backgroundScope.launch { st.collect {} } // shown on screen
+        runCurrent()
+        settleMissing(repo, "p", "u#0")
+        assertEquals(ImageState.Missing, st.value)
+        repo.onFrame(ServerFrame.ChatSnapshot("p", 1, "idle", emptyList())) // same-epoch re-open
+        assertEquals(ImageState.Loading, st.value)
+        assertEquals(3, imageMsgs(sent).size)
+        // The retry-once rule applies afresh.
+        repo.onFrame(ServerFrame.ChatImageData("p", "u#0", null, null, true))
+        assertEquals(ImageState.Loading, st.value)
+        advanceTimeBy(IMAGE_RETRY_MS); runCurrent()
+        assertEquals(4, imageMsgs(sent).size)
+        repo.onFrame(ServerFrame.ChatImageData("p", "u#0", "image/png", b64("ok"), false))
+        assertEquals("ok", String((st.value as ImageState.Ready).bytes))
+    }
+
+    @Test fun snapshotOnlyResetsItsOwnPanesMissingImages() = runTest {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> }, scope = backgroundScope)
+        repo.imageState("q", "u#0")
+        settleMissing(repo, "q", "u#0")
+        repo.onFrame(ServerFrame.ChatSnapshot("p", 1, "idle", emptyList()))
+        assertEquals(ImageState.Missing, repo.imageState("q", "u#0").value)
+        assertEquals(2, imageMsgs(sent).size)
+    }
+
+    @Test fun reconnectReRequestsMissingImages() = runTest {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> }, scope = backgroundScope)
+        val st = repo.imageState("p", "u#0")
+        backgroundScope.launch { st.collect {} }
+        runCurrent()
+        settleMissing(repo, "p", "u#0")
+        sent.clear()
+        repo.onReconnected()
+        assertEquals(ImageState.Loading, st.value)
+        assertEquals(listOf(ClientMsg.chatImage("p", "u#0")), imageMsgs(sent))
     }
 
     // ---- protocol 9: answers ----

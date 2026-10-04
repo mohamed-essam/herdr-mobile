@@ -3,6 +3,7 @@ package dev.herdr.mobile.ui
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -103,7 +104,9 @@ fun ChatImage(vm: DashboardViewModel, paneId: String, id: String, modifier: Modi
                 is Decoded.Done -> Image(
                     d.bitmap, contentDescription = "image",
                     contentScale = ContentScale.Fit,
+                    // The outline shows a dark screenshot's bounds on the dark background.
                     modifier = modifier.heightIn(max = INLINE_MAX_HEIGHT).clip(RoundedCornerShape(8.dp))
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
                         .clickable { viewing = true },
                 )
             }
