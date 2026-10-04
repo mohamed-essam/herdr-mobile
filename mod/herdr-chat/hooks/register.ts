@@ -10,7 +10,7 @@ type Outgoing = ChatEvent | Control
 // Per-load mutable state. Helpers are top-level functions (the engine only
 // follows `$` into functions declared at the top of this file), so the state
 // travels in this object rather than in register()'s closure.
-type State = {
+export type State = {
   paneId: string | undefined
   sessionId: string
   cwd: string
@@ -71,6 +71,23 @@ async function tick($: EngineInterface, s: State) {
   }
 }
 
+type Appended = {
+  door: string
+  uuid: string
+  agentId?: string
+  message: { isMeta?: true; role?: string; content?: unknown }
+}
+
+// Queues the forwardable part of an appended row. Prefers the stored (possibly
+// rewritten) content over the incoming one. Exported so tests can drive it
+// directly: the test kit cannot answer session.append end-to-end.
+export function queueAppended(s: State, e: Appended, stored: { content?: unknown } | undefined): void {
+  if (!s.paneId || !shouldForward(e)) return
+  const role = e.message.role
+  if (role !== 'user' && role !== 'assistant') return
+  s.pending.push(...normalizeBlocks(role, stored?.content ?? e.message.content, e.uuid))
+}
+
 export const register: Register = on => {
   const s: State = {
     paneId: undefined,
@@ -105,9 +122,7 @@ export const register: Register = on => {
 
   on('session.append', async ($, e, next) => {
     const r = await next(e)
-    if (s.paneId && shouldForward(e) && (e.message.role === 'user' || e.message.role === 'assistant')) {
-      s.pending.push(...normalizeBlocks(e.message.role, r.message?.content ?? e.message.content, e.uuid))
-    }
+    queueAppended(s, e, r.message)
     return r
   })
 

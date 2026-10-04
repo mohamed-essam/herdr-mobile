@@ -1,5 +1,8 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
+import { queueAppended, type State } from '../hooks/register'
+
+const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], offline: false, inFlight: false, submitChain: Promise.resolve() })
 
 type Sync = { paneId: string; sessionId: string; events: { type: string; [k: string]: unknown }[] }
 
@@ -65,22 +68,35 @@ describe('herdr-chat', () => {
     expect(w.syncs.length).toBe(0)
   })
 
-  test('forwarded rows are queued in order; the stored row is returned unchanged', async ($, on) => {
-    const w = world(on)
-    // KIT LIMITATION (2.1.289): the kit cannot answer session.append beneath the plugin; a hook that answers without next is skipped, and next(e) reaches the throwing bottom. This test fails with 'no implementation for session.append' until the kit supports it.
-    on('session.append', ($, e) => ({ message: e.message, uuid: e.uuid }))
-    await start($)
-    await w.clock.advance(1000)
-    const r = await $.session.append({ door: 'prompt', uuid: 'u1', origin: { kind: 'user' } as never, message: { type: 'user', role: 'user', content: [{ type: 'text', text: 'run tests' }] } })
-    expect(r.uuid).toBe('u1')
-    await $.session.append({ door: 'response', uuid: 'a1', origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'ok' }] } })
-    await $.session.append({ door: 'attachment', uuid: 'x1', origin: { kind: 'model', model: 'm' }, message: { type: 'attachment', content: [] } })
-    await $.session.append({ door: 'response', uuid: 's1', agentId: 'sub', origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'subagent' }] } })
-    await w.clock.advance(1000)
-    expect(w.syncs[1]?.events).toEqual([
+  // The kit cannot drive session.append end-to-end (a test hook cannot answer it
+  // beneath the plugin), so the forwarding logic is unit-tested directly.
+  test('forwarded rows are queued in order', () => {
+    const s = state('w1:p1')
+    queueAppended(s, { door: 'prompt', uuid: 'u1', message: { role: 'user', content: [{ type: 'text', text: 'run tests' }] } }, undefined)
+    queueAppended(s, { door: 'response', uuid: 'a1', message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } }, undefined)
+    expect(s.pending).toEqual([
       { type: 'user_text', uuid: 'u1', text: 'run tests' },
       { type: 'assistant_text', uuid: 'a1#0', text: 'ok' },
     ])
+  })
+
+  test('attachment-door rows and subagent rows are dropped', () => {
+    const s = state('w1:p1')
+    queueAppended(s, { door: 'attachment', uuid: 'x1', message: { role: 'user', content: [] } }, undefined)
+    queueAppended(s, { door: 'response', uuid: 's1', agentId: 'sub', message: { role: 'assistant', content: [{ type: 'text', text: 'subagent' }] } }, undefined)
+    expect(s.pending).toEqual([])
+  })
+
+  test('stored (rewritten) content is preferred over the incoming content', () => {
+    const s = state('w1:p1')
+    queueAppended(s, { door: 'prompt', uuid: 'u1', message: { role: 'user', content: [{ type: 'text', text: 'secret' }] } }, { content: [{ type: 'text', text: 'redacted' }] })
+    expect(s.pending).toEqual([{ type: 'user_text', uuid: 'u1', text: 'redacted' }])
+  })
+
+  test('nothing is queued when paneId is unset', () => {
+    const s = state(undefined)
+    queueAppended(s, { door: 'prompt', uuid: 'u1', message: { role: 'user', content: [{ type: 'text', text: 'hi' }] } }, undefined)
+    expect(s.pending).toEqual([])
   })
 
   test('turn start and main-thread completion queue working then idle', async ($, on) => {
