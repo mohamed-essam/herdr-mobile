@@ -99,14 +99,27 @@ func (h *Hub) get(id string) *pane {
 // Sync applies the mod's queued events in order, records the heartbeat and
 // drains the pane's outbox. The result is never nil.
 func (h *Hub) Sync(paneID, sessionID string, events []json.RawMessage) []OutMsg {
+	out, _ := h.SyncResync(paneID, sessionID, events)
+	return out
+}
+
+// SyncResync is Sync that also reports whether the mod must resync (send
+// hello + snapshot): the pane never received a hello (e.g. the companion
+// restarted between two mod ticks), or the request's session id differs from
+// the stored one and the batch carried no hello.
+func (h *Hub) SyncResync(paneID, sessionID string, events []json.RawMessage) ([]OutMsg, bool) {
 	h.mu.Lock()
 	p := h.get(paneID)
 	p.lastSeen = h.now()
 	flipped := !p.live
 	p.live = true
+	sawHello := false
 	for _, ev := range events {
-		p.apply(paneID, sessionID, ev)
+		if p.apply(paneID, sessionID, ev) {
+			sawHello = true
+		}
 	}
+	resync := p.sessionID == "" || (!sawHello && sessionID != p.sessionID)
 	out := p.outbox
 	p.outbox = nil
 	h.mu.Unlock()
@@ -116,7 +129,7 @@ func (h *Hub) Sync(paneID, sessionID string, events []json.RawMessage) []OutMsg 
 	if out == nil {
 		out = []OutMsg{}
 	}
-	return out
+	return out, resync
 }
 
 func isChatEvent(t string) bool {
@@ -127,7 +140,8 @@ func isChatEvent(t string) bool {
 	return false
 }
 
-func (p *pane) apply(paneID, sessionID string, raw json.RawMessage) {
+// apply applies one event and reports whether it was a hello.
+func (p *pane) apply(paneID, sessionID string, raw json.RawMessage) bool {
 	var head struct {
 		Type      string            `json:"type"`
 		SessionID string            `json:"sessionId"`
@@ -135,7 +149,7 @@ func (p *pane) apply(paneID, sessionID string, raw json.RawMessage) {
 		Events    []json.RawMessage `json:"events"`
 	}
 	if json.Unmarshal(raw, &head) != nil {
-		return
+		return false
 	}
 	switch {
 	case head.Type == "hello":
@@ -146,6 +160,7 @@ func (p *pane) apply(paneID, sessionID string, raw json.RawMessage) {
 			p.outbox = nil // queued for the previous session
 		}
 		p.sessionID = sessionID
+		return true
 	case head.Type == "snapshot":
 		p.epoch++
 		p.seq = 0
@@ -161,7 +176,7 @@ func (p *pane) apply(paneID, sessionID string, raw json.RawMessage) {
 		p.fan(Update{Kind: "snapshot", Epoch: p.epoch, Snapshot: p.snapshot(paneID)})
 	case head.Type == "state":
 		if head.State != "working" && head.State != "idle" {
-			return
+			return false
 		}
 		p.state = head.State
 		p.fan(Update{Kind: "state", Epoch: p.epoch, State: p.state})
@@ -169,6 +184,7 @@ func (p *pane) apply(paneID, sessionID string, raw json.RawMessage) {
 		e := p.push(raw)
 		p.fan(Update{Kind: "event", Epoch: p.epoch, Entry: e})
 	}
+	return false
 }
 
 func (p *pane) push(raw json.RawMessage) Entry {

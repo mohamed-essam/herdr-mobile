@@ -92,6 +92,13 @@ type syncReq struct {
 	Events    []json.RawMessage `json:"events"`
 }
 
+// syncRes is the /sync answer. Resync asks the mod to send hello + snapshot
+// on its next tick (omitted when false; older mods ignore it).
+type syncRes struct {
+	Messages []OutMsg `json:"messages"`
+	Resync   bool     `json:"resync,omitempty"`
+}
+
 // Handler serves the mod's one endpoint, POST /sync.
 func (h *Hub) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -101,9 +108,9 @@ func (h *Hub) Handler() http.Handler {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
-		msgs := h.Sync(req.PaneID, req.SessionID, req.Events)
+		msgs, resync := h.SyncResync(req.PaneID, req.SessionID, req.Events)
 		w.Header().Set("content-type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"messages": msgs})
+		_ = json.NewEncoder(w).Encode(syncRes{Messages: msgs, Resync: resync})
 	})
 	return mux
 }
