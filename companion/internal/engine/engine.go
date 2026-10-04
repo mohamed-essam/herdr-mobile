@@ -3,12 +3,15 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"log"
+	"net"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/chatbridge"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/herdr"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/notify"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/proto"
@@ -21,6 +24,9 @@ type Config struct {
 	ListenAddr       string
 	PollInterval     time.Duration
 	DebounceFinished time.Duration
+	// ChatSocket is the Unix socket the herdr-chat mod syncs over; empty
+	// disables the chat view.
+	ChatSocket string
 }
 
 type Engine struct {
@@ -28,6 +34,7 @@ type Engine struct {
 	client *herdr.Client
 	store  *state.Store
 	srv    *wsserver.Server
+	hub    *chatbridge.Hub
 
 	mu       sync.Mutex
 	endpoint string
@@ -46,6 +53,16 @@ func New(cfg Config) *Engine {
 	c := herdr.New(cfg.SocketPath)
 	e := &Engine{cfg: cfg, client: c, store: state.NewStore()}
 	e.srv = wsserver.NewServer(wsserver.AllowAll{}, c)
+	e.hub = chatbridge.NewHub(nil)
+	// Liveness callbacks run serialized under the hub's lock while a mod sync
+	// may be waiting: this must stay fast and non-blocking, and must never call
+	// back into the hub (deadlock). SetChat + Broadcast (non-blocking) is safe.
+	e.hub.SetOnLiveness(func(paneID string, live bool) {
+		if p, changed := e.store.SetChat(paneID, live); changed {
+			e.srv.Broadcast(proto.PaneUpdate(p))
+		}
+	})
+	e.srv.SetChat(e.hub)
 	e.srv.SetInitialSnapshot(e.store.Snapshot)
 	e.srv.SetWorkspaceSnapshot(e.store.Workspaces)
 	e.srv.SetTabSnapshot(e.store.Tabs)
@@ -84,6 +101,14 @@ func (e *Engine) Run(ctx context.Context) error {
 
 	go e.pollLoop(ctx)
 
+	if e.cfg.ChatSocket == "" {
+		log.Printf("chat bridge disabled: no private socket path (set --chat-socket, HERDR_MOBILE_CHAT_SOCK or XDG_RUNTIME_DIR)")
+	} else if l, err := chatbridge.Listen(e.cfg.ChatSocket); err != nil {
+		log.Printf("chat bridge disabled: cannot listen on %s: %v", e.cfg.ChatSocket, err)
+	} else {
+		go e.serveChat(ctx, l)
+	}
+
 	httpSrv := &http.Server{Addr: e.cfg.ListenAddr, Handler: e.srv.Handler()}
 	go func() {
 		<-ctx.Done()
@@ -96,6 +121,26 @@ func (e *Engine) Run(ctx context.Context) error {
 		return nil
 	}
 	return err
+}
+
+// serveChat serves the herdr-chat mods' /sync endpoint and expires mods that
+// stop syncing, until ctx ends.
+func (e *Engine) serveChat(ctx context.Context, l net.Listener) {
+	srv := &http.Server{Handler: e.hub.Handler()}
+	go func() {
+		t := time.NewTicker(time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				srv.Close()
+				return
+			case <-t.C:
+				e.hub.Tick()
+			}
+		}
+	}()
+	_ = srv.Serve(l)
 }
 
 func (e *Engine) pollLoop(ctx context.Context) {
@@ -176,6 +221,7 @@ func (e *Engine) pollOnce(ctx context.Context) {
 	changes, transitions := e.store.Apply(panes)
 	for _, ch := range changes {
 		if ch.Kind == "removed" {
+			e.hub.Drop(ch.PaneID)
 			e.srv.Broadcast(proto.PaneRemoved(ch.PaneID))
 		} else {
 			e.srv.Broadcast(proto.PaneUpdate(ch.Pane))

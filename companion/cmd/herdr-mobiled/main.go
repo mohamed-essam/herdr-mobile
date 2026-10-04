@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/chatbridge"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/engine"
 )
 
@@ -47,9 +48,10 @@ func main() {
 	// phone over the tailnet.
 	listen := flag.String("listen", "127.0.0.1:8787", "WS listen address (bind to your tailnet IP, e.g. `tailscale ip -4`, to reach it from the phone)")
 	poll := flag.Duration("poll", 1500*time.Millisecond, "pane.list poll interval")
+	chatSock := flag.String("chat-socket", chatbridge.SocketPath(), "Unix socket for the herdr-chat Claude Code mod (empty disables the chat view)")
 	flag.Parse()
 
-	e := engine.New(engine.Config{SocketPath: *socket, ListenAddr: *listen, PollInterval: *poll})
+	e := engine.New(engine.Config{SocketPath: *socket, ListenAddr: *listen, PollInterval: *poll, ChatSocket: *chatSock})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -57,7 +59,7 @@ func main() {
 	if isNonLoopbackBind(*listen) {
 		log.Printf("WARNING: listening on %s — the v1 API has no authentication and can send input to your terminals. Only bind to a private (e.g. Tailscale) address, never a public one.", *listen)
 	}
-	log.Printf("herdr-mobiled: socket=%s listen=%s", *socket, *listen)
+	log.Printf("herdr-mobiled: socket=%s listen=%s chat=%s", *socket, *listen, *chatSock)
 	if err := e.Run(ctx); err != nil {
 		log.Fatal(err)
 	}

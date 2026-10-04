@@ -173,3 +173,45 @@ func TestLastActivityPrunedWhenWorkspaceGone(t *testing.T) {
 		t.Fatal("lastActivity for a workspace no longer reported should be pruned")
 	}
 }
+
+func TestSetChatFlagsKnownPane(t *testing.T) {
+	s := NewStore()
+	s.Apply(infos(herdr.PaneInfo{PaneID: "w1:p1", WorkspaceID: "w1", Agent: "claude"}))
+	p, changed := s.SetChat("w1:p1", true)
+	if !changed || !p.Chat {
+		t.Fatalf("SetChat on: changed=%v pane=%+v", changed, p)
+	}
+	if _, again := s.SetChat("w1:p1", true); again {
+		t.Fatal("setting the same value should report no change")
+	}
+	// herdr's next poll must not wipe the flag
+	ch, _ := s.Apply(infos(herdr.PaneInfo{PaneID: "w1:p1", WorkspaceID: "w1", Agent: "claude"}))
+	if len(ch) != 0 || !s.Snapshot()[0].Chat {
+		t.Fatalf("poll lost chat flag: changes=%+v snap=%+v", ch, s.Snapshot())
+	}
+	if p, changed := s.SetChat("w1:p1", false); !changed || p.Chat {
+		t.Fatalf("SetChat off: %v %+v", changed, p)
+	}
+}
+
+func TestSetChatBeforePaneAppears(t *testing.T) {
+	s := NewStore()
+	if _, changed := s.SetChat("w2:p1", true); changed {
+		t.Fatal("unknown pane: nothing to broadcast yet")
+	}
+	ch, _ := s.Apply(infos(herdr.PaneInfo{PaneID: "w2:p1", WorkspaceID: "w2"}))
+	if len(ch) != 1 || !ch[0].Pane.Chat {
+		t.Fatalf("new pane should carry chat=true: %+v", ch)
+	}
+}
+
+func TestRemovedPaneForgetsChat(t *testing.T) {
+	s := NewStore()
+	s.Apply(infos(herdr.PaneInfo{PaneID: "w1:p1", WorkspaceID: "w1"}))
+	s.SetChat("w1:p1", true)
+	s.Apply(infos())
+	ch, _ := s.Apply(infos(herdr.PaneInfo{PaneID: "w1:p1", WorkspaceID: "w1"}))
+	if ch[0].Pane.Chat {
+		t.Fatal("a re-created pane id must not inherit the old chat flag")
+	}
+}

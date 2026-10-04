@@ -19,6 +19,9 @@ type Pane struct {
 	// then decodes them as null and renders "—" rather than a blank cell.
 	Agent       string `json:"agent,omitempty"`
 	AgentStatus string `json:"agentStatus,omitempty"`
+	// Chat is true while the herdr-chat mod in this pane is syncing (the app
+	// opens the chat view for it). omitempty keeps older apps unaffected.
+	Chat bool `json:"chat,omitempty"`
 }
 
 type Worktree struct {
@@ -61,6 +64,7 @@ type Transition struct {
 type Store struct {
 	mu    sync.Mutex
 	panes map[string]Pane
+	chat  map[string]bool
 
 	workspaces   []Workspace
 	tabs         []Tab
@@ -71,6 +75,7 @@ type Store struct {
 func NewStore() *Store {
 	return &Store{
 		panes:        map[string]Pane{},
+		chat:         map[string]bool{},
 		lastActivity: map[string]int64{},
 		now:          func() int64 { return time.Now().UnixMilli() },
 	}
@@ -90,6 +95,7 @@ func (s *Store) Apply(infos []herdr.PaneInfo) ([]Change, []Transition) {
 	seen := map[string]bool{}
 	for _, i := range infos {
 		np := toPane(i)
+		np.Chat = s.chat[np.PaneID]
 		seen[np.PaneID] = true
 		old, existed := s.panes[np.PaneID]
 		if !existed {
@@ -112,11 +118,33 @@ func (s *Store) Apply(infos []herdr.PaneInfo) ([]Change, []Transition) {
 		if !seen[id] {
 			ws := s.panes[id].WorkspaceID
 			delete(s.panes, id)
+			delete(s.chat, id)
 			changes = append(changes, Change{Kind: "removed", PaneID: id})
 			s.lastActivity[ws] = s.now() // removed
 		}
 	}
 	return changes, transitions
+}
+
+// SetChat records whether the pane's mod is live. It reports the updated pane
+// and true only when a known pane's flag actually changed (so the caller
+// broadcasts a pane_update). A flag set before herdr reports the pane is
+// kept and applied when the pane appears.
+func (s *Store) SetChat(paneID string, on bool) (Pane, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if on {
+		s.chat[paneID] = true
+	} else {
+		delete(s.chat, paneID)
+	}
+	p, ok := s.panes[paneID]
+	if !ok || p.Chat == on {
+		return Pane{}, false
+	}
+	p.Chat = on
+	s.panes[paneID] = p
+	return p, true
 }
 
 func (s *Store) Snapshot() []Pane {
