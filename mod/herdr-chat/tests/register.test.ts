@@ -8,8 +8,9 @@ type Sync = { paneId: string; sessionId: string; events: { type: string; [k: str
 
 // Wires the world beneath the plugin: env, clock, session reads, and a fake
 // companion that records each /sync body and answers with queued messages.
-function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boolean } = {}) {
-  if (opts.nosock) mock.env(on, { HERDR_PANE_ID: 'w1:p1' })
+function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boolean; xdg?: string } = {}) {
+  if (opts.xdg) mock.env(on, { HERDR_PANE_ID: 'w1:p1', XDG_RUNTIME_DIR: opts.xdg })
+  else if (opts.nosock) mock.env(on, { HERDR_PANE_ID: 'w1:p1' })
   else mock.env(on, opts.pane === undefined ? { HERDR_PANE_ID: 'w1:p1', HERDR_MOBILE_CHAT_SOCK: '/s/chat.sock' } : opts.pane ? { HERDR_PANE_ID: opts.pane, HERDR_MOBILE_CHAT_SOCK: '/s/chat.sock' } : {})
   const clock = mock.clock(on)
   const syncs: Sync[] = []
@@ -27,7 +28,7 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
   on('http.fetch', ($, e) => {
     if (opts.down?.()) throw new Error('ECONNREFUSED')
     expect(e.url).toBe('http://chat/sync')
-    expect(e.init?.socketPath).toBe('/s/chat.sock')
+    expect(e.init?.socketPath).toBe(opts.xdg ? `${opts.xdg}/herdr-mobile/chat.sock` : '/s/chat.sock')
     syncs.push(JSON.parse(String(e.init?.body)))
     const messages = outbox.splice(0)
     return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ messages }) } }
@@ -76,6 +77,13 @@ describe('herdr-chat', () => {
     await start($)
     await w.clock.advance(3000)
     expect(w.syncs.length).toBe(0)
+  })
+
+  test('falls back to XDG_RUNTIME_DIR for the socket path', async ($, on) => {
+    const w = world(on, { xdg: '/run/user/7' })
+    await start($)
+    await w.clock.advance(1000)
+    expect(w.syncs.length).toBe(1)
   })
 
   test('forwarded rows are queued in order', () => {
