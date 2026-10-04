@@ -100,7 +100,9 @@ to disable chat. If `HERDR_MOBILE_CHAT_SOCK` is not set and `$XDG_RUNTIME_DIR` i
 unavailable, the chat view is off (there is no `/tmp` fallback). A custom socket
 path must be in a directory only you can access (mode 0700 or stricter, owned by
 you); otherwise the companion refuses to listen and logs why. Set
-`HERDR_MOBILE_CHAT_SOCK` in the environment where Claude runs.
+`HERDR_MOBILE_CHAT_SOCK` in the environment where Claude runs. If you pass
+`--chat-socket <path>` to the companion, set `HERDR_MOBILE_CHAT_SOCK` to the same
+path in the environment Claude runs in, since the plugin cannot see the flag.
 
 ### App
 
