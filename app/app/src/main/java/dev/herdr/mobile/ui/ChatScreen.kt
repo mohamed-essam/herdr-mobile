@@ -2,13 +2,12 @@ package dev.herdr.mobile.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -28,12 +27,15 @@ import dev.herdr.mobile.data.PendingMsg
 import dev.herdr.mobile.data.PendingStatus
 import dev.herdr.mobile.data.BOTTOM_OFFSET
 import dev.herdr.mobile.data.entryScrollTarget
+import dev.herdr.mobile.data.formatTs
 import dev.herdr.mobile.data.pendingLabel
 import dev.herdr.mobile.data.taskNoticeIsError
 import dev.herdr.mobile.data.taskNoticeLabel
 import dev.herdr.mobile.net.ChatEvent
 import dev.herdr.mobile.net.Pane
 import kotlinx.coroutines.delay
+import java.time.ZoneId
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -43,6 +45,7 @@ fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTermina
     var draft by rememberSaveable(pane.paneId) { mutableStateOf("") }
     var expanded by remember(pane.paneId) { mutableStateOf(setOf<String>()) }
     val listState = rememberLazyListState()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     DisposableEffect(pane.paneId) {
         vm.openChat(pane.paneId)
@@ -51,12 +54,24 @@ fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTermina
     LaunchedEffect(pane.paneId) {
         while (true) { delay(10_000); vm.expireChat() }
     }
+    // The dashboard (and its snackbar) isn't composed while a pane is open.
+    LaunchedEffect(Unit) {
+        vm.actionErrors.collect { snackbarHostState.showSnackbar(it) }
+    }
 
     val results = remember(view.entries) {
         view.entries.mapNotNull { it.event as? ChatEvent.ToolResult }.associateBy { it.toolUseId }
     }
-    val rows = remember(view.entries) { view.entries.filter { it.event !is ChatEvent.ToolResult } }
+    // An AskUserQuestion shows as its question card, not also as a tool card.
+    val rows = remember(view.entries) {
+        val questions = view.entries.mapNotNullTo(HashSet()) { (it.event as? ChatEvent.Question)?.toolUseId }
+        view.entries.filter { e ->
+            val ev = e.event
+            ev !is ChatEvent.ToolResult && !(ev is ChatEvent.ToolUse && ev.toolUseId in questions)
+        }
+    }
     val itemCount = rows.size + view.pending.size
+    val lastKey = view.pending.lastOrNull()?.id ?: rows.lastOrNull()?.let { "e${view.epoch}-${it.seq}" }
     // Follow new output only while the user is already at the bottom.
     val atBottom by remember {
         derivedStateOf {
@@ -73,8 +88,16 @@ fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTermina
             entryScrolled = true
         }
     }
-    LaunchedEffect(itemCount) {
+    // Keyed on the newest item, so a page of older history prepended above
+    // doesn't count as new output.
+    LaunchedEffect(lastKey) {
         if (itemCount > 0 && atBottom) listState.scrollToItem(itemCount - 1, BOTTOM_OFFSET)
+    }
+    // Page back once the oldest item is on screen. Items are keyed by seq, so
+    // the list keeps the visible item where it is when the page is prepended.
+    val atTop by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
+    LaunchedEffect(atTop, entryScrolled, view.hasMore, view.loadingOlder) {
+        if (atTop && entryScrolled && view.hasMore && !view.loadingOlder) vm.loadOlderChat(pane.paneId)
     }
 
     val title = pane.cwd.substringAfterLast('/').ifBlank { pane.workspaceId.ifBlank { pane.paneId } }
@@ -83,9 +106,12 @@ fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTermina
         view.state == "working" -> "working ${spinnerFrame()}"
         else -> "idle"
     }
+    val now = System.currentTimeMillis()
+    fun ts(t: Long?) = t?.let { formatTs(it, now, ZoneId.systemDefault(), Locale.getDefault()) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -113,23 +139,37 @@ fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTermina
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Text("loading…", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-            } else {
+            } else Box(Modifier.weight(1f).fillMaxWidth()) {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(rows, key = { "e${view.epoch}-${it.seq}" }) { entry ->
                         when (val ev = entry.event) {
-                            is ChatEvent.UserText -> UserBubble(ev.text)
-                            is ChatEvent.AssistantText -> AssistantBlock(ev.text)
-                            is ChatEvent.ToolUse -> ToolCard(
-                                ev, results[ev.toolUseId], ev.toolUseId in expanded,
-                            ) { expanded = if (ev.toolUseId in expanded) expanded - ev.toolUseId else expanded + ev.toolUseId }
+                            is ChatEvent.UserText -> UserBubble(ev.text, time = ts(ev.ts)) {
+                                for (id in ev.images) ChatImage(vm, pane.paneId, id)
+                            }
+                            is ChatEvent.AssistantText -> AssistantBlock(ev.text, ts(ev.ts))
+                            is ChatEvent.ToolUse -> {
+                                val result = results[ev.toolUseId]
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    ToolCard(ev, result, ev.toolUseId in expanded) {
+                                        expanded = if (ev.toolUseId in expanded) expanded - ev.toolUseId else expanded + ev.toolUseId
+                                    }
+                                    result?.images?.forEach { ChatImage(vm, pane.paneId, it) }
+                                }
+                            }
                             is ChatEvent.TaskNotice -> TaskNoticeRow(ev)
                             is ChatEvent.ToolResult -> {}
-                            is ChatEvent.Question -> {} // question card: Task 7
+                            is ChatEvent.Question -> QuestionCard(
+                                ev,
+                                enabled = connected && pane.chat,
+                                sending = ev.toolUseId in view.answering,
+                                answered = ev.toolUseId in view.answered,
+                                answer = results[ev.toolUseId]?.preview,
+                            ) { vm.answerChat(pane.paneId, ev.toolUseId, it) }
                         }
                     }
                     items(view.pending, key = { it.id }) { p ->
@@ -138,6 +178,21 @@ fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTermina
                             pending = p,
                             label = pendingLabel(p, view.state),
                             onRetry = if (p.status != PendingStatus.Queued) ({ vm.retryChat(pane.paneId, p.id) }) else null,
+                        )
+                    }
+                }
+                // An overlay, not a list row: a row above the oldest item would
+                // become the scroll anchor and the prepended page would push the
+                // view to its top.
+                if (view.loadingOlder) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
+                    ) {
+                        Text(
+                            "loading earlier…", Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
@@ -160,15 +215,29 @@ fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTermina
 }
 
 @Composable
-private fun UserBubble(text: String, pending: PendingMsg? = null, label: String? = null, onRetry: (() -> Unit)? = null) {
+private fun UserBubble(
+    text: String,
+    pending: PendingMsg? = null,
+    label: String? = null,
+    time: String? = null,
+    onRetry: (() -> Unit)? = null,
+    images: @Composable ColumnScope.() -> Unit = {},
+) {
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
         Surface(
             color = MaterialTheme.colorScheme.primaryContainer,
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier.widthIn(max = 320.dp).alpha(if (pending != null) 0.6f else 1f),
         ) {
-            Text(text, Modifier.padding(horizontal = 12.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.onPrimaryContainer)
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                images()
+                // A message that is only an image has no text.
+                if (text.isNotEmpty() || pending != null) {
+                    SelectionContainer { Text(text, color = MaterialTheme.colorScheme.onPrimaryContainer) }
+                }
+            }
         }
+        if (time != null) TimeLabel(time)
         if (label != null) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -176,6 +245,11 @@ private fun UserBubble(text: String, pending: PendingMsg? = null, label: String?
             }
         }
     }
+}
+
+@Composable
+private fun TimeLabel(time: String) {
+    Text(time, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
 }
 
 @Composable
@@ -192,22 +266,10 @@ private fun TaskNoticeRow(n: ChatEvent.TaskNotice) {
 }
 
 @Composable
-private fun AssistantBlock(text: String) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        for (seg in splitFences(text)) {
-            when (seg) {
-                is TextSegment.Prose -> Text(seg.text, style = MaterialTheme.typography.bodyMedium)
-                is TextSegment.Code -> Text(
-                    seg.text,
-                    fontFamily = FontFamily.Monospace,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainer)
-                        .horizontalScroll(rememberScrollState()).padding(8.dp),
-                    softWrap = false,
-                )
-            }
-        }
+private fun AssistantBlock(text: String, time: String?) {
+    Column(Modifier.fillMaxWidth()) {
+        SelectionContainer { ChatMarkdown(text) }
+        if (time != null) TimeLabel(time)
     }
 }
 
@@ -216,20 +278,25 @@ private fun ToolCard(use: ChatEvent.ToolUse, result: ChatEvent.ToolResult?, expa
     val accent = if (result?.isError == true) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .clickable(enabled = result != null, onClick = onToggle).padding(horizontal = 10.dp, vertical = 6.dp),
+            .background(MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
+        // Only the header toggles, so the expanded output below can be selected.
         Text(
             (if (expanded) "▾ " else "▸ ") + use.summary,
             color = accent, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall,
             maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth().clickable(enabled = result != null, onClick = onToggle)
+                .padding(horizontal = 10.dp, vertical = 6.dp),
         )
         if (expanded && result != null) {
-            Text(
-                result.preview.ifBlank { "(no output)" },
-                fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp),
-            )
+            SelectionContainer {
+                Text(
+                    result.preview.ifBlank { "(no output)" },
+                    fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 10.dp, end = 10.dp, bottom = 6.dp),
+                )
+            }
         }
     }
 }

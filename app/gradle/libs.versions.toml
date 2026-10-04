@@ -11,6 +11,7 @@ coroutines = "1.11.0"
 junit = "4.13.2"
 core-ktx = "1.17.0"
 activity-compose = "1.13.0"
+markdown-renderer = "0.41.0"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "core-ktx" }
@@ -29,6 +30,7 @@ kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-t
 datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
 unifiedpush = { module = "org.unifiedpush.android:connector", version.ref = "unifiedpush" }
 junit = { module = "junit:junit", version.ref = "junit" }
+markdown-renderer-m3 = { module = "com.mikepenz:multiplatform-markdown-renderer-m3", version.ref = "markdown-renderer" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
