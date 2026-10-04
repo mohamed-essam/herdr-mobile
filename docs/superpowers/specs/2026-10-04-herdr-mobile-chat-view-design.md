@@ -66,30 +66,32 @@ unset, register no further behaviour. `sessionId` is the Claude session id
 
 **Socket path.** `$XDG_RUNTIME_DIR/herdr-mobile/chat.sock`, falling back to
 `/tmp/herdr-mobile-$UID/chat.sock` when `XDG_RUNTIME_DIR` is unset. The companion
-uses the same rule. Requests go through
-`$.http.fetch("http://chat/<path>", { socketPath })`.
+uses the same rule. The mod makes exactly one kind of request,
+`$.http.fetch("http://chat/sync", { method: "POST", socketPath, body })`, from a
+timer (see **Sync loop**). Hooks never do I/O themselves: they only append to an
+in-memory `pending` list, so a hook never waits on the companion and no request
+has to outlive the dispatch that made it.
 
-**Hello + snapshot.** On start (and on every recovery, see below), POST a `hello`
-event `{ paneId, sessionId, cwd }`, then a `snapshot` event built from
-`$.session.messages()`. Those rows are `SessionMessage` (`{ role, text, toolUses,
-toolResults? }`), not stored rows, so they carry no `uuid` and no `isMeta`, and
-the snapshot is normalized separately:
-- a user message with non-empty `text` → `user_text` (a message holding only
-  `toolResults` yields nothing on its own);
-- an assistant message's `text` → `assistant_text`;
-- each entry of an assistant message's `toolUses` → `tool_use`, plus a
-  `tool_result` from its outcome (`text`, `isError`) when the transcript holds one.
+**Hello + snapshot.** On start (and on every recovery, see below), queue a `hello`
+event `{ sessionId, cwd }`, then a `snapshot` event built from
+`$.session.messages({ as: "api" })`, which returns the main conversation as
+Messages-API messages (`{ role, content }`), the same block form live rows carry,
+so the snapshot goes through the **same block normalizer** as live rows. Those
+messages carry no `uuid` and no `isMeta`, so `uuid`s are synthesized as
+`snap-<index>`, and a snapshot may show a few injected user rows that live
+filtering would drop. That is accepted for v1. Only the last 500 normalized
+events are sent.
 
-`uuid`s are synthesized as `snap-<index>`. Because meta rows can't be told apart
-here, a snapshot may show a few injected user rows that live filtering would
-drop. That is accepted for v1.
+**`/clear`.** A `/clear` fires `session.end` with `reason: "clear"` and no
+`session.start` after it, so on that event the mod re-reads the session id and
+queues hello + snapshot again (an empty one).
 
 **Live rows (`session.append`).** `const r = await next(e)`, then, only when:
 - `e.agentId` is absent (main conversation, not a subagent),
 - `e.message.isMeta` is falsy,
 - `e.door` is one of `prompt`, `response`, `tool-result`, `delivery`,
 
-normalize the stored row and POST each resulting event (a row can yield several):
+normalize the stored row and queue each resulting event (a row can yield several):
 
 | Event | Fields | From |
 |---|---|---|
@@ -101,34 +103,43 @@ normalize the stored row and POST each resulting event (a row can yield several)
 Thinking blocks, images and documents are dropped. Any text field over 64 KB is
 truncated with a `…[truncated]` marker.
 
-**State.** `turn.start` → POST `state {state:"working"}`; `turn.complete` → POST
+**State.** `turn.start` queues `state {state:"working"}`; `turn.complete` queues
 `state {state:"idle"}`. Both call `next(e)` and pass its result through unchanged.
 
-**Inbound poll.** A `$.clock.every(1000, …)` timer started in `session.start`
-calls `GET /outbox?pane=<paneId>&session=<sessionId>`. For each returned message,
-`await $.prompt.submit({ text, asUser: true })` in order.
+**Sync loop.** A `$.clock.every(1000, …)` timer started in `session.start` takes
+the whole `pending` list and POSTs `/sync` with `{ paneId, sessionId, events }`
+(events in the order they were queued). The response is `{ messages: [{ id, text }] }`,
+the phone messages queued for this pane. Each is handed to
+`$.prompt.submit({ text, asUser: true })` through a promise chain that the timer
+does **not** await: `submit` only resolves when Claude goes idle and its turn
+starts, and the loop must keep syncing (it is the heartbeat) while Claude works.
+A tick is skipped while the previous one is still in flight.
 
-**Outage handling.** Any failed request sets `offline = true` and is dropped (no
-queue in the mod). When a poll succeeds while `offline`, the mod clears the flag
-and re-sends hello + snapshot. A hot reload of the mod re-runs `session.start`,
-which re-sends hello + snapshot as well.
+**Outage handling.** A failed sync (transport error or non-2xx) drops the batch it
+carried and sets `offline = true`; nothing is retried. While offline, each tick
+sends an empty batch. When one succeeds, the mod clears the flag and queues hello +
+snapshot, so the next tick resyncs the companion from scratch. A hot reload of the
+mod re-runs `session.start`, which queues hello + snapshot as well.
 
 ## 2. Companion: chatbridge
 
 **Socket server.** `net.Listen("unix", path)` after creating the parent dir 0700
 and removing a stale socket; chmod the socket 0600. Plain `net/http` over it.
 
-- `POST /event` body `{ paneId, sessionId, event }` → 204. Unknown event types → 400.
-- `GET /outbox?pane=<id>&session=<sid>` → `200 { messages: [{ id, text }] }`,
-  removing them from the outbox. Also updates the pane's `lastSeen`.
+- `POST /sync` body `{ paneId, sessionId, events: [...] }` (at most 8 MB) →
+  `200 { messages: [{ id, text }] }`. The events are applied in order (unknown
+  types skipped), the pane's `lastSeen` is updated (the heartbeat), and the
+  outbox is drained into the response. Missing `paneId` or bad JSON → 400.
 
 **Per-pane state** (in memory, mutex-guarded):
 - `epoch` (int, starts at 1), `sessionId`, `state` (`working|idle`, default `idle`),
   `lastSeen`, `events` ring buffer (cap 500, each with a per-pane monotonic `seq`),
   `outbox` (cap 20).
-- `hello` with a `sessionId` different from the stored one, and every `snapshot`,
-  bump `epoch` and replace the buffer (a snapshot's events get fresh seqs from 1).
-- **Chat-capable** ⇔ `now - lastSeen < 5s`.
+- `hello` records `sessionId`. Every `snapshot` bumps `epoch` and replaces the
+  buffer (its events get fresh seqs from 1). The mod always sends a snapshot
+  right after hello, so a new session, a resume, a `/clear` and a recovery all
+  reset through the snapshot alone.
+- **Chat-capable** ⇔ `now - lastSeen < 5s`, checked by a 1s ticker.
 - When a pane disappears from the engine's `pane.list` view, its chat state is dropped.
 
 **Subscriptions.** chatbridge exposes `Subscribe(paneId) (snapshot, <-chan Frame, cancel)`
@@ -160,9 +171,9 @@ is re-broadcast with the new `chat` flag.
 **`ChatScreen`**
 - Message list, newest at the bottom, auto-scrolls unless the user scrolled up.
   - `user_text`: right-aligned bubble.
-  - `assistant_text`: full-width Markdown (headings, lists, code fences, links)
-    styled with the Catppuccin theme. If no Markdown library is light enough,
-    fall back to monospace plain text.
+  - `assistant_text`: full-width text. Fenced code blocks (```` ``` ````) are
+    split out and drawn monospace on a `surfaceContainer` background; the rest is
+    plain body text. No Markdown library in v1.
   - `tool_use`: compact one-line card `▸ <summary>`. Tap expands the matching
     `tool_result` preview. Red accent when `isError`.
 - Status line above the input showing the existing working-spinner / idle glyph,
@@ -195,7 +206,7 @@ immediately, with the error text.
 | Companion down | Mod requests fail silently; on the first successful poll the mod re-sends hello + snapshot → new epoch → app reloads the view. |
 | Mod not installed / Claude outside herdr | `chat: false`, terminal as today. |
 | Claude exits | Polling stops, `chat` turns false within 5s, banner shown. Buffer kept until the pane closes. |
-| `/clear`, resume, second Claude in the pane | New hello (new `sessionId`) / snapshot → new epoch → app reloads. |
+| `/clear`, resume, second Claude in the pane | New hello + snapshot (`/clear` via `session.end` reason `clear`) → new epoch → app reloads. |
 | Message sent while Claude is working | Queued; `$.prompt.submit` starts its turn when Claude goes idle; pending bubble says "queued". |
 | Companion restarts with queued messages | Outbox is in memory and lost; pending bubbles time out to "not delivered" + Retry. |
 | Huge tool output | Only a 400-char preview crosses the wire; any text field over 64 KB truncated. |
