@@ -28,8 +28,8 @@ async function resolveSocket($: EngineInterface): Promise<string> {
   if (explicit) return explicit
   const runtime = await $.env.get('XDG_RUNTIME_DIR')
   if (runtime) return `${runtime}/herdr-mobile/chat.sock`
-  const id = await $.process.run(['id', '-u'])
-  return `/tmp/herdr-mobile-${id.stdout.trim()}/chat.sock`
+  // No predictable /tmp fallback: another local user could pre-create it.
+  return ''
 }
 
 async function queueResync($: EngineInterface, s: State) {
@@ -106,6 +106,10 @@ export const register: Register = on => {
     if (!s.paneId) return r
     s.cwd = e.cwd
     s.socketPath = await resolveSocket($)
+    if (!s.socketPath) {
+      s.paneId = undefined
+      return r
+    }
     await queueResync($, s)
     $.clock.every(SYNC_MS, () => void tick($, s))
     return r

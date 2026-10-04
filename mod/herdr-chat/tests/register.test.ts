@@ -8,8 +8,9 @@ type Sync = { paneId: string; sessionId: string; events: { type: string; [k: str
 
 // Wires the world beneath the plugin: env, clock, session reads, and a fake
 // companion that records each /sync body and answers with queued messages.
-function world(on: On, opts: { pane?: string; down?: () => boolean } = {}) {
-  mock.env(on, opts.pane === undefined ? { HERDR_PANE_ID: 'w1:p1', HERDR_MOBILE_CHAT_SOCK: '/s/chat.sock' } : opts.pane ? { HERDR_PANE_ID: opts.pane, HERDR_MOBILE_CHAT_SOCK: '/s/chat.sock' } : {})
+function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boolean } = {}) {
+  if (opts.nosock) mock.env(on, { HERDR_PANE_ID: 'w1:p1' })
+  else mock.env(on, opts.pane === undefined ? { HERDR_PANE_ID: 'w1:p1', HERDR_MOBILE_CHAT_SOCK: '/s/chat.sock' } : opts.pane ? { HERDR_PANE_ID: opts.pane, HERDR_MOBILE_CHAT_SOCK: '/s/chat.sock' } : {})
   const clock = mock.clock(on)
   const syncs: Sync[] = []
   const outbox: { id: string; text: string }[] = []
@@ -70,6 +71,13 @@ describe('herdr-chat', () => {
 
   // The kit cannot drive session.append end-to-end (a test hook cannot answer it
   // beneath the plugin), so the forwarding logic is unit-tested directly.
+  test('does nothing without a socket env var (no /tmp fallback)', async ($, on) => {
+    const w = world(on, { nosock: true })
+    await start($)
+    await w.clock.advance(3000)
+    expect(w.syncs.length).toBe(0)
+  })
+
   test('forwarded rows are queued in order', () => {
     const s = state('w1:p1')
     queueAppended(s, { door: 'prompt', uuid: 'u1', message: { role: 'user', content: [{ type: 'text', text: 'run tests' }] } }, undefined)
