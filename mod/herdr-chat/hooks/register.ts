@@ -1,12 +1,22 @@
 import type { EngineInterface, Register } from 'claude-code'
-import { normalizeBlocks, normalizeSnapshot, shouldForward, type ChatEvent } from './normalize'
+import { normalizeBlocks, normalizeSnapshot, shouldForward, utf8Bytes, type ChatEvent, type ChatImage, type Normalized } from './normalize'
 import { addTranscriptLine, finishTranscriptHistory, newTranscriptHistory, splitPiece } from './transcript'
 
+// History goes out as begin (`total`: its event count), chunks, end.
 type Control =
   | { type: 'hello'; sessionId: string; cwd: string }
-  | { type: 'snapshot'; events: ChatEvent[] }
+  | { type: 'snapshot_begin'; total: number }
+  | { type: 'snapshot_chunk'; events: ChatEvent[] }
+  | { type: 'snapshot_end' }
   | { type: 'state'; state: 'working' | 'idle' }
 type Outgoing = ChatEvent | Control
+
+// A chunk's events serialize to at most CHUNK_BYTES; a /sync body, images
+// included, to at most BODY_BYTES (the companion's limit is 8 MB); an image
+// over IMAGE_BYTES is dropped (its reference stays, answered `missing`).
+export const CHUNK_BYTES = 2 * 1024 * 1024
+export const BODY_BYTES = 6 * 1024 * 1024
+export const IMAGE_BYTES = 5 * 1024 * 1024
 
 // Per-load mutable state. Helpers are top-level functions (the engine only
 // follows `$` into functions declared at the top of this file), so the state
@@ -17,8 +27,13 @@ export type State = {
   cwd: string
   socketPath: string
   pending: Outgoing[]
+  // Images the queued events reference, sent beside them as the body allows.
+  imageQueue: Array<[string, ChatImage]>
   offline: boolean
   inFlight: boolean
+  // A history build (transcript read) is running in the background; until it
+  // ends, ticks send heartbeats only and queued rows wait behind it.
+  building: boolean
   submitChain: Promise<unknown>
   needResync: boolean
   lastState: 'working' | 'idle' | undefined
@@ -66,77 +81,157 @@ async function readTranscript($: EngineInterface, path: string) {
 // History from the transcript file (real uuids, timestamps, meta rows
 // dropped); the api-form history when the path is unknown, the read fails or
 // the file has no message rows.
-async function readHistory($: EngineInterface, s: State): Promise<ChatEvent[]> {
+async function readHistory($: EngineInterface, s: State): Promise<Normalized> {
   s.historyLacksPath = !s.transcriptPath
   if (s.transcriptPath) {
-    let events: ChatEvent[] | null = null
+    let history: Normalized | null = null
     try {
-      events = await readTranscript($, s.transcriptPath)
+      history = await readTranscript($, s.transcriptPath)
     } catch {
-      events = null
+      history = null
     }
-    if (events) return events
+    if (history) return history
   }
   const history = await $.session.messages({ as: 'api' })
-  return Array.isArray(history) ? normalizeSnapshot(history) : []
+  return Array.isArray(history) ? normalizeSnapshot(history) : { events: [], images: {} }
 }
 
-// Reads the session fresh and puts hello + snapshot (+ the last known state)
-// ahead of rows queued while the reads were awaited. Callers clear `pending`
-// first when what is queued is already covered by the snapshot.
-async function queueResync($: EngineInterface, s: State) {
-  s.sessionId = await $.session.id()
-  const events = await readHistory($, s)
-  const head: Outgoing[] = [{ type: 'hello', sessionId: s.sessionId, cwd: s.cwd }, { type: 'snapshot', events }]
-  if (s.lastState) head.push({ type: 'state', state: s.lastState })
-  // Rows appended during the awaits above stay after the snapshot.
-  s.pending = [...head, ...s.pending]
+// Splits the history into chunks whose events serialize to ≤ CHUNK_BYTES (an
+// event larger than that alone still makes one chunk).
+export function chunkEvents(events: readonly ChatEvent[]): ChatEvent[][] {
+  const out: ChatEvent[][] = []
+  let cur: ChatEvent[] = []
+  let bytes = 2 // [ ]
+  for (const ev of events) {
+    const size = utf8Bytes(JSON.stringify(ev))
+    if (cur.length && bytes + 1 + size > CHUNK_BYTES) {
+      out.push(cur)
+      cur = []
+      bytes = 2
+    }
+    bytes += size + (cur.length ? 1 : 0)
+    cur.push(ev)
+  }
+  if (cur.length) out.push(cur)
+  return out
+}
+
+// Throws away what is queued (the new history covers it) and rebuilds the
+// history in the background; a request made while a build runs is kept for
+// the tick after it ends.
+function resync($: EngineInterface, s: State) {
+  s.pending = []
+  s.imageQueue = []
+  if (s.building) {
+    s.needResync = true
+    return
+  }
+  s.needResync = false
+  s.building = true
+  void buildHistory($, s)
+}
+
+// Reads the session fresh (the transcript read can take several ticks) and
+// puts hello + the chunked snapshot (+ the last known state) ahead of rows
+// queued meanwhile, its images ahead of theirs.
+async function buildHistory($: EngineInterface, s: State) {
+  try {
+    const sessionId = await $.session.id()
+    const { events, images } = await readHistory($, s)
+    s.sessionId = sessionId
+    const head: Outgoing[] = [{ type: 'hello', sessionId, cwd: s.cwd }, { type: 'snapshot_begin', total: events.length }]
+    for (const chunk of chunkEvents(events)) head.push({ type: 'snapshot_chunk', events: chunk })
+    head.push({ type: 'snapshot_end' })
+    if (s.lastState) head.push({ type: 'state', state: s.lastState })
+    s.pending = [...head, ...s.pending]
+    s.imageQueue = [...Object.entries(images), ...s.imageQueue]
+  } catch {
+    // A failed session read: retry on the next tick.
+    s.needResync = true
+  } finally {
+    s.building = false
+  }
+}
+
+// Takes the next /sync body's share of the queues: rows up to (not past) a
+// second snapshot chunk, then images while the body stays ≤ BODY_BYTES. An
+// image that doesn't fit waits; one over IMAGE_BYTES is dropped.
+function takeBody(s: State): { events: Outgoing[]; images: Record<string, ChatImage> } {
+  let bytes = utf8Bytes(JSON.stringify({ paneId: s.paneId, sessionId: s.sessionId, events: [], images: {} }))
+  let n = 0
+  let chunks = 0
+  for (; n < s.pending.length; n++) {
+    const ev = s.pending[n]!
+    if (ev.type === 'snapshot_chunk' && ++chunks > 1) break
+    const size = utf8Bytes(JSON.stringify(ev)) + (n ? 1 : 0)
+    if (n && bytes + size > BODY_BYTES) break
+    bytes += size
+  }
+  const events = s.pending.slice(0, n)
+  s.pending = s.pending.slice(n)
+  const images: Record<string, ChatImage> = {}
+  const rest: Array<[string, ChatImage]> = []
+  let count = 0
+  for (const entry of s.imageQueue) {
+    const [id, img] = entry
+    const imgBytes = utf8Bytes(JSON.stringify(img))
+    if (imgBytes > IMAGE_BYTES) continue
+    const size = utf8Bytes(JSON.stringify(id)) + 1 + imgBytes + (count ? 1 : 0)
+    if (bytes + size > BODY_BYTES) {
+      rest.push(entry)
+      continue
+    }
+    images[id] = img
+    bytes += size
+    count++
+  }
+  s.imageQueue = rest
+  return { events, images }
 }
 
 async function tick($: EngineInterface, s: State) {
   if (s.inFlight || !s.paneId) return
   s.inFlight = true
   try {
-    if (s.needResync && !s.offline) {
-      s.needResync = false
-      s.pending = []
-      await queueResync($, s)
+    if (s.needResync && !s.offline && !s.building) resync($, s)
+    // Offline: an empty probe. Building: a heartbeat; queued rows wait for
+    // the history to go first.
+    const held = s.offline || s.building
+    const { events, images } = held ? { events: [], images: {} } : takeBody(s)
+    const res = await $.http.fetch('http://chat/sync', {
+      method: 'POST',
+      socketPath: s.socketPath,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        paneId: s.paneId,
+        sessionId: s.sessionId,
+        events,
+        ...(Object.keys(images).length ? { images } : {}),
+      }),
+    })
+    if (!res.ok) throw new Error(`sync ${res.status}`)
+    if (s.offline) {
+      s.offline = false
+      resync($, s)
     }
-    const batch = s.offline ? [] : s.pending
-    if (!s.offline) s.pending = []
-    try {
-      const res = await $.http.fetch('http://chat/sync', {
-        method: 'POST',
-        socketPath: s.socketPath,
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ paneId: s.paneId, sessionId: s.sessionId, events: batch }),
-      })
-      if (!res.ok) throw new Error(`sync ${res.status}`)
-      if (s.offline) {
-        s.offline = false
-        s.needResync = false
-        s.pending = []
-        await queueResync($, s)
-      }
-      const { messages = [], resync } = JSON.parse(res.text) as {
-        messages?: { id: string; text: string }[]
-        resync?: boolean
-      }
-      // The companion has no hello for this session (e.g. it restarted
-      // between two ticks): resend hello + snapshot on the next tick.
-      if (resync === true) s.needResync = true
-      for (const m of messages) {
-        // Not awaited: submit resolves only when Claude goes idle, and this
-        // loop is the heartbeat that keeps the pane chat-capable meanwhile.
-        s.submitChain = s.submitChain.then(() => $.prompt.submit({ text: m.text, asUser: true })).catch(() => {})
-      }
-    } catch {
-      s.offline = true
-      s.pending = []
+    const { messages = [], resync: again } = JSON.parse(res.text) as {
+      messages?: { id: string; text: string }[]
+      resync?: boolean
+    }
+    // The companion has no hello for this session (e.g. it restarted
+    // between two ticks): rebuild and resend. A heartbeat sent while the
+    // history was being built is expected to get this answer; its hello is
+    // already on the way.
+    if (again === true && !held) s.needResync = true
+    for (const m of messages) {
+      // Not awaited: submit resolves only when Claude goes idle, and this
+      // loop is the heartbeat that keeps the pane chat-capable meanwhile.
+      s.submitChain = s.submitChain.then(() => $.prompt.submit({ text: m.text, asUser: true })).catch(() => {})
     }
   } catch {
-    // A failed session read: retry the resync on the next tick.
-    s.needResync = true
+    s.offline = true
+    s.pending = []
+    s.imageQueue = []
   } finally {
     s.inFlight = false
   }
@@ -156,7 +251,9 @@ export function queueAppended(s: State, e: Appended, stored: { content?: unknown
   if (!s.paneId || !shouldForward(e)) return
   const role = e.message.role
   if (role !== 'user' && role !== 'assistant') return
-  s.pending.push(...normalizeBlocks(role, stored?.content ?? e.message.content, e.uuid, Date.now()))
+  const n = normalizeBlocks(role, stored?.content ?? e.message.content, e.uuid, Date.now())
+  s.pending.push(...n.events)
+  s.imageQueue.push(...Object.entries(n.images))
 }
 
 export const register: Register = on => {
@@ -166,8 +263,10 @@ export const register: Register = on => {
     cwd: '',
     socketPath: '',
     pending: [],
+    imageQueue: [],
     offline: false,
     inFlight: false,
+    building: false,
     submitChain: Promise.resolve(),
     needResync: false,
     lastState: undefined,
@@ -224,6 +323,7 @@ export const register: Register = on => {
     // resync (fresh id + history) happens at the next tick, not here.
     if (s.paneId && (e.reason === 'clear' || e.reason === 'resume')) {
       s.pending = []
+      s.imageQueue = []
       s.needResync = true
       // The new session's transcript is named by its own classic event; until
       // then the api form stands in (and that path's arrival upgrades it).

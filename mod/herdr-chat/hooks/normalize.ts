@@ -1,10 +1,15 @@
-// `ts`: epoch milliseconds, when known (optional on the wire).
+// `ts`: epoch milliseconds, when known (optional on the wire). `images`: ids
+// of images carried beside the events (the /sync body's `images` map).
 export type ChatEvent =
-  | { type: 'user_text'; uuid: string; text: string; ts?: number }
+  | { type: 'user_text'; uuid: string; text: string; images?: string[]; ts?: number }
   | { type: 'assistant_text'; uuid: string; text: string; ts?: number }
   | { type: 'tool_use'; uuid: string; toolUseId: string; tool: string; summary: string; ts?: number }
-  | { type: 'tool_result'; toolUseId: string; isError: boolean; preview: string; ts?: number }
+  | { type: 'tool_result'; toolUseId: string; isError: boolean; preview: string; images?: string[]; ts?: number }
   | { type: 'task_notice'; uuid: string; status: string; summary: string; ts?: number }
+
+export type ChatImage = { mediaType: string; data: string }
+// Events plus the images they reference, by id.
+export type Normalized = { events: ChatEvent[]; images: Record<string, ChatImage> }
 
 export const MAX_TEXT = 64 * 1024
 export const PREVIEW = 400
@@ -70,12 +75,32 @@ function tag(doc: string, name: string): string {
   return m?.[1]?.trim() ?? ''
 }
 
-export function normalizeBlocks(role: 'user' | 'assistant', content: unknown, uuid: string, ts?: number): ChatEvent[] {
+// A base64 image block's payload (as stored); undefined for anything else.
+function imageOf(b: Block): ChatImage | undefined {
+  if (!b || b.type !== 'image' || !b.source || typeof b.source !== 'object') return undefined
+  const src = b.source as { type?: unknown; media_type?: unknown; data?: unknown }
+  if (src.type !== 'base64' || typeof src.media_type !== 'string' || typeof src.data !== 'string') return undefined
+  return { mediaType: src.media_type, data: src.data }
+}
+
+// A message's blocks as chat events. Image blocks (a user's own, or inside a
+// tool_result) move to `images`, keyed `<uuid>#<block>` (`#<block>.<n>` for
+// the n-th image of a tool_result), and the events list their ids.
+export function normalizeBlocks(role: 'user' | 'assistant', content: unknown, uuid: string, ts?: number): Normalized {
   const blocks: Block[] =
     typeof content === 'string' ? [{ type: 'text', text: content }] : Array.isArray(content) ? content : []
   const out: ChatEvent[] = []
+  const images: Record<string, ChatImage> = {}
   const userTexts: string[] = []
+  const userImages: string[] = []
   blocks.forEach((b, i) => {
+    if (!b || typeof b !== 'object') return
+    const image = role === 'user' ? imageOf(b) : undefined
+    if (image) {
+      images[`${uuid}#${i}`] = image
+      userImages.push(`${uuid}#${i}`)
+      return
+    }
     if (b.type === 'text' && typeof b.text === 'string') {
       if (role === 'user') {
         let k = 0
@@ -97,22 +122,35 @@ export function normalizeBlocks(role: 'user' | 'assistant', content: unknown, uu
       const input = (b.input && typeof b.input === 'object' ? b.input : {}) as Record<string, unknown>
       out.push({ type: 'tool_use', uuid: `${uuid}#${i}`, toolUseId: String(b.id), tool, summary: summarize(tool, input) })
     } else if (b.type === 'tool_result') {
+      const ids: string[] = []
+      if (Array.isArray(b.content)) {
+        for (const c of b.content as Block[]) {
+          const img = imageOf(c)
+          if (!img) continue
+          const id = `${uuid}#${i}.${ids.length}`
+          images[id] = img
+          ids.push(id)
+        }
+      }
       out.push({
         type: 'tool_result',
         toolUseId: String(b.tool_use_id),
         isError: b.is_error === true,
         preview: clip(resultText(b.content), PREVIEW),
+        ...(ids.length ? { images: ids } : {}),
       })
     }
   })
   const text = userTexts.join('\n').trim()
-  if (text) out.unshift({ type: 'user_text', uuid, text: cap(text) })
+  if (text || userImages.length) {
+    out.unshift({ type: 'user_text', uuid, text: cap(text), ...(userImages.length ? { images: userImages } : {}) })
+  }
   if (ts !== undefined) for (const ev of out) ev.ts = ts
-  return out
+  return { events: out, images }
 }
 
 // UTF-8 size of a string (surrogate pairs count 2 + 2 = 4 bytes).
-function utf8Bytes(s: string): number {
+export function utf8Bytes(s: string): number {
   let n = 0
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i)
@@ -123,11 +161,19 @@ function utf8Bytes(s: string): number {
 
 // The last SNAPSHOT_LIMIT events, then the newest of those whose serialized
 // array fits in SNAPSHOT_BYTES (well under the companion's 8 MB body limit;
-// an oversized snapshot would be rejected and re-sent forever).
+// an oversized snapshot would be rejected and re-sent forever), with the
+// images those events reference.
 export function normalizeSnapshot(
   messages: readonly { role: 'user' | 'assistant'; content: unknown }[],
-): ChatEvent[] {
-  const all = messages.flatMap((m, i) => normalizeBlocks(m.role, m.content, `snap-${i}`)).slice(-SNAPSHOT_LIMIT)
+): Normalized {
+  const images: Record<string, ChatImage> = {}
+  const all = messages
+    .flatMap((m, i) => {
+      const n = normalizeBlocks(m.role, m.content, `snap-${i}`)
+      Object.assign(images, n.images)
+      return n.events
+    })
+    .slice(-SNAPSHOT_LIMIT)
   let bytes = 2 // [ ]
   let start = all.length
   while (start > 0) {
@@ -136,5 +182,11 @@ export function normalizeSnapshot(
     bytes += size
     start--
   }
-  return all.slice(start)
+  const events = all.slice(start)
+  const kept: Record<string, ChatImage> = {}
+  for (const ev of events) {
+    if (ev.type !== 'user_text' && ev.type !== 'tool_result') continue
+    for (const id of ev.images ?? []) if (images[id]) kept[id] = images[id]
+  }
+  return { events, images: kept }
 }

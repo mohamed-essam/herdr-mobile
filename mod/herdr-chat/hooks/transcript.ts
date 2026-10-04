@@ -1,4 +1,4 @@
-import { normalizeBlocks, type ChatEvent } from './normalize'
+import { normalizeBlocks, type ChatEvent, type Normalized } from './normalize'
 
 type Row = {
   type?: unknown
@@ -13,11 +13,11 @@ type Row = {
 // lines), filtered as live rows are: main-thread `user`/`assistant` rows with
 // a role and a uuid, no meta rows (skill bodies, image captions, "Tool loaded.", peer-
 // agent messages). Each event carries the row's real uuid and its timestamp.
-// Lines that aren't JSON are skipped.
-export type TranscriptHistory = { events: ChatEvent[]; sawMessageRow: boolean }
+// Lines that aren't JSON are skipped. Images go beside the events, by id.
+export type TranscriptHistory = Normalized & { sawMessageRow: boolean }
 
 export function newTranscriptHistory(): TranscriptHistory {
-  return { events: [], sawMessageRow: false }
+  return { events: [], images: {}, sawMessageRow: false }
 }
 
 export function addTranscriptLine(h: TranscriptHistory, line: string): void {
@@ -35,21 +35,22 @@ export function addTranscriptLine(h: TranscriptHistory, line: string): void {
   if (role !== 'user' && role !== 'assistant') return
   if (typeof row.uuid !== 'string') return
   const ms = typeof row.timestamp === 'string' ? Date.parse(row.timestamp) : NaN
-  for (const ev of normalizeBlocks(role, row.message?.content, row.uuid, Number.isNaN(ms) ? undefined : ms)) {
-    h.events.push(ev)
-  }
+  const n = normalizeBlocks(role, row.message?.content, row.uuid, Number.isNaN(ms) ? undefined : ms)
+  for (const ev of n.events) h.events.push(ev)
+  Object.assign(h.images, n.images)
 }
 
 // Null when the file had no user/assistant row at all, so the caller can fall
 // back to the api-form history.
-export function finishTranscriptHistory(h: TranscriptHistory): ChatEvent[] | null {
-  return h.sawMessageRow ? h.events : null
+export function finishTranscriptHistory(h: TranscriptHistory): Normalized | null {
+  return h.sawMessageRow ? { events: h.events, images: h.images } : null
 }
 
+// The events of a whole transcript (null as above).
 export function eventsFromTranscript(jsonl: string): ChatEvent[] | null {
   const h = newTranscriptHistory()
   for (const line of jsonl.split('\n')) addTranscriptLine(h, line)
-  return finishTranscriptHistory(h)
+  return finishTranscriptHistory(h)?.events ?? null
 }
 
 // One piece of the file read from a line onward (`tail -n +<line>`), whose

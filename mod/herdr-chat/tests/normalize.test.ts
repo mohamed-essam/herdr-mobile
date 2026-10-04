@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { cap, normalizeBlocks, normalizeSnapshot, shouldForward, summarize, MAX_TEXT, SNAPSHOT_BYTES } from '../hooks/normalize'
+import { cap, normalizeBlocks as normalizeAll, normalizeSnapshot as snapshotAll, shouldForward, summarize, MAX_TEXT, SNAPSHOT_BYTES } from '../hooks/normalize'
+
+// Most tests look at the events only; the image side channel has its own.
+const normalizeBlocks = (...a: Parameters<typeof normalizeAll>) => normalizeAll(...a).events
+const normalizeSnapshot = (...a: Parameters<typeof snapshotAll>) => snapshotAll(...a).events
 
 describe('shouldForward', () => {
   const row = (over: object) => ({ door: 'prompt', message: { role: 'user' }, ...over })
@@ -211,5 +215,54 @@ describe('normalizeBlocks: timestamps', () => {
   })
   test('ts is absent when not given', () => {
     expect('ts' in normalizeBlocks('user', 'hi', 'u1')[0]!).toBe(false)
+  })
+})
+
+describe('normalizeBlocks: images', () => {
+  const img = (data: string, mediaType = 'image/png') => ({ type: 'image', source: { type: 'base64', media_type: mediaType, data } })
+  test('tool_result images move to the side channel with <uuid>#<block>.<n> ids', () => {
+    const out = normalizeAll('user', [
+      { type: 'text', text: 'context' },
+      { type: 'tool_result', tool_use_id: 't1', content: [img('AAA'), { type: 'text', text: 'see the screenshot' }, img('BBB', 'image/jpeg')] },
+    ], 'u1')
+    expect(out.images).toEqual({
+      'u1#1.0': { mediaType: 'image/png', data: 'AAA' },
+      'u1#1.1': { mediaType: 'image/jpeg', data: 'BBB' },
+    })
+    const result = out.events.find(e => e.type === 'tool_result')
+    expect(result).toEqual({ type: 'tool_result', toolUseId: 't1', isError: false, preview: 'see the screenshot', images: ['u1#1.0', 'u1#1.1'] })
+  })
+  test('a user message of one image yields an empty user_text referencing it', () => {
+    const out = normalizeAll('user', [img('CCC')], 'u2', 5)
+    expect(out.events).toEqual([{ type: 'user_text', uuid: 'u2', text: '', images: ['u2#0'], ts: 5 }])
+    expect(out.images).toEqual({ 'u2#0': { mediaType: 'image/png', data: 'CCC' } })
+  })
+  test('user text and images share one user_text', () => {
+    const out = normalizeAll('user', [{ type: 'text', text: 'look' }, img('DDD')], 'u3')
+    expect(out.events).toEqual([{ type: 'user_text', uuid: 'u3', text: 'look', images: ['u3#1'] }])
+  })
+  test('no images: no images key and an empty map', () => {
+    const out = normalizeAll('user', [{ type: 'tool_result', tool_use_id: 't2', content: 'ok' }], 'u4')
+    expect(out.images).toEqual({})
+    expect('images' in out.events[0]!).toBe(false)
+  })
+  test('non-base64 image sources are ignored', () => {
+    const out = normalizeAll('user', [{ type: 'image', source: { type: 'url', url: 'https://x' } }], 'u5')
+    expect(out).toEqual({ events: [], images: {} })
+  })
+  test('the api-form snapshot carries the images its kept events reference', () => {
+    const out = snapshotAll([
+      { role: 'user', content: [img('EEE')] },
+      { role: 'assistant', content: [{ type: 'text', text: 'nice' }] },
+    ])
+    expect(out.events[0]).toEqual({ type: 'user_text', uuid: 'snap-0', text: '', images: ['snap-0#0'] })
+    expect(out.images).toEqual({ 'snap-0#0': { mediaType: 'image/png', data: 'EEE' } })
+  })
+  test('the api-form snapshot drops images of events cut by its limit', () => {
+    const msgs = [
+      { role: 'user' as const, content: [img('OLD')] as unknown },
+      ...Array.from({ length: 500 }, (_, i) => ({ role: 'user' as const, content: `m${i}` as unknown })),
+    ]
+    expect(snapshotAll(msgs).images).toEqual({})
   })
 })
