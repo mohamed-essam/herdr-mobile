@@ -34,10 +34,10 @@ const RESYNC = ['hello', 'snapshot_begin', 'snapshot_chunk', 'snapshot_end']
 
 // Wires the world beneath the plugin: env, clock, session reads, and a fake
 // companion that records each /sync body and answers with queued messages.
-function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boolean; xdg?: string } = {}) {
+function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boolean; xdg?: string; env?: Record<string, string> } = {}) {
   if (opts.xdg) mock.env(on, { HERDR_PANE_ID: 'w1:p1', XDG_RUNTIME_DIR: opts.xdg })
   else if (opts.nosock) mock.env(on, { HERDR_PANE_ID: 'w1:p1' })
-  else mock.env(on, opts.pane === undefined ? { HERDR_PANE_ID: 'w1:p1', HERDR_MOBILE_CHAT_SOCK: '/s/chat.sock' } : opts.pane ? { HERDR_PANE_ID: opts.pane, HERDR_MOBILE_CHAT_SOCK: '/s/chat.sock' } : {})
+  else mock.env(on, opts.pane === undefined ? { HERDR_PANE_ID: 'w1:p1', HERDR_MOBILE_CHAT_SOCK: '/s/chat.sock', ...opts.env } : opts.pane ? { HERDR_PANE_ID: opts.pane, HERDR_MOBILE_CHAT_SOCK: '/s/chat.sock' } : {})
   const clock = mock.clock(on)
   const syncs: Sync[] = []
   const sizes: number[] = []
@@ -52,13 +52,23 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
   // exits 1, `boom` makes the run reject), with stdout cut at `limit` bytes as
   // the engine cuts at 4 MiB: a character straddling the cut is dropped.
   // `reads` lists each read's path (its first run); `runs` every run.
+  // A fake `find <root> -maxdepth 2 -name <name> -print -quit` prints the
+  // first file under <root> so named; `finds` lists each run's argv.
   const files: Record<string, string> = {}
   const reads: string[] = []
+  const finds: string[][] = []
   const runs: { line: number; cut: boolean; dropped: boolean }[] = []
   const tail = { limit: 4194304 }
   let submitGate: Promise<void> = Promise.resolve()
   let readGate: Promise<void> = Promise.resolve()
   on('process.run', async ($, e) => {
+    if (e.argv[0] === 'find') {
+      finds.push([...e.argv])
+      const [, root, depth, depthN, nameFlag, name, print, quit] = e.argv
+      expect([depth, depthN, nameFlag, print, quit, e.argv.length]).toEqual(['-maxdepth', '2', '-name', '-print', '-quit', 8])
+      const hit = Object.keys(files).find(f => f.startsWith(`${root}/`) && f.endsWith(`/${name}`) && f.slice(root!.length + 1).split('/').length <= 2)
+      return { value: { exitCode: 0, stdout: hit ? `${hit}\n` : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     const [cmd, flag, from, dashes, path] = e.argv
     expect([cmd, flag, dashes, e.argv.length]).toEqual(['tail', '-n', '--', 5])
     const line = Number(from!.slice(1))
@@ -96,7 +106,7 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
     return { text: e.text }
   })
   return {
-    clock, syncs, sizes, outbox, submitted, current, answer, files, reads, runs, tail, counts,
+    clock, syncs, sizes, outbox, submitted, current, answer, files, reads, finds, runs, tail, counts,
     hold() { let release!: () => void; submitGate = new Promise(r => (release = r)); return release },
     holdReads() { let release!: () => void; readGate = new Promise(r => (release = r)); return release },
     all: () => syncs.flatMap(s => s.events),
@@ -424,6 +434,82 @@ describe('herdr-chat', () => {
     await w.clock.advance(2000)
     expect(w.reads).toEqual(['boom'])
     expect(w.snapshots()[0]!.events.map((e: any) => e.uuid)).toEqual(['snap-0', 'snap-1#0'])
+  })
+
+  test('without a classic path the transcript is found by session id under ~/.claude/projects', async ($, on) => {
+    const w = world(on, { env: { HOME: '/home/u' } })
+    w.files['/home/u/.claude/projects/-repo/sess-1.jsonl'] = TRANSCRIPT
+    await start($)
+    await w.clock.advance(2000)
+    expect(w.finds).toEqual([['find', '/home/u/.claude/projects', '-maxdepth', '2', '-name', 'sess-1.jsonl', '-print', '-quit']])
+    expect(w.reads).toEqual(['/home/u/.claude/projects/-repo/sess-1.jsonl'])
+    expect(w.counts.messages).toBe(0)
+    expect(w.snapshots()[0]!.events).toEqual([{ type: 'user_text', uuid: 'u1', text: 'from the transcript', ts: 1791126614835 }])
+  })
+
+  test('CLAUDE_CONFIG_DIR replaces ~/.claude for the id lookup', async ($, on) => {
+    const w = world(on, { env: { HOME: '/home/u', CLAUDE_CONFIG_DIR: '/cfg' } })
+    w.files['/cfg/projects/-repo/sess-1.jsonl'] = TRANSCRIPT
+    await start($)
+    await w.clock.advance(2000)
+    expect(w.finds.map(f => f[1])).toEqual(['/cfg/projects'])
+    expect(w.reads).toEqual(['/cfg/projects/-repo/sess-1.jsonl'])
+    expect(w.snapshots()[0]!.events.map((e: any) => e.uuid)).toEqual(['u1'])
+  })
+
+  test('an id lookup that finds nothing falls back to the api-form history', async ($, on) => {
+    const w = world(on, { env: { HOME: '/home/u' } })
+    await start($)
+    await w.clock.advance(2000)
+    expect(w.finds.length).toBe(1)
+    expect(w.reads).toEqual([])
+    expect(w.snapshots()[0]!.events.map((e: any) => e.uuid)).toEqual(['snap-0', 'snap-1#0'])
+  })
+
+  for (const id of ['../../etc/passwd', 'a b', '*', '']) {
+    test(`an unsafe session id (${JSON.stringify(id)}) is never looked up`, async ($, on) => {
+      const w = world(on, { env: { HOME: '/home/u' } })
+      w.current.id = id
+      await start($)
+      await w.clock.advance(2000)
+      expect(w.finds).toEqual([])
+      expect(w.snapshots()[0]!.events.map((e: any) => e.uuid)).toEqual(['snap-0', 'snap-1#0'])
+    })
+  }
+
+  test('no HOME and no CLAUDE_CONFIG_DIR: no lookup, api-form history', async ($, on) => {
+    const w = world(on)
+    await start($)
+    await w.clock.advance(2000)
+    expect(w.finds).toEqual([])
+    expect(w.snapshots()[0]!.events.map((e: any) => e.uuid)).toEqual(['snap-0', 'snap-1#0'])
+  })
+
+  test('a classic path is preferred over the id lookup', async ($, on) => {
+    const w = world(on, { env: { HOME: '/home/u' } })
+    w.files['/t/p1.jsonl'] = TRANSCRIPT
+    await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/p1.jsonl' })
+    await start($)
+    await w.clock.advance(2000)
+    expect(w.finds).toEqual([])
+    expect(w.reads).toEqual(['/t/p1.jsonl'])
+  })
+
+  test('the id lookup runs fresh at every resync (/clear finds the new session)', async ($, on) => {
+    const w = world(on, { env: { HOME: '/home/u' } })
+    on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+    w.files['/home/u/.claude/projects/-repo/sess-1.jsonl'] = TRANSCRIPT
+    w.files['/home/u/.claude/projects/-wt/sess-2.jsonl'] = TRANSCRIPT.replace('from the transcript', 'new session')
+    await start($)
+    await w.clock.advance(2000)
+    await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+    w.current.id = 'sess-2'
+    await w.clock.advance(2000)
+    expect(w.finds.map(f => f[5])).toEqual(['sess-1.jsonl', 'sess-2.jsonl'])
+    expect(w.reads).toEqual(['/home/u/.claude/projects/-repo/sess-1.jsonl', '/home/u/.claude/projects/-wt/sess-2.jsonl'])
+    const snap = w.snapshots()[1]!
+    expect(snap.sessionId).toBe('sess-2')
+    expect(snap.events).toEqual([{ type: 'user_text', uuid: 'u1', text: 'new session', ts: 1791126614835 }])
   })
 
   test('the first transcript path after a path-less snapshot triggers one upgrade resync', async ($, on) => {

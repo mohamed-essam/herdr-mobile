@@ -44,10 +44,13 @@ export type State = {
   lastState: 'working' | 'idle' | undefined
   timer: { cancel: () => void } | undefined
   // The session's transcript file, from the latest classic event carrying it
-  // (it moves when the session enters a worktree).
+  // (it moves when the session enters a worktree). Preferred when present;
+  // classic events are often routed beneath user-tier plugins (the built-in
+  // security plugin does so), so each read otherwise finds the file by id.
   transcriptPath: string | undefined
   // The last snapshot used the api-form history because no transcript path
-  // was known yet: the first path to arrive asks for one upgrade resync.
+  // was known or found: the first classic path to arrive asks for one upgrade
+  // resync.
   historyLacksPath: boolean
   // Question events whose dialog race has not settled, by toolUseId: every
   // resync re-sends them (the history has no question events).
@@ -86,15 +89,41 @@ async function readTranscript($: EngineInterface, path: string) {
   return finishTranscriptHistory(h)
 }
 
+// A session id is the transcript file's name; only a plain one is looked up.
+const SESSION_ID = /^[A-Za-z0-9-]{1,128}$/
+
+// Finds the session's transcript as <config dir>/projects/<project>/<id>.jsonl
+// (config dir: CLAUDE_CONFIG_DIR, else ~/.claude). Looked up fresh at every
+// read, never cached: the file moves when the session enters a worktree, and
+// /clear and /resume change the id. Resolves undefined when not found.
+async function findTranscript($: EngineInterface, sessionId: string): Promise<string | undefined> {
+  if (!SESSION_ID.test(sessionId)) return undefined
+  let configDir = await $.env.get('CLAUDE_CONFIG_DIR')
+  if (!configDir) {
+    const home = await $.env.get('HOME')
+    if (!home) return undefined
+    configDir = `${home}/.claude`
+  }
+  try {
+    const r = await $.process.run(['find', `${configDir}/projects`, '-maxdepth', '2', '-name', `${sessionId}.jsonl`, '-print', '-quit'])
+    if (r.exitCode !== 0) return undefined
+    return r.stdout.split('\n').map(l => l.trim()).find(l => l) || undefined
+  } catch {
+    return undefined
+  }
+}
+
 // History from the transcript file (real uuids, timestamps, meta rows
-// dropped); the api-form history when the path is unknown, the read fails or
-// the file has no message rows.
-async function readHistory($: EngineInterface, s: State): Promise<Normalized> {
-  s.historyLacksPath = !s.transcriptPath
-  if (s.transcriptPath) {
+// dropped): the classic-supplied path, else the one found by session id. The
+// api-form history when neither is known, the read fails or the file has no
+// message rows.
+async function readHistory($: EngineInterface, s: State, sessionId: string): Promise<Normalized> {
+  const path = s.transcriptPath || (await findTranscript($, sessionId))
+  s.historyLacksPath = !path
+  if (path) {
     let history: Normalized | null = null
     try {
-      history = await readTranscript($, s.transcriptPath)
+      history = await readTranscript($, path)
     } catch {
       history = null
     }
@@ -145,7 +174,7 @@ function resync($: EngineInterface, s: State) {
 async function buildHistory($: EngineInterface, s: State) {
   try {
     const sessionId = await $.session.id()
-    const { events, images } = await readHistory($, s)
+    const { events, images } = await readHistory($, s, sessionId)
     s.sessionId = sessionId
     const head: Outgoing[] = [{ type: 'hello', sessionId, cwd: s.cwd }, { type: 'snapshot_begin', total: events.length }]
     for (const chunk of chunkEvents(events)) head.push({ type: 'snapshot_chunk', events: chunk })
@@ -408,8 +437,9 @@ export const register: Register = on => {
       s.pending = []
       s.imageQueue = []
       s.needResync = true
-      // The new session's transcript is named by its own classic event; until
-      // then the api form stands in (and that path's arrival upgrades it).
+      // The new session's transcript is found by its new id at the resync, or
+      // named by its own classic event (whose arrival upgrades an api-form
+      // stand-in).
       s.transcriptPath = undefined
     }
     return r
