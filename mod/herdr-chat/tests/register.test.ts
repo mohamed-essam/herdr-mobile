@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { BODY_BYTES, IMAGE_BYTES, queueAppended, type State } from '../hooks/register'
+import { BODY_BYTES, HISTORY_IMAGE_BYTES, IMAGE_BYTES, queueAppended, type State } from '../hooks/register'
 import { eventsFromTranscript } from '../hooks/transcript'
 
 const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], imageQueue: [], offline: false, inFlight: false, building: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined, historyLacksPath: false, openQuestions: new Map() })
@@ -59,6 +59,7 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
   const reads: string[] = []
   const finds: string[][] = []
   const runs: { line: number; cut: boolean; dropped: boolean }[] = []
+  const seds: number[] = []
   const tail = { limit: 4194304 }
   let submitGate: Promise<void> = Promise.resolve()
   let readGate: Promise<void> = Promise.resolve()
@@ -69,6 +70,18 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
       expect([depth, depthN, nameFlag, print, quit, e.argv.length]).toEqual(['-maxdepth', '2', '-name', '-print', '-quit', 8])
       const hit = Object.keys(files).find(f => f.startsWith(`${root}/`) && f.endsWith(`/${name}`) && f.slice(root!.length + 1).split('/').length <= 2)
       return { value: { exitCode: 0, stdout: hit ? `${hit}\n` : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    // A fake `sed -n -E '<line>{s#…#…#g;p;q}' -- <path>`: prints that one
+    // line with long base64 `data` strings emptied, cut at `limit` as above.
+    if (e.argv[0] === 'sed') {
+      const [, n, ext, script, dashes, path] = e.argv
+      expect([n, ext, dashes, e.argv.length]).toEqual(['-n', '-E', '--', 6])
+      expect(script).toMatch(/^\d+\{s#"data":"\[A-Za-z0-9\+\/=\]\{1000\}\[A-Za-z0-9\+\/=\]\*"#"data":""#g;p;q\}$/)
+      const line = Number(/^(\d+)\{/.exec(script!)![1])
+      seds.push(line)
+      const text = files[path!]!.split('\n')[line - 1]!.replace(/"data":"[A-Za-z0-9+/=]{1000,}"/g, '"data":""')
+      const out = cutUtf8(`${text}\n`, tail.limit)
+      return { value: { exitCode: 0, stdout: out.text, stderr: '', isStdoutTruncated: out.cut, isStderrTruncated: false } }
     }
     const [cmd, flag, from, dashes, path] = e.argv
     expect([cmd, flag, dashes, e.argv.length]).toEqual(['tail', '-n', '--', 5])
@@ -109,7 +122,7 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
     return { text: e.text }
   })
   return {
-    clock, syncs, sizes, outbox, submitted, current, answer, files, reads, finds, runs, tail, counts,
+    clock, syncs, sizes, outbox, submitted, current, answer, files, reads, finds, runs, seds, tail, counts,
     hold() { let release!: () => void; submitGate = new Promise(r => (release = r)); return release },
     holdReads() { let release!: () => void; readGate = new Promise(r => (release = r)); return release },
     all: () => syncs.flatMap(s => s.events),
@@ -199,7 +212,8 @@ describe('herdr-chat', () => {
     const s = state('w1:p1')
     queueAppended(s, { door: 'tool-result', uuid: 'r1', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'QUJD' } }] }] } }, undefined)
     expect(s.pending).toEqual([{ type: 'tool_result', toolUseId: 't1', isError: false, preview: '', images: ['r1#0.0'], ts: expect.any(Number) }])
-    expect(s.imageQueue).toEqual([['r1#0.0', { mediaType: 'image/png', data: 'QUJD' }]])
+    const img = { mediaType: 'image/png', data: 'QUJD' }
+    expect(s.imageQueue).toEqual([{ id: 'r1#0.0', img, bytes: JSON.stringify(img).length }])
   })
 
   test('attachment-door rows and subagent rows are dropped', () => {
@@ -428,6 +442,29 @@ describe('herdr-chat', () => {
     await start($)
     await w.clock.advance(2000)
     expect(w.snapshots()[0]!.events.map((e: any) => e.text)).toEqual(['before', 'after'])
+    expect(w.seds).toEqual([2]) // re-read without image data, still too long
+  })
+
+  test('a line over the read limit is re-read with its image data emptied; its text stays, its image goes missing', async ($, on) => {
+    const w = world(on)
+    const row = (uuid: string, content: unknown) => JSON.stringify({ type: 'user', uuid, timestamp: '2026-10-04T15:10:14.835Z', message: { role: 'user', content } })
+    w.files['/t/p1.jsonl'] = [
+      row('u1', 'before'),
+      row('u2', [{ type: 'text', text: 'see this' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'A'.repeat(5000) } }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'QUJD' } }]),
+      row('u3', 'after'),
+    ].join('\n')
+    w.tail.limit = 1000
+    await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/p1.jsonl' })
+    await start($)
+    await w.clock.advance(3000)
+    expect(w.seds).toEqual([2])
+    expect(w.snapshots()[0]!.events).toEqual([
+      { type: 'user_text', uuid: 'u1', text: 'before', ts: 1791126614835 },
+      { type: 'user_text', uuid: 'u2', text: 'see this', images: ['u2#1', 'u2#2'], ts: 1791126614835 },
+      { type: 'user_text', uuid: 'u3', text: 'after', ts: 1791126614835 },
+    ])
+    // The emptied image is never queued (answered `missing`); a small one is kept.
+    expect(w.syncs.flatMap(s => Object.keys(s.images ?? {}))).toEqual(['u2#2'])
   })
 
   test('a transcript run that rejects falls back to the api-form history', async ($, on) => {
@@ -646,14 +683,14 @@ describe('herdr-chat', () => {
     for (const n of w.sizes) expect(n).toBeLessThanOrEqual(BODY_BYTES)
     const carried = w.syncs.map(s => Object.keys(s.images ?? {}))
     expect(carried[0]).toEqual([])
-    // Two 1.5 MB images per body: three bodies, in history order.
+    // Two 1.5 MB images per body: three bodies, newest first.
     expect(carried.slice(1, 4).map(c => c.length)).toEqual([2, 2, 2])
-    expect(carried.slice(1, 4).flat()).toEqual(Array.from({ length: 6 }, (_, i) => `i${i}#0`))
+    expect(carried.slice(1, 4).flat()).toEqual(Array.from({ length: 6 }, (_, i) => `i${5 - i}#0`))
     expect(carried[4]).toEqual([])
-    expect(w.syncs[1]!.images!['i0#0']).toEqual({ mediaType: 'image/png', data: big })
+    expect(w.syncs[1]!.images!['i5#0']).toEqual({ mediaType: 'image/png', data: big })
   })
 
-  test('only the newest 30 history images are sent; every reference stays', async ($, on) => {
+  test('only the newest 30 history images are sent, newest first; every reference stays', async ($, on) => {
     const w = world(on)
     w.files['/t/img.jsonl'] = Array.from({ length: 40 }, (_, i) => imageRow(`i${i}`, 'QUJD')).join('\n')
     await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/img.jsonl' })
@@ -661,7 +698,38 @@ describe('herdr-chat', () => {
     await w.clock.advance(3000)
     expect(w.snapshots()[0]!.events.map((e: any) => e.images)).toEqual(Array.from({ length: 40 }, (_, i) => [`i${i}#0`]))
     const sent = w.syncs.flatMap(s => Object.keys(s.images ?? {}))
-    expect(sent).toEqual(Array.from({ length: 30 }, (_, i) => `i${i + 10}#0`))
+    expect(sent).toEqual(Array.from({ length: 30 }, (_, i) => `i${39 - i}#0`))
+  })
+
+  // The companion evicts its oldest-stored image past 40 MiB (data + media
+  // type): history images stay under that, so the newest are never evicted.
+  test('history images stay within the companion image byte cap, the newest kept', async ($, on) => {
+    const w = world(on)
+    const big = 'A'.repeat(1.5 * MB)
+    w.files['/t/img.jsonl'] = Array.from({ length: 30 }, (_, i) => imageRow(`i${i}`, big)).join('\n')
+    await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/img.jsonl' })
+    await start($)
+    await w.clock.advance(20000)
+    const sent = w.syncs.flatMap(s => Object.entries(s.images ?? {}))
+    expect(sent.length).toBe(26)
+    expect(sent.map(([id]) => id)).toEqual(Array.from({ length: 26 }, (_, i) => `i${29 - i}#0`))
+    expect(sent.reduce((n, [, img]) => n + img.data.length + img.mediaType.length, 0)).toBeLessThanOrEqual(HISTORY_IMAGE_BYTES)
+    expect(HISTORY_IMAGE_BYTES).toBeLessThanOrEqual(40 * MB)
+  })
+
+  test('only the newest 5000 history events are sent (the companion ring)', async ($, on) => {
+    const w = world(on)
+    const rows = Array.from({ length: 5003 }, (_, i) =>
+      JSON.stringify({ type: 'user', uuid: `u${i}`, timestamp: '2026-10-04T15:10:14.835Z', message: { role: 'user', content: `q${i}` } }))
+    w.files['/t/long.jsonl'] = rows.join('\n')
+    await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/long.jsonl' })
+    await start($)
+    await w.clock.advance(3000)
+    const [snap] = w.snapshots()
+    expect(snap!.total).toBe(5000)
+    expect(snap!.events.length).toBe(5000)
+    expect(snap!.events[0].uuid).toBe('u3')
+    expect(snap!.events[4999].uuid).toBe('u5002')
   })
 
   test('an image over IMAGE_BYTES is dropped, never sent, and does not block the rest', async ($, on) => {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { eventsFromTranscript, splitPiece } from '../hooks/transcript'
+import { addTranscriptLine, eventsFromTranscript, HISTORY_IMAGES, newTranscriptHistory, splitPiece } from '../hooks/transcript'
 
 const row = (o: object) => JSON.stringify(o)
 const base = { isSidechain: false, sessionId: 's1' }
@@ -66,7 +66,29 @@ describe('splitPiece', () => {
     expect(splitPiece('a\nb\npart', true)).toEqual({ lines: ['a', 'b'], advance: 2 })
     expect(splitPiece('a\n', true)).toEqual({ lines: ['a'], advance: 1 })
   })
-  test('a cut piece without a newline skips that one over-long line', () => {
-    expect(splitPiece('xxxxxxxx', true)).toEqual({ lines: [], advance: 1 })
+  test('a cut piece without a newline flags that one over-long line', () => {
+    expect(splitPiece('xxxxxxxx', true)).toEqual({ lines: [], advance: 1, overlong: true })
+  })
+})
+
+describe('transcript images', () => {
+  const imageRow = (uuid: string, data: string) =>
+    row({ type: 'user', uuid, timestamp: '2026-10-04T15:10:14.835Z', message: { role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data } }] } })
+
+  test('only the newest HISTORY_IMAGES images are held while reading, in history order', () => {
+    const h = newTranscriptHistory()
+    for (let i = 0; i < 35; i++) {
+      addTranscriptLine(h, imageRow(`i${i}`, 'QUJD'))
+      expect(Object.keys(h.images).length).toBeLessThanOrEqual(HISTORY_IMAGES)
+    }
+    expect(Object.keys(h.images)).toEqual(Array.from({ length: 30 }, (_, i) => `i${i + 5}#0`))
+    expect(h.events.length).toBe(35) // every reference stays
+  })
+
+  test('an image with empty data is not held (it resolves missing)', () => {
+    const h = newTranscriptHistory()
+    addTranscriptLine(h, imageRow('e1', ''))
+    expect(h.images).toEqual({})
+    expect(h.events).toEqual([{ type: 'user_text', uuid: 'e1', text: '', images: ['e1#0'], ts: 1791126614835 }])
   })
 })

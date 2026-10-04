@@ -1,6 +1,6 @@
 import type { EngineInterface, Register } from 'claude-code'
 import { normalizeBlocks, normalizeSnapshot, shouldForward, utf8Bytes, type ChatEvent, type ChatImage, type Normalized } from './normalize'
-import { addTranscriptLine, finishTranscriptHistory, newTranscriptHistory, splitPiece } from './transcript'
+import { addTranscriptLine, finishTranscriptHistory, HISTORY_IMAGES, newTranscriptHistory, splitPiece } from './transcript'
 
 // History goes out as begin (`total`: its event count), chunks, end.
 type Control =
@@ -20,9 +20,17 @@ type Outgoing = ChatEvent | Control
 export const CHUNK_BYTES = 2 * 1024 * 1024
 export const BODY_BYTES = 4_000_000
 export const IMAGE_BYTES = 3_500_000
-// Only the newest history images are sent: the companion keeps 30 per pane.
-// Older references stay in their events (answered `missing`).
-export const HISTORY_IMAGES = 30
+// Only the newest history images are sent (HISTORY_IMAGES, the companion
+// keeps 30 per pane), newest first, while their sizes as the companion counts
+// them (data + media type) sum to at most HISTORY_IMAGE_BYTES, its per-pane
+// byte cap: its eviction of the oldest-stored then never drops the newest,
+// and the ones the phone shows first arrive first. Older references stay in
+// their events (answered `missing`).
+export { HISTORY_IMAGES }
+export const HISTORY_IMAGE_BYTES = 40 * 1024 * 1024
+// Only the newest HISTORY_EVENTS history events are sent: the companion's
+// ring keeps no more.
+export const HISTORY_EVENTS = 5000
 
 // Per-load mutable state. Helpers are top-level functions (the engine only
 // follows `$` into functions declared at the top of this file), so the state
@@ -33,8 +41,9 @@ export type State = {
   cwd: string
   socketPath: string
   pending: Outgoing[]
-  // Images the queued events reference, sent beside them as the body allows.
-  imageQueue: Array<[string, ChatImage]>
+  // Images the queued events reference, sent beside them as the body allows;
+  // `bytes`: the image's serialized size, measured once when queued.
+  imageQueue: QueuedImage[]
   offline: boolean
   inFlight: boolean
   // A history build (transcript read) is running in the background; until it
@@ -58,6 +67,12 @@ export type State = {
   openQuestions: Map<string, Outgoing>
 }
 
+export type QueuedImage = { id: string; img: ChatImage; bytes: number }
+
+function queued(id: string, img: ChatImage): QueuedImage {
+  return { id, img, bytes: utf8Bytes(JSON.stringify(img)) }
+}
+
 const SYNC_MS = 1000
 
 async function resolveSocket($: EngineInterface): Promise<string> {
@@ -74,8 +89,10 @@ async function resolveSocket($: EngineInterface): Promise<string> {
 // cut at 4 MiB, its complete lines are parsed as they come, and the next run
 // starts at the first line not yet read. Reading by line, never by byte
 // offset, means a cut inside a multi-byte character only ever touches the
-// incomplete last line, which is read again whole by the next run. Rejects
-// when the file can't be read.
+// incomplete last line, which is read again whole by the next run. A single
+// line over 4 MiB (a row with large images) is re-read alone with its long
+// base64 `data` strings emptied (those images are then answered `missing`);
+// still too long, it is skipped. Rejects when the file can't be read.
 async function readTranscript($: EngineInterface, path: string) {
   const h = newTranscriptHistory()
   let line = 1
@@ -84,10 +101,28 @@ async function readTranscript($: EngineInterface, path: string) {
     if (r.exitCode !== 0) throw new Error(`tail exited ${r.exitCode}`)
     const piece = splitPiece(r.stdout, r.isStdoutTruncated)
     for (const l of piece.lines) addTranscriptLine(h, l)
+    if (piece.overlong) {
+      const stripped = await readStripped($, path, line)
+      if (stripped !== undefined) addTranscriptLine(h, stripped)
+    }
     if (!r.isStdoutTruncated) break
     line += piece.advance
   }
   return finishTranscriptHistory(h)
+}
+
+// Line `line` of the file with every base64 `data` string of 1000+ characters
+// emptied; undefined when that fails or is still cut at the read limit. (A
+// counted repeat beyond {1000} makes sed's regex too big or very slow.)
+async function readStripped($: EngineInterface, path: string, line: number): Promise<string | undefined> {
+  try {
+    const script = `${line}{s#"data":"[A-Za-z0-9+/=]{1000}[A-Za-z0-9+/=]*"#"data":""#g;p;q}`
+    const r = await $.process.run(['sed', '-n', '-E', script, '--', path])
+    if (r.exitCode !== 0 || r.isStdoutTruncated) return undefined
+    return r.stdout
+  } catch {
+    return undefined
+  }
 }
 
 // A session id is the transcript file's name; only a plain one is looked up.
@@ -175,7 +210,8 @@ function resync($: EngineInterface, s: State) {
 async function buildHistory($: EngineInterface, s: State) {
   try {
     const sessionId = await $.session.id()
-    const { events, images } = await readHistory($, s, sessionId)
+    const history = await readHistory($, s, sessionId)
+    const events = history.events.slice(-HISTORY_EVENTS)
     s.sessionId = sessionId
     const head: Outgoing[] = [{ type: 'hello', sessionId, cwd: s.cwd }, { type: 'snapshot_begin', total: events.length }]
     for (const chunk of chunkEvents(events)) head.push({ type: 'snapshot_chunk', events: chunk })
@@ -185,14 +221,33 @@ async function buildHistory($: EngineInterface, s: State) {
     // A question queued during the build is in both: send it once, here.
     const queued = s.pending.filter(ev => !(ev.type === 'question' && s.openQuestions.has(ev.toolUseId)))
     s.pending = [...head, ...queued]
-    // Entries keep history order (ids are never integer-like keys).
-    s.imageQueue = [...Object.entries(images).slice(-HISTORY_IMAGES), ...s.imageQueue]
+    s.imageQueue = [...historyImages(events, history.images), ...s.imageQueue]
   } catch {
     // A failed session read: retry on the next tick.
     s.needResync = true
   } finally {
     s.building = false
   }
+}
+
+// The history images to send (see HISTORY_IMAGE_BYTES): the newest of those
+// the sent events reference, newest first, skipping empty and over-IMAGE_BYTES
+// ones (never sent), until the next would pass the companion's byte cap.
+export function historyImages(events: readonly ChatEvent[], images: Record<string, ChatImage>): QueuedImage[] {
+  const referenced = new Set<string>()
+  for (const ev of events) if ('images' in ev) for (const id of ev.images ?? []) referenced.add(id)
+  // Entries keep history order (ids are never integer-like keys).
+  const newest = Object.entries(images).filter(([id]) => referenced.has(id)).slice(-HISTORY_IMAGES).reverse()
+  const out: QueuedImage[] = []
+  let stored = 0
+  for (const [id, img] of newest) {
+    const q = queued(id, img)
+    if (!img.data || q.bytes > IMAGE_BYTES) continue
+    stored += img.data.length + img.mediaType.length
+    if (stored > HISTORY_IMAGE_BYTES) break
+    out.push(q)
+  }
+  return out
 }
 
 // Takes the next /sync body's share of the queues: rows up to (not past) a
@@ -212,13 +267,12 @@ function takeBody(s: State): { events: Outgoing[]; images: Record<string, ChatIm
   const events = s.pending.slice(0, n)
   s.pending = s.pending.slice(n)
   const images: Record<string, ChatImage> = {}
-  const rest: Array<[string, ChatImage]> = []
+  const rest: QueuedImage[] = []
   let count = 0
   for (const entry of s.imageQueue) {
-    const [id, img] = entry
-    const imgBytes = utf8Bytes(JSON.stringify(img))
-    if (imgBytes > IMAGE_BYTES) continue
-    const size = utf8Bytes(JSON.stringify(id)) + 1 + imgBytes + (count ? 1 : 0)
+    const { id, img } = entry
+    if (entry.bytes > IMAGE_BYTES) continue
+    const size = utf8Bytes(JSON.stringify(id)) + 1 + entry.bytes + (count ? 1 : 0)
     if (bytes + size > BODY_BYTES) {
       rest.push(entry)
       continue
@@ -365,7 +419,7 @@ export function queueAppended(s: State, e: Appended, stored: { content?: unknown
   if (role !== 'user' && role !== 'assistant') return
   const n = normalizeBlocks(role, stored?.content ?? e.message.content, e.uuid, Date.now())
   s.pending.push(...n.events)
-  s.imageQueue.push(...Object.entries(n.images))
+  for (const [id, img] of Object.entries(n.images)) if (img.data) s.imageQueue.push(queued(id, img))
 }
 
 export const register: Register = on => {
