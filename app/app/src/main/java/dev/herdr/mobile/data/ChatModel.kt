@@ -21,33 +21,50 @@ data class ChatView(
     val entries: List<ChatEntry> = emptyList(),
     val lastSeq: Int = 0,
     val pending: List<PendingMsg> = emptyList(),
+    /** When the view last went working -> idle; pending timeouts count from here. */
+    val idleSince: Long = 0L,
+    /** A seq gap was seen in this epoch; events wait for the fresh snapshot. */
+    val gap: Boolean = false,
 )
 
 const val PENDING_TIMEOUT_MS = 120_000L
 const val MAX_ENTRIES = 500
 
 object ChatReducer {
-    fun onFrame(v: ChatView, f: ServerFrame): ChatView = when (f) {
-        is ServerFrame.ChatSnapshot -> v.copy(
+    /**
+     * Applies a frame. [now] stamps a working -> idle transition. A chat_event
+     * in the current epoch whose seq skips ahead (the companion dropped
+     * updates for a full subscriber) sets [ChatView.gap]; later events are
+     * ignored until a snapshot heals the view. The caller re-opens the pane.
+     */
+    fun onFrame(v: ChatView, f: ServerFrame, now: Long): ChatView = when (f) {
+        is ServerFrame.ChatSnapshot -> withState(v, f.state, now).copy(
             loaded = true,
             epoch = f.epoch,
-            state = f.state,
             entries = f.entries.takeLast(MAX_ENTRIES),
             lastSeq = f.entries.maxOfOrNull { it.seq } ?: 0,
             pending = confirm(v.pending, snapshotCandidates(v, f)),
+            gap = false,
         )
         is ServerFrame.ChatEventFrame -> {
             val e = f.entry
-            if (!v.loaded || f.epoch != v.epoch || e == null || e.seq <= v.lastSeq) v
-            else v.copy(
-                entries = (v.entries + e).takeLast(MAX_ENTRIES),
-                lastSeq = e.seq,
-                pending = confirm(v.pending, listOfNotNull(userText(e))),
-            )
+            when {
+                !v.loaded || f.epoch != v.epoch || e == null || e.seq <= v.lastSeq || v.gap -> v
+                e.seq != v.lastSeq + 1 -> v.copy(gap = true)
+                else -> v.copy(
+                    entries = (v.entries + e).takeLast(MAX_ENTRIES),
+                    lastSeq = e.seq,
+                    pending = confirm(v.pending, listOfNotNull(userText(e))),
+                )
+            }
         }
-        is ServerFrame.ChatState -> v.copy(state = f.state)
+        is ServerFrame.ChatState -> withState(v, f.state, now)
         else -> v
     }
+
+    private fun withState(v: ChatView, state: String, now: Long): ChatView =
+        if (v.state == "working" && state != "working") v.copy(state = state, idleSince = now)
+        else v.copy(state = state)
 
     fun addPending(v: ChatView, id: String, text: String, now: Long): ChatView =
         v.copy(pending = v.pending + PendingMsg(id, text.trim(), now))
@@ -58,11 +75,14 @@ object ChatReducer {
     fun removePending(v: ChatView, id: String): ChatView =
         v.copy(pending = v.pending.filterNot { it.id == id })
 
+    // A message is held by the mod until Claude goes idle, so nothing expires
+    // while working and the clock restarts when the view goes idle again.
     fun expire(v: ChatView, now: Long): ChatView {
-        if (v.pending.none { it.status == PendingStatus.Queued && now - it.sentAt >= PENDING_TIMEOUT_MS }) return v
-        return v.copy(pending = v.pending.map {
-            if (it.status == PendingStatus.Queued && now - it.sentAt >= PENDING_TIMEOUT_MS) it.copy(status = PendingStatus.NotDelivered) else it
-        })
+        if (v.state == "working") return v
+        fun overdue(p: PendingMsg) =
+            p.status == PendingStatus.Queued && now - maxOf(p.sentAt, v.idleSince) >= PENDING_TIMEOUT_MS
+        if (v.pending.none(::overdue)) return v
+        return v.copy(pending = v.pending.map { if (overdue(it)) it.copy(status = PendingStatus.NotDelivered) else it })
     }
 
     // Same epoch: only entries newer than what we already had can be new
@@ -89,6 +109,11 @@ object ChatReducer {
 
 fun pendingLabel(p: PendingMsg, state: String): String = when (p.status) {
     PendingStatus.Queued -> if (state == "working") "queued — Claude is busy" else "sending…"
-    PendingStatus.Failed -> "failed: ${p.error ?: "error"}"
+    PendingStatus.Failed -> when (p.error) {
+        "no_mod" -> "Claude isn't connected"
+        "outbox_full" -> "too many queued messages"
+        "empty" -> "empty message"
+        else -> "failed: ${p.error ?: "error"}"
+    }
     PendingStatus.NotDelivered -> "not delivered"
 }

@@ -34,7 +34,11 @@ class ChatRepository(
             is ServerFrame.ChatState -> f.paneId
             else -> return
         }
-        flow(paneId).update { ChatReducer.onFrame(it, f) }
+        val t = now()
+        var gapped = false
+        flow(paneId).update { v -> ChatReducer.onFrame(v, f, t).also { gapped = !v.gap && it.gap } }
+        // A seq gap: re-open once; the companion answers with a fresh snapshot.
+        if (gapped && paneId in opened) sendRaw(ClientMsg.chatOpen(paneId))
     }
 
     fun open(paneId: String) {
