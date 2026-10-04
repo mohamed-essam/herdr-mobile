@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/chatbridge"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/herdr"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
 )
@@ -322,8 +323,8 @@ func TestInitialSnapshotIncludesWorkspacesAndTabs(t *testing.T) {
 	defer c.Close(websocket.StatusNormalClosure, "")
 
 	welcome := readUntil(t, ctx, c, "welcome")
-	if welcome["companionProtocol"].(float64) != 7 {
-		t.Fatalf("want companionProtocol 7, got %v", welcome["companionProtocol"])
+	if welcome["companionProtocol"].(float64) != 8 {
+		t.Fatalf("want companionProtocol 8, got %v", welcome["companionProtocol"])
 	}
 	ws := readUntil(t, ctx, c, "workspaces")
 	arr := ws["workspaces"].([]any)
@@ -604,5 +605,87 @@ func TestCreateRejectsUnknownWhat(t *testing.T) {
 	res := readUntil(t, ctx, c, "created")
 	if res["ok"] != false {
 		t.Fatalf("expected ok=false for unknown what, got %+v", res)
+	}
+}
+
+func dialChat(t *testing.T, hub *chatbridge.Hub) (*websocket.Conn, context.Context) {
+	t.Helper()
+	s := NewServer(AllowAll{}, &stubRPC{})
+	s.SetChat(hub)
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	ctx := context.Background()
+	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close(websocket.StatusNormalClosure, "") })
+	return c, ctx
+}
+
+func TestChatOpenSnapshotThenLiveEvents(t *testing.T) {
+	hub := chatbridge.NewHub(nil)
+	hub.Sync("w1:p1", "s", []json.RawMessage{json.RawMessage(`{"type":"snapshot","events":[{"type":"user_text","uuid":"u1","text":"hi"}]}`)})
+	c, ctx := dialChat(t, hub)
+
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"chat_open","paneId":"w1:p1"}`))
+	snap := readUntil(t, ctx, c, "chat_snapshot")
+	if evs := snap["events"].([]any); len(evs) != 1 {
+		t.Fatalf("snapshot events: %v", snap["events"])
+	}
+	hub.Sync("w1:p1", "s", []json.RawMessage{json.RawMessage(`{"type":"assistant_text","uuid":"a1","text":"hello"}`), json.RawMessage(`{"type":"state","state":"working"}`)})
+	ev := readUntil(t, ctx, c, "chat_event")
+	if ev["seq"].(float64) != 2 || ev["paneId"] != "w1:p1" {
+		t.Fatalf("chat_event: %v", ev)
+	}
+	st := readUntil(t, ctx, c, "chat_state")
+	if st["state"] != "working" {
+		t.Fatalf("chat_state: %v", st)
+	}
+}
+
+func TestChatCloseStopsUpdates(t *testing.T) {
+	hub := chatbridge.NewHub(nil)
+	hub.Sync("w1:p1", "s", nil)
+	c, ctx := dialChat(t, hub)
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"chat_open","paneId":"w1:p1"}`))
+	readUntil(t, ctx, c, "chat_snapshot")
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"chat_close","paneId":"w1:p1"}`))
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"ping"}`))
+	readUntil(t, ctx, c, "pong") // close processed before the next sync
+	hub.Sync("w1:p1", "s", []json.RawMessage{json.RawMessage(`{"type":"user_text","uuid":"u","text":"x"}`)})
+	readNoneUntil(t, ctx, c, "chat_event", 500*time.Millisecond)
+}
+
+func TestChatSendQueuesOrReportsNoMod(t *testing.T) {
+	hub := chatbridge.NewHub(nil)
+	hub.Sync("w1:p1", "s", nil)
+	c, ctx := dialChat(t, hub)
+
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"chat_send","reqId":"c1","paneId":"w1:p1","text":"hi"}`))
+	ok := readUntil(t, ctx, c, "chat_send_result")
+	if ok["ok"] != true || ok["reqId"] != "c1" {
+		t.Fatalf("send ok: %v", ok)
+	}
+	if out := hub.Sync("w1:p1", "s", nil); len(out) != 1 || out[0].Text != "hi" {
+		t.Fatalf("outbox: %+v", out)
+	}
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"chat_send","reqId":"c2","paneId":"w9:p9","text":"hi"}`))
+	bad := readUntil(t, ctx, c, "chat_send_result")
+	if bad["ok"] != false || bad["error"] != "no_mod" {
+		t.Fatalf("send no_mod: %v", bad)
+	}
+}
+
+func TestChatSendWithoutHubIsNoMod(t *testing.T) {
+	s := NewServer(AllowAll{}, &stubRPC{})
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	ctx := context.Background()
+	c, _, _ := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	defer c.Close(websocket.StatusNormalClosure, "")
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"chat_send","reqId":"c1","paneId":"p","text":"hi"}`))
+	if r := readUntil(t, ctx, c, "chat_send_result"); r["error"] != "no_mod" {
+		t.Fatalf("%v", r)
 	}
 }

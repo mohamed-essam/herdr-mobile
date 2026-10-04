@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/coder/websocket"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/chatbridge"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/herdr"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/proto"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/pty"
@@ -36,6 +37,12 @@ type HerdrRPC interface {
 	ListWorktrees(ctx context.Context, workspaceID string) ([]herdr.WorktreeEntry, error)
 }
 
+// ChatHub is the chatbridge surface the WS server needs (a *chatbridge.Hub).
+type ChatHub interface {
+	Subscribe(paneID string) (chatbridge.Snapshot, <-chan chatbridge.Update, func())
+	Send(paneID, text string) error
+}
+
 type Server struct {
 	auth        Authorizer
 	rpc         HerdrRPC
@@ -46,6 +53,7 @@ type Server struct {
 	herdrVer    string
 	herdrProt   int
 	poke        func()
+	chat        ChatHub
 
 	termSeq    atomic.Uint64
 	attachArgv func(target string) []string
@@ -59,6 +67,7 @@ type client struct {
 	send     chan []byte
 	sessions map[string]*termSession
 	smu      sync.Mutex
+	chats    map[string]func() // chat subscriptions by pane, guarded by smu
 }
 
 // termSession wraps a pty.Session with a closing flag so onExit can tell an
@@ -92,6 +101,7 @@ func (s *Server) SetTabSnapshot(fn func() []state.Tab)             { s.tabSnapsh
 func (s *Server) SetPushEndpoint(fn func(string))                  { s.onPush = fn }
 func (s *Server) SetHerdrInfo(ver string, prot int)                { s.herdrVer, s.herdrProt = ver, prot }
 func (s *Server) SetPoke(fn func())                                { s.poke = fn }
+func (s *Server) SetChat(h ChatHub)                                { s.chat = h }
 
 func (s *Server) Broadcast(frame []byte) {
 	s.mu.Lock()
@@ -118,7 +128,7 @@ func (s *Server) Handler() http.Handler {
 		if err != nil {
 			return
 		}
-		c := &client{conn: conn, send: make(chan []byte, 64), sessions: map[string]*termSession{}}
+		c := &client{conn: conn, send: make(chan []byte, 64), sessions: map[string]*termSession{}, chats: map[string]func(){}}
 		// enqueue welcome + snapshot BEFORE the client is visible to Broadcast
 		c.send <- proto.Welcome(s.herdrVer, s.herdrProt)
 		c.send <- proto.PanesSnapshot(s.snapshot())
@@ -211,6 +221,12 @@ func (s *Server) readLoop(ctx context.Context, c *client) {
 			}
 		case "term_close":
 			c.closeTerm(m.TermID)
+		case "chat_open":
+			s.openChat(ctx, c, m.PaneID)
+		case "chat_close":
+			c.closeChat(m.PaneID)
+		case "chat_send":
+			s.sendChat(c, m)
 		case "action":
 			s.handleAction(ctx, c, m)
 		case "create":
@@ -422,10 +438,67 @@ func (c *client) closeAll() {
 	c.smu.Lock()
 	all := c.sessions
 	c.sessions = map[string]*termSession{}
+	chats := c.chats
+	c.chats = map[string]func(){}
 	c.smu.Unlock()
 	for _, ts := range all {
 		ts.closing.Store(true)
 		_ = ts.sess.Close()
+	}
+	for _, cancel := range chats {
+		cancel()
+	}
+}
+
+// openChat subscribes this client to a pane's chat: the snapshot first, then
+// live updates in order. Re-opening a pane replaces the previous subscription.
+func (s *Server) openChat(ctx context.Context, c *client, paneID string) {
+	if s.chat == nil || paneID == "" {
+		return
+	}
+	c.closeChat(paneID)
+	snap, ch, cancel := s.chat.Subscribe(paneID)
+	c.smu.Lock()
+	c.chats[paneID] = cancel
+	c.smu.Unlock()
+	sendBlocking(ctx, c, proto.ChatSnapshot(snap))
+	go func() {
+		for u := range ch {
+			var f []byte
+			switch u.Kind {
+			case "event":
+				f = proto.ChatEvent(paneID, u.Epoch, u.Entry)
+			case "state":
+				f = proto.ChatState(paneID, u.State)
+			case "snapshot":
+				f = proto.ChatSnapshot(u.Snapshot)
+			default:
+				continue
+			}
+			sendBlocking(ctx, c, f)
+		}
+	}()
+}
+
+func (s *Server) sendChat(c *client, m proto.ClientMsg) {
+	err := chatbridge.ErrNoMod
+	if s.chat != nil {
+		err = s.chat.Send(m.PaneID, m.Text)
+	}
+	if err != nil {
+		c.send <- proto.ChatSendResult(m.ReqID, false, err.Error())
+		return
+	}
+	c.send <- proto.ChatSendResult(m.ReqID, true, "")
+}
+
+func (c *client) closeChat(paneID string) {
+	c.smu.Lock()
+	cancel := c.chats[paneID]
+	delete(c.chats, paneID)
+	c.smu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 }
 

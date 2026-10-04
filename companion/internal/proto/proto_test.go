@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/chatbridge"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
 )
 
@@ -77,10 +78,33 @@ func TestTermFrames(t *testing.T) {
 	}
 }
 
-func TestWelcomeAdvertisesProtocol7(t *testing.T) {
+func TestWelcomeAdvertisesProtocol8(t *testing.T) {
 	var got map[string]any
 	json.Unmarshal(Welcome("0.7.1", 14), &got)
-	if got["companionProtocol"].(float64) != 7 {
-		t.Fatalf("want companionProtocol 7, got %v", got["companionProtocol"])
+	if got["companionProtocol"].(float64) != 8 {
+		t.Fatalf("want companionProtocol 8, got %v", got["companionProtocol"])
+	}
+}
+
+func TestChatFrames(t *testing.T) {
+	var m map[string]any
+	json.Unmarshal(ChatSnapshot(chatbridge.Snapshot{PaneID: "w1:p1", Epoch: 3, State: "idle"}), &m)
+	if m["t"] != "chat_snapshot" || m["epoch"].(float64) != 3 || m["events"] == nil {
+		t.Fatalf("snapshot: %v", m)
+	}
+	json.Unmarshal(ChatEvent("w1:p1", 3, chatbridge.Entry{Seq: 7, Event: json.RawMessage(`{"type":"user_text","uuid":"u","text":"hi"}`)}), &m)
+	ev := m["event"].(map[string]any)
+	if m["t"] != "chat_event" || m["seq"].(float64) != 7 || ev["text"] != "hi" {
+		t.Fatalf("event: %v", m)
+	}
+	m = nil
+	json.Unmarshal(ChatSendResult("c1", false, "no_mod"), &m)
+	if m["ok"] != false || m["error"] != "no_mod" {
+		t.Fatalf("send result: %v", m)
+	}
+	m = nil
+	json.Unmarshal(ChatSendResult("c2", true, ""), &m)
+	if _, has := m["error"]; has {
+		t.Fatalf("ok result must omit error: %v", m)
 	}
 }

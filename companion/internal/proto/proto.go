@@ -3,6 +3,7 @@ package proto
 import (
 	"encoding/json"
 
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/chatbridge"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
 )
 
@@ -45,7 +46,7 @@ func ParseClient(b []byte) (ClientMsg, error) {
 func must(v any) []byte { b, _ := json.Marshal(v); return b }
 
 func Welcome(version string, protocol int) []byte {
-	return must(map[string]any{"t": "welcome", "herdrVersion": version, "herdrProtocol": protocol, "companionProtocol": 7})
+	return must(map[string]any{"t": "welcome", "herdrVersion": version, "herdrProtocol": protocol, "companionProtocol": 8})
 }
 func PanesSnapshot(p []state.Pane) []byte {
 	return must(map[string]any{"t": "panes", "panes": p})
@@ -116,4 +117,28 @@ func TermExit(termID string, code int, reason string) []byte {
 }
 func TermError(reqID, termID, message string) []byte {
 	return must(map[string]any{"t": "term_error", "reqId": reqID, "termId": termID, "message": message})
+}
+
+func ChatSnapshot(s chatbridge.Snapshot) []byte {
+	events := s.Events
+	if events == nil {
+		events = []chatbridge.Entry{}
+	}
+	return must(map[string]any{"t": "chat_snapshot", "paneId": s.PaneID, "epoch": s.Epoch, "state": s.State, "events": events})
+}
+
+func ChatEvent(paneID string, epoch int, e chatbridge.Entry) []byte {
+	return must(map[string]any{"t": "chat_event", "paneId": paneID, "epoch": epoch, "seq": e.Seq, "event": e.Event})
+}
+
+func ChatState(paneID, st string) []byte {
+	return must(map[string]any{"t": "chat_state", "paneId": paneID, "state": st})
+}
+
+func ChatSendResult(reqID string, ok bool, errCode string) []byte {
+	m := map[string]any{"t": "chat_send_result", "reqId": reqID, "ok": ok}
+	if errCode != "" {
+		m["error"] = errCode
+	}
+	return must(m)
 }
