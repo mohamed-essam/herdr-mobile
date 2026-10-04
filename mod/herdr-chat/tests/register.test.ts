@@ -1,11 +1,12 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { queueAppended, type State } from '../hooks/register'
+import { BODY_BYTES, IMAGE_BYTES, queueAppended, type State } from '../hooks/register'
 import { eventsFromTranscript } from '../hooks/transcript'
 
 const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], imageQueue: [], offline: false, inFlight: false, building: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined, historyLacksPath: false, openQuestions: new Map() })
 
 const MB = 1024 * 1024
+const FETCH_BODY_LIMIT = 4 * MB
 
 // The first `limit` UTF-8 bytes of `s`, as text; a character the cut falls
 // inside is dropped (`dropped`).
@@ -93,6 +94,8 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
     if (opts.down?.()) throw new Error('ECONNREFUSED')
     expect(e.url).toBe('http://chat/sync')
     expect(e.init?.socketPath).toBe(opts.xdg ? `${opts.xdg}/herdr-mobile/chat.sock` : '/s/chat.sock')
+    // The engine refuses a request body over 4 MiB characters before sending it.
+    if (String(e.init?.body).length > FETCH_BODY_LIMIT) throw new Error('herdr-chat: $.http.fetch: request body over the limit')
     sizes.push(String(e.init?.body).length)
     syncs.push(JSON.parse(String(e.init?.body)))
     const messages = outbox.splice(0)
@@ -631,21 +634,22 @@ describe('herdr-chat', () => {
     expect(w.syncs[3]!.events).toEqual([])
   })
 
-  test('images ride beside the events, at most 6 MB per body, over consecutive syncs', async ($, on) => {
+  test('images ride beside the events, under the engine body limit, over consecutive syncs', async ($, on) => {
     const w = world(on)
     const big = 'A'.repeat(1.5 * MB)
     w.files['/t/img.jsonl'] = Array.from({ length: 6 }, (_, i) => imageRow(`i${i}`, big)).join('\n')
     await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/img.jsonl' })
     await start($)
-    await w.clock.advance(4000)
+    await w.clock.advance(6000)
     expect(w.snapshots()[0]!.events).toEqual(Array.from({ length: 6 }, (_, i) =>
       ({ type: 'user_text', uuid: `i${i}`, text: '', images: [`i${i}#0`], ts: 1791126614835 })))
-    for (const n of w.sizes) expect(n).toBeLessThanOrEqual(6 * MB)
+    for (const n of w.sizes) expect(n).toBeLessThanOrEqual(BODY_BYTES)
     const carried = w.syncs.map(s => Object.keys(s.images ?? {}))
     expect(carried[0]).toEqual([])
-    expect(carried[1]!.length > 0 && carried[2]!.length > 0).toBe(true)
-    expect([...carried[1]!, ...carried[2]!]).toEqual(Array.from({ length: 6 }, (_, i) => `i${i}#0`))
-    expect(carried[3]).toEqual([])
+    // Two 1.5 MB images per body: three bodies, in history order.
+    expect(carried.slice(1, 4).map(c => c.length)).toEqual([2, 2, 2])
+    expect(carried.slice(1, 4).flat()).toEqual(Array.from({ length: 6 }, (_, i) => `i${i}#0`))
+    expect(carried[4]).toEqual([])
     expect(w.syncs[1]!.images!['i0#0']).toEqual({ mediaType: 'image/png', data: big })
   })
 
@@ -660,9 +664,9 @@ describe('herdr-chat', () => {
     expect(sent).toEqual(Array.from({ length: 30 }, (_, i) => `i${i + 10}#0`))
   })
 
-  test('an image over 5 MB is dropped, never sent, and does not block the rest', async ($, on) => {
+  test('an image over IMAGE_BYTES is dropped, never sent, and does not block the rest', async ($, on) => {
     const w = world(on)
-    w.files['/t/img.jsonl'] = [imageRow('huge', 'A'.repeat(6 * MB)), imageRow('small', 'QUJD')].join('\n')
+    w.files['/t/img.jsonl'] = [imageRow('huge', 'A'.repeat(IMAGE_BYTES + 1)), imageRow('small', 'QUJD')].join('\n')
     w.tail.limit = 16 * MB // the row itself must be readable here
     await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/img.jsonl' })
     await start($)
@@ -670,6 +674,6 @@ describe('herdr-chat', () => {
     expect(w.snapshots()[0]!.events.map((e: any) => e.images)).toEqual([['huge#0'], ['small#0']])
     const sent = w.syncs.flatMap(s => Object.keys(s.images ?? {}))
     expect(sent).toEqual(['small#0'])
-    for (const n of w.sizes) expect(n).toBeLessThanOrEqual(6 * MB)
+    for (const n of w.sizes) expect(n).toBeLessThanOrEqual(BODY_BYTES)
   })
 })

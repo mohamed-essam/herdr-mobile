@@ -14,11 +14,12 @@ type Control =
 type Outgoing = ChatEvent | Control
 
 // A chunk's events serialize to at most CHUNK_BYTES; a /sync body, images
-// included, to at most BODY_BYTES (the companion's limit is 8 MB); an image
-// over IMAGE_BYTES is dropped (its reference stays, answered `missing`).
+// included, to at most BODY_BYTES ($.http.fetch refuses a request body over
+// 4 MiB characters; UTF-8 bytes never undercount them); an image over
+// IMAGE_BYTES is dropped (its reference stays, answered `missing`).
 export const CHUNK_BYTES = 2 * 1024 * 1024
-export const BODY_BYTES = 6 * 1024 * 1024
-export const IMAGE_BYTES = 5 * 1024 * 1024
+export const BODY_BYTES = 4_000_000
+export const IMAGE_BYTES = 3_500_000
 // Only the newest history images are sent: the companion keeps 30 per pane.
 // Older references stay in their events (answered `missing`).
 export const HISTORY_IMAGES = 30
