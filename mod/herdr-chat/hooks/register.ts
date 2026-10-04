@@ -9,6 +9,8 @@ type Control =
   | { type: 'snapshot_chunk'; events: ChatEvent[] }
   | { type: 'snapshot_end' }
   | { type: 'state'; state: 'working' | 'idle' }
+  // An AskUserQuestion dialog the phone may answer (its tool input's questions).
+  | { type: 'question'; uuid: string; toolUseId: string; questions: unknown[]; ts: number }
 type Outgoing = ChatEvent | Control
 
 // A chunk's events serialize to at most CHUNK_BYTES; a /sync body, images
@@ -241,6 +243,39 @@ async function tick($: EngineInterface, s: State) {
   }
 }
 
+// One string answer per question text; anything else is no answer.
+function answerOf(v: unknown): Record<string, string> | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null
+  const entries = Object.entries(v)
+  if (!entries.length || entries.some(([, a]) => typeof a !== 'string')) return null
+  return Object.fromEntries(entries) as Record<string, string>
+}
+
+// Long-polls the companion for the phone's answer to `toolUseId` until one
+// comes or `race.over` (the dialog answered). The companion holds each poll up
+// to 25 s and answers `{answer: null}` on timeout: poll again at once. A poll
+// that fails (companion down, an older companion without /answer) is retried
+// after one sync interval. Never rejects; resolves null once the race is over.
+async function pollAnswer($: EngineInterface, s: State, toolUseId: string, race: { over: boolean }): Promise<Record<string, string> | null> {
+  while (!race.over) {
+    try {
+      const res = await $.http.fetch('http://chat/answer', {
+        method: 'POST',
+        socketPath: s.socketPath,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ paneId: s.paneId, toolUseId }),
+      })
+      if (!res.ok) throw new Error(`answer ${res.status}`)
+      const answer = answerOf((JSON.parse(res.text) as { answer?: unknown }).answer)
+      if (answer && !race.over) return answer
+    } catch {
+      if (race.over) break
+      await new Promise<void>(r => $.clock.after(SYNC_MS, r))
+    }
+  }
+  return null
+}
+
 type Appended = {
   door: string
   uuid: string
@@ -340,6 +375,27 @@ export const register: Register = on => {
     const r = await next(e)
     queueAppended(s, e, r.message)
     return r
+  })
+
+  // The terminal dialog races the phone: the question rides the next sync and
+  // whichever answers first wins. A phone answer closes the dialog (a hook
+  // that returns while its `next` is pending aborts what runs beneath); when
+  // the dialog wins, a poll still in flight is ignored. The waits are
+  // in-flight `$` calls, which the hook budget does not count.
+  on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
+    if (!s.paneId) return next(e)
+    s.pending.push({ type: 'question', uuid: e.tool_use_id, toolUseId: e.tool_use_id, questions: e.questions, ts: Date.now() })
+    const race = { over: false }
+    const dialog = next(e).then(r => ({ dialog: r }))
+    const never = new Promise<never>(() => {})
+    const phone = pollAnswer($, s, e.tool_use_id, race).then(a => (a ? { phone: a } : never))
+    try {
+      const first = await Promise.race([dialog, phone])
+      if ('dialog' in first) return first.dialog
+      return { result: { questions: e.questions, answers: first.phone } }
+    } finally {
+      race.over = true
+    }
   })
 
   on('turn.start', async ($, e, next) => {

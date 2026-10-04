@@ -1,0 +1,149 @@
+import { describe, expect, mock, test } from 'claude-code/testing'
+import type { On } from 'claude-code'
+
+type Sync = { paneId: string; sessionId: string; events: { type: string; [k: string]: unknown }[] }
+type Poll = { paneId: string; toolUseId: string }
+// What the fake companion does with one /answer poll: answer it (`null` = the
+// long-poll timed out), fail it, or hold it until released.
+type Reply = { answer: Record<string, string> | null } | 'fail' | Promise<{ answer: Record<string, string> | null }>
+
+const QUESTIONS = [
+  { question: 'Which color do you prefer?', header: 'Color', options: [{ label: 'Red', description: 'warm' }, { label: 'Blue', description: 'cool' }], multiSelect: false },
+]
+
+// The world beneath the plugin: env, clock, session reads, a fake companion
+// (/sync records bodies; /answer serves `replies` in order, then nulls) and
+// the terminal dialog (a test tool.call hook held until `answerDialog`).
+function world(on: On, opts: { pane?: boolean } = {}) {
+  mock.env(on, opts.pane === false ? {} : { HERDR_PANE_ID: 'w1:p1', HERDR_MOBILE_CHAT_SOCK: '/s/chat.sock' })
+  const clock = mock.clock(on)
+  const syncs: Sync[] = []
+  const polls: Poll[] = []
+  const replies: Reply[] = []
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.id', () => ({ value: 'sess-1' }))
+  on('session.messages', () => ({ value: [] as never }))
+  on('http.fetch', async ($, e) => {
+    expect(e.init?.socketPath).toBe('/s/chat.sock')
+    expect(e.init?.method).toBe('POST')
+    if (e.url === 'http://chat/sync') {
+      syncs.push(JSON.parse(String(e.init?.body)))
+      return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ messages: [] }) } }
+    }
+    expect(e.url).toBe('http://chat/answer')
+    polls.push(JSON.parse(String(e.init?.body)))
+    const r = replies.shift() ?? { answer: null }
+    if (r === 'fail') throw new Error('ECONNREFUSED')
+    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(await r) } }
+  })
+  const dialog = { calls: 0, toolUseId: '', aborted: false }
+  let answerDialog!: (label: string) => void
+  const shown = new Promise<string>(r => (answerDialog = r))
+  on('tool.call', { tool: 'AskUserQuestion' }, async ($, e) => {
+    dialog.calls++
+    dialog.toolUseId = e.tool_use_id
+    const label = await shown
+    return { result: { questions: e.questions, answers: { [e.questions[0]!.question]: label } } } as never
+  })
+  return {
+    clock, syncs, polls, replies, dialog, answerDialog,
+    hold() {
+      let release!: (a: Record<string, string> | null) => void
+      replies.push(new Promise(r => (release = a => r({ answer: a }))))
+      return release
+    },
+    all: () => syncs.flatMap(s => s.events),
+  }
+}
+
+const start = ($: any) => $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+const ask = ($: any) => $.tool.call({ tool: 'AskUserQuestion', questions: QUESTIONS })
+
+// Lets in-flight hooks and fetches run.
+async function flush(w: { clock: { settle: () => Promise<void> } }) {
+  for (let i = 0; i < 5; i++) await w.clock.settle()
+}
+
+describe('AskUserQuestion from the phone', () => {
+  test('a phone answer on the 2nd poll wins while the dialog is open; the question was queued', async ($, on) => {
+    const w = world(on)
+    await start($)
+    await w.clock.advance(2000) // hello + snapshot out
+    w.replies.push({ answer: null }, { answer: { 'Which color do you prefer?': 'Blue' } })
+    const r = await ask($)
+    expect(w.dialog.calls).toBe(1)
+    expect(w.polls.length).toBe(2)
+    expect(w.polls[0]).toEqual({ paneId: 'w1:p1', toolUseId: w.dialog.toolUseId })
+    expect(r.result).toEqual({ questions: QUESTIONS, answers: { 'Which color do you prefer?': 'Blue' } })
+    await w.clock.advance(1000)
+    const q = w.all().filter(e => e.type === 'question')
+    expect(q).toEqual([{ type: 'question', uuid: w.dialog.toolUseId, toolUseId: w.dialog.toolUseId, questions: QUESTIONS, ts: expect.any(Number) }])
+  })
+
+  test('the dialog answering first wins unchanged; a late phone answer is ignored', async ($, on) => {
+    const w = world(on)
+    await start($)
+    await w.clock.advance(2000)
+    const release = w.hold()
+    const call = ask($)
+    await flush(w)
+    expect(w.polls.length).toBe(1)
+    w.answerDialog('Red')
+    const r = await call
+    expect(r.result).toEqual({ questions: QUESTIONS, answers: { 'Which color do you prefer?': 'Red' } })
+    release({ 'Which color do you prefer?': 'Blue' })
+    await flush(w)
+    await w.clock.advance(3000)
+    expect(w.polls.length).toBe(1) // no poll after the dialog won
+  })
+
+  test('a failing /answer keeps polling once per interval; the dialog still answers', async ($, on) => {
+    const w = world(on)
+    await start($)
+    await w.clock.advance(2000)
+    w.replies.push('fail', 'fail', 'fail')
+    const release = w.hold()
+    const call = ask($)
+    await flush(w)
+    expect(w.polls.length).toBe(1)
+    await w.clock.advance(1000)
+    await flush(w)
+    expect(w.polls.length).toBe(2)
+    await w.clock.advance(1000)
+    await flush(w)
+    await w.clock.advance(1000)
+    await flush(w)
+    expect(w.polls.length).toBe(4) // three failures, then the held poll
+    w.answerDialog('Red')
+    const r = await call
+    expect(r.result).toEqual({ questions: QUESTIONS, answers: { 'Which color do you prefer?': 'Red' } })
+    release(null)
+  })
+
+  test('a malformed phone answer is not used', async ($, on) => {
+    const w = world(on)
+    await start($)
+    await w.clock.advance(2000)
+    w.replies.push({ answer: { 'Which color do you prefer?': 7 } as never })
+    const release = w.hold()
+    const call = ask($)
+    await flush(w)
+    expect(w.polls.length).toBe(2)
+    w.answerDialog('Red')
+    expect((await call).result).toEqual({ questions: QUESTIONS, answers: { 'Which color do you prefer?': 'Red' } })
+    release(null)
+  })
+
+  test('without HERDR_PANE_ID the dialog alone answers', async ($, on) => {
+    const w = world(on, { pane: false })
+    await start($)
+    await w.clock.advance(2000)
+    const call = ask($)
+    await flush(w)
+    w.answerDialog('Red')
+    const r = await call
+    expect(r.result).toEqual({ questions: QUESTIONS, answers: { 'Which color do you prefer?': 'Red' } })
+    expect(w.polls.length).toBe(0)
+    expect(w.syncs.length).toBe(0)
+  })
+})
