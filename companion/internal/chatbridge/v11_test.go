@@ -377,3 +377,78 @@ func TestSyncHandlerStoresImages(t *testing.T) {
 		t.Fatalf("image: %q %q %v", mt, data, ok)
 	}
 }
+
+func TestPollingKeepsQuestionAlive(t *testing.T) {
+	c := &fakeClock{t: time.Unix(1000, 0)}
+	h := NewHub(c.now)
+	h.Sync("p", "s", []json.RawMessage{hello("s"), questionEv("t1"), questionEv("t2")})
+	for i := 0; i < 2; i++ {
+		c.add(59 * time.Minute)
+		h.Sync("p", "s", nil)
+		h.WaitAnswer(context.Background(), "p", "t1", time.Millisecond)
+	}
+	if err := h.Answer("p", "t1", map[string]string{"a": "b"}); err != nil {
+		t.Fatalf("polled question: %v", err)
+	}
+	if err := h.Answer("p", "t2", map[string]string{"a": "b"}); !errors.Is(err, ErrNoQuestion) {
+		t.Fatalf("unpolled question after 118 min: %v", err)
+	}
+	h.Sync("p", "s", []json.RawMessage{questionEv("t3")})
+	c.add(61 * time.Minute)
+	h.Sync("p", "s", nil)
+	if err := h.Answer("p", "t3", map[string]string{"a": "b"}); !errors.Is(err, ErrNoQuestion) {
+		t.Fatalf("61 min without a poll: %v", err)
+	}
+}
+
+func TestAnswerRejectsEmpty(t *testing.T) {
+	h := NewHub(nil)
+	h.Sync("p", "s", []json.RawMessage{hello("s"), questionEv("t1")})
+	for _, a := range []map[string]string{nil, {}} {
+		if err := h.Answer("p", "t1", a); !errors.Is(err, ErrEmpty) {
+			t.Fatalf("answers %v: %v", a, err)
+		}
+	}
+}
+
+func TestImageStoreByteCap(t *testing.T) {
+	h := NewHub(nil)
+	big := strings.Repeat("x", 15<<20)
+	for i := 0; i < 3; i++ {
+		h.SyncBody("p", "s", nil, map[string]Image{fmt.Sprintf("b%d", i): {MediaType: "image/png", Data: big}})
+	}
+	if _, _, ok := h.Image("p", "b0"); ok {
+		t.Fatal("oldest image should be evicted over 40 MB")
+	}
+	for _, id := range []string{"b1", "b2"} {
+		if _, _, ok := h.Image("p", id); !ok {
+			t.Fatalf("%s evicted", id)
+		}
+	}
+	// Replacing an id accounts its bytes once.
+	h.SyncBody("p", "s", nil, map[string]Image{"b2": {MediaType: "image/png", Data: big}})
+	if _, _, ok := h.Image("p", "b1"); !ok {
+		t.Fatal("re-storing b2 double-counted its bytes")
+	}
+}
+
+func TestStagingClearedOnDeathAndNewSession(t *testing.T) {
+	c := &fakeClock{t: time.Unix(1000, 0)}
+	h := NewHub(c.now)
+	h.Sync("p", "s1", []json.RawMessage{hello("s1"), raw(`{"type":"snapshot_begin","total":2}`), chunk(userText(1))})
+	c.add(LiveWindow)
+	h.Tick()
+	h.Sync("p", "s1", []json.RawMessage{chunk(userText(2)), raw(`{"type":"snapshot_end"}`)})
+	snap, _, c1 := h.Subscribe("p")
+	c1()
+	if snap.Epoch != 1 {
+		t.Fatalf("staging survived the mod's death: %+v", snap)
+	}
+	h.Sync("p", "s1", []json.RawMessage{raw(`{"type":"snapshot_begin","total":2}`), chunk(userText(3))})
+	h.Sync("p", "s2", []json.RawMessage{hello("s2"), raw(`{"type":"snapshot_end"}`)})
+	snap, _, c2 := h.Subscribe("p")
+	c2()
+	if snap.Epoch != 1 {
+		t.Fatalf("staging survived a new session: %+v", snap)
+	}
+}

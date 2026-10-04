@@ -123,8 +123,8 @@ func (e *Engine) Run(ctx context.Context) error {
 	return err
 }
 
-// serveChat serves the herdr-chat mods' /sync and /answer endpoints and expires mods that
-// stop syncing, until ctx ends.
+// serveChat serves the herdr-chat mods' /sync and /answer endpoints and
+// expires mods that stop syncing, until ctx ends.
 func (e *Engine) serveChat(ctx context.Context, l net.Listener) {
 	srv := &http.Server{Handler: e.hub.Handler()}
 	go func() {

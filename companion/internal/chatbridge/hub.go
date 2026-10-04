@@ -25,9 +25,12 @@ const (
 	// older ones are fetched with History, at most HistoryMax per page.
 	SnapshotTail = 300
 	HistoryMax   = 300
-	// ImageCap is the per-pane image LRU size.
-	ImageCap = 30
-	// QuestionTTL is how long an unanswered question stays pending.
+	// ImageCap and ImageBytesCap bound the per-pane image LRU (entries, and
+	// len(data)+len(mediaType) summed).
+	ImageCap      = 30
+	ImageBytesCap = 40 << 20
+	// QuestionTTL is how long a question stays pending without an /answer
+	// poll for it.
 	QuestionTTL = time.Hour
 	// AnswerWait is how long the mod's /answer long-poll is held.
 	AnswerWait = 25 * time.Second
@@ -97,6 +100,7 @@ type pane struct {
 	// images is an LRU; imageOrder lists its ids oldest first.
 	images     map[string]Image
 	imageOrder []string
+	imageBytes int
 	questions  map[string]*question
 	// answered is closed (and cleared) when an answer is stored or the pane
 	// is dropped, waking every WaitAnswer on the pane.
@@ -220,6 +224,7 @@ func (p *pane) apply(paneID, sessionID string, raw json.RawMessage, now time.Tim
 			p.outbox = nil // queued for the previous session
 			p.setIdle()    // the old session's turn state does not carry over
 			p.questions = map[string]*question{}
+			p.staging = nil // the old session's unfinished snapshot
 		}
 		p.sessionID = sessionID
 		return true
@@ -304,15 +309,24 @@ func (p *pane) pending(toolUseID string, now time.Time) *question {
 	return q
 }
 
+func imageSize(img Image) int { return len(img.Data) + len(img.MediaType) }
+
+// storeImage adds img under id as the newest entry and evicts the oldest
+// while the store holds more than ImageCap entries or ImageBytesCap bytes
+// (an image alone over the byte cap is evicted at once).
 func (p *pane) storeImage(id string, img Image) {
-	if _, ok := p.images[id]; ok {
+	if old, ok := p.images[id]; ok {
+		p.imageBytes -= imageSize(old)
 		p.touchImage(id)
 	} else {
 		p.imageOrder = append(p.imageOrder, id)
 	}
 	p.images[id] = img
-	for len(p.imageOrder) > ImageCap {
-		delete(p.images, p.imageOrder[0])
+	p.imageBytes += imageSize(img)
+	for len(p.imageOrder) > ImageCap || (p.imageBytes > ImageBytesCap && len(p.imageOrder) > 0) {
+		oldest := p.imageOrder[0]
+		p.imageBytes -= imageSize(p.images[oldest])
+		delete(p.images, oldest)
 		p.imageOrder = p.imageOrder[1:]
 	}
 }
@@ -426,6 +440,9 @@ func (h *Hub) Image(paneID, id string) (mediaType, data string, ok bool) {
 // Answer stores the phone's answers (question text -> answer) to the pending
 // question toolUseID and wakes the mod's waiting /answer poll.
 func (h *Hub) Answer(paneID, toolUseID string, answers map[string]string) error {
+	if len(answers) == 0 {
+		return ErrEmpty
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	p := h.panes[paneID]
@@ -437,9 +454,6 @@ func (h *Hub) Answer(paneID, toolUseID string, answers map[string]string) error 
 		return ErrNoQuestion
 	}
 	q.answer = maps.Clone(answers)
-	if q.answer == nil {
-		q.answer = map[string]string{}
-	}
 	if p.answered != nil {
 		close(p.answered)
 		p.answered = nil
@@ -447,7 +461,8 @@ func (h *Hub) Answer(paneID, toolUseID string, answers map[string]string) error 
 	return nil
 }
 
-// WaitAnswer returns the stored answer to toolUseID, waiting up to timeout
+// WaitAnswer refreshes the pending question's TTL and returns its stored
+// answer, waiting up to timeout
 // (or until ctx ends) for one. The question need not be known yet: the mod's
 // poll can overtake the sync carrying its question event. The pane must
 // exist (the /answer handler records a heartbeat first).
@@ -461,7 +476,13 @@ func (h *Hub) WaitAnswer(ctx context.Context, paneID, toolUseID string, timeout 
 			h.mu.Unlock()
 			return nil, false
 		}
-		if q := p.pending(toolUseID, h.now()); q != nil && q.answer != nil {
+		now := h.now()
+		// A poll keeps its question alive: QuestionTTL counts from the last
+		// poll, so a dialog left open for hours can still be answered.
+		if q := p.questions[toolUseID]; q != nil {
+			q.added = now
+		}
+		if q := p.pending(toolUseID, now); q != nil && q.answer != nil {
 			a := maps.Clone(q.answer)
 			h.mu.Unlock()
 			return a, true
@@ -542,8 +563,9 @@ func (h *Hub) Tick() {
 		}
 		if p.live && now.Sub(p.lastSeen) >= LiveWindow {
 			p.live = false
-			p.outbox = nil // never deliver stale messages to a later session
-			p.setIdle()    // a dead mod is not working
+			p.outbox = nil  // never deliver stale messages to a later session
+			p.setIdle()     // a dead mod is not working
+			p.staging = nil // it restarts its chunked snapshot after recovery
 			dead = append(dead, id)
 		}
 	}
