@@ -191,3 +191,25 @@ describe('normalizeBlocks: local-command envelopes (M1)', () => {
     ])
   })
 })
+
+describe('normalizeBlocks: timestamps', () => {
+  test('ts is set on every event when given', () => {
+    const out = normalizeBlocks('assistant', [
+      { type: 'text', text: 'hi' },
+      { type: 'tool_use', id: 't1', name: 'Read', input: { file_path: '/a' } },
+    ], 'a1', 42)
+    expect(out).toEqual([
+      { type: 'assistant_text', uuid: 'a1#0', text: 'hi', ts: 42 },
+      { type: 'tool_use', uuid: 'a1#1', toolUseId: 't1', tool: 'Read', summary: 'Read: /a', ts: 42 },
+    ])
+    const user = normalizeBlocks('user', [
+      { type: 'text', text: 'q<task-notification><status>done</status><summary>s</summary></task-notification>' },
+      { type: 'tool_result', tool_use_id: 't1', content: 'ok' },
+    ], 'u1', 7)
+    expect(user.map(e => e.type)).toEqual(['user_text', 'task_notice', 'tool_result'])
+    expect(user.every(e => e.ts === 7)).toBe(true)
+  })
+  test('ts is absent when not given', () => {
+    expect('ts' in normalizeBlocks('user', 'hi', 'u1')[0]!).toBe(false)
+  })
+})

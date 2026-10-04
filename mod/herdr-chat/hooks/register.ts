@@ -1,5 +1,6 @@
 import type { EngineInterface, Register } from 'claude-code'
 import { normalizeBlocks, normalizeSnapshot, shouldForward, type ChatEvent } from './normalize'
+import { eventsFromTranscript } from './transcript'
 
 type Control =
   | { type: 'hello'; sessionId: string; cwd: string }
@@ -22,6 +23,9 @@ export type State = {
   needResync: boolean
   lastState: 'working' | 'idle' | undefined
   timer: { cancel: () => void } | undefined
+  // The session's transcript file, from the latest classic event carrying it
+  // (it moves when the session enters a worktree).
+  transcriptPath: string | undefined
 }
 
 const SYNC_MS = 1000
@@ -35,13 +39,30 @@ async function resolveSocket($: EngineInterface): Promise<string> {
   return ''
 }
 
+// History from the transcript file (real uuids, timestamps, meta rows
+// dropped); the api-form history when the path is unknown, the read rejects
+// (missing, over the read limit) or the file has no message rows.
+async function readHistory($: EngineInterface, s: State): Promise<ChatEvent[]> {
+  if (s.transcriptPath) {
+    let text: string | undefined
+    try {
+      text = await $.fs.read(s.transcriptPath)
+    } catch {
+      text = undefined
+    }
+    const events = text === undefined ? null : eventsFromTranscript(text)
+    if (events) return events
+  }
+  const history = await $.session.messages({ as: 'api' })
+  return Array.isArray(history) ? normalizeSnapshot(history) : []
+}
+
 // Reads the session fresh and puts hello + snapshot (+ the last known state)
 // ahead of rows queued while the reads were awaited. Callers clear `pending`
 // first when what is queued is already covered by the snapshot.
 async function queueResync($: EngineInterface, s: State) {
   s.sessionId = await $.session.id()
-  const history = await $.session.messages({ as: 'api' })
-  const events = Array.isArray(history) ? normalizeSnapshot(history) : []
+  const events = await readHistory($, s)
   const head: Outgoing[] = [{ type: 'hello', sessionId: s.sessionId, cwd: s.cwd }, { type: 'snapshot', events }]
   if (s.lastState) head.push({ type: 'state', state: s.lastState })
   // Rows appended during the awaits above stay after the snapshot.
@@ -111,7 +132,7 @@ export function queueAppended(s: State, e: Appended, stored: { content?: unknown
   if (!s.paneId || !shouldForward(e)) return
   const role = e.message.role
   if (role !== 'user' && role !== 'assistant') return
-  s.pending.push(...normalizeBlocks(role, stored?.content ?? e.message.content, e.uuid))
+  s.pending.push(...normalizeBlocks(role, stored?.content ?? e.message.content, e.uuid, Date.now()))
 }
 
 export const register: Register = on => {
@@ -127,7 +148,25 @@ export const register: Register = on => {
     needResync: false,
     lastState: undefined,
     timer: undefined,
+    transcriptPath: undefined,
   }
+
+  // Only remembers the path; the read happens at the next resync.
+  const trackTranscript = (path: string) => {
+    if (path) s.transcriptPath = path
+  }
+  on('classic.SessionStart', async ($, e, next) => {
+    trackTranscript(e.transcript_path)
+    return next(e)
+  })
+  on('classic.UserPromptSubmit', async ($, e, next) => {
+    trackTranscript(e.transcript_path)
+    return next(e)
+  })
+  on('classic.Stop', async ($, e, next) => {
+    trackTranscript(e.transcript_path)
+    return next(e)
+  })
 
   on('session.start', async ($, e, next) => {
     const r = await next(e)

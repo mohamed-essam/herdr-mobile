@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { queueAppended, type State } from '../hooks/register'
 
-const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], offline: false, inFlight: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined })
+const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], offline: false, inFlight: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined })
 
 type Sync = { paneId: string; sessionId: string; events: { type: string; [k: string]: unknown }[] }
 
@@ -21,8 +21,22 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
     { role: 'user', content: [{ type: 'text', text: 'earlier question' }] },
     { role: 'assistant', content: [{ type: 'text', text: 'earlier answer' }] },
   ] as unknown[] }
+  // Transcript files the fake fs can read (any other path rejects) and the
+  // paths the plugin asked for.
+  const files: Record<string, string> = {}
+  const reads: string[] = []
   let submitGate: Promise<void> = Promise.resolve()
+  on('fs.read', ($, e) => {
+    reads.push(e.path)
+    const text = files[e.path]
+    if (text === undefined) throw new Error('ENOENT')
+    return { value: text }
+  })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
+  // No settings hooks beneath: the classic events answer with no decision.
+  on('classic.SessionStart', () => ({}))
+  on('classic.UserPromptSubmit', () => ({}))
+  on('classic.Stop', () => ({}))
   on('session.id', () => ({ value: current.id }))
   on('session.messages', () => ({ value: current.history as never }))
   on('http.fetch', ($, e) => {
@@ -41,11 +55,17 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
     return { text: e.text }
   })
   return {
-    clock, syncs, outbox, submitted, current, answer,
+    clock, syncs, outbox, submitted, current, answer, files, reads,
     hold() { let release!: () => void; submitGate = new Promise(r => (release = r)); return release },
     all: () => syncs.flatMap(s => s.events),
   }
 }
+
+const TRANSCRIPT = [
+  JSON.stringify({ type: 'queue-operation', operation: 'enqueue' }),
+  JSON.stringify({ type: 'user', uuid: 'u1', isSidechain: false, timestamp: '2026-10-04T15:10:14.835Z', message: { role: 'user', content: 'from the transcript' } }),
+  JSON.stringify({ type: 'user', uuid: 'm1', isMeta: true, isSidechain: false, timestamp: '2026-10-04T15:10:15.000Z', message: { role: 'user', content: 'Base directory for this skill: /x' } }),
+].join('\n')
 
 const start = ($: any) => $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
 
@@ -93,8 +113,8 @@ describe('herdr-chat', () => {
     queueAppended(s, { door: 'prompt', uuid: 'u1', message: { role: 'user', content: [{ type: 'text', text: 'run tests' }] } }, undefined)
     queueAppended(s, { door: 'response', uuid: 'a1', message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } }, undefined)
     expect(s.pending).toEqual([
-      { type: 'user_text', uuid: 'u1', text: 'run tests' },
-      { type: 'assistant_text', uuid: 'a1#0', text: 'ok' },
+      { type: 'user_text', uuid: 'u1', text: 'run tests', ts: expect.any(Number) },
+      { type: 'assistant_text', uuid: 'a1#0', text: 'ok', ts: expect.any(Number) },
     ])
   })
 
@@ -108,7 +128,7 @@ describe('herdr-chat', () => {
   test('stored (rewritten) content is preferred over the incoming content', () => {
     const s = state('w1:p1')
     queueAppended(s, { door: 'prompt', uuid: 'u1', message: { role: 'user', content: [{ type: 'text', text: 'secret' }] } }, { content: [{ type: 'text', text: 'redacted' }] })
-    expect(s.pending).toEqual([{ type: 'user_text', uuid: 'u1', text: 'redacted' }])
+    expect(s.pending).toEqual([{ type: 'user_text', uuid: 'u1', text: 'redacted', ts: expect.any(Number) }])
   })
 
   test('nothing is queued when paneId is unset', () => {
@@ -220,5 +240,77 @@ describe('herdr-chat', () => {
     await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: false })
     await w.clock.advance(3000)
     expect(w.syncs.length).toBe(0)
+  })
+
+  test('history comes from the transcript named by classic.SessionStart', async ($, on) => {
+    const w = world(on)
+    w.files['/t/p1.jsonl'] = TRANSCRIPT
+    await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/p1.jsonl' })
+    await start($)
+    await w.clock.advance(1000)
+    expect(w.reads).toEqual(['/t/p1.jsonl'])
+    const snap = w.syncs[0]!.events[1] as any
+    expect(snap.type).toBe('snapshot')
+    expect(snap.events).toEqual([{ type: 'user_text', uuid: 'u1', text: 'from the transcript', ts: 1791126614835 }])
+  })
+
+  for (const ev of ['UserPromptSubmit', 'Stop'] as const) {
+    test(`a later classic.${ev} moves the transcript path for the next resync`, async ($, on) => {
+      const w = world(on)
+      w.files['/t/p1.jsonl'] = TRANSCRIPT
+      w.files['/t/p2.jsonl'] = TRANSCRIPT.replace('from the transcript', 'moved transcript')
+      await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/p1.jsonl' })
+      await start($)
+      await w.clock.advance(1000)
+      if (ev === 'UserPromptSubmit') await $.classic.UserPromptSubmit({ prompt: 'hi', transcript_path: '/t/p2.jsonl' })
+      else await $.classic.Stop({ stop_hook_active: false, transcript_path: '/t/p2.jsonl' })
+      w.answer.resync = true
+      await w.clock.advance(1000) // answered with resync:true
+      await w.clock.advance(1000) // resync goes out
+      expect(w.reads).toEqual(['/t/p1.jsonl', '/t/p2.jsonl'])
+      const snap = w.syncs[2]!.events[1] as any
+      expect(snap.events).toEqual([{ type: 'user_text', uuid: 'u1', text: 'moved transcript', ts: 1791126614835 }])
+    })
+  }
+
+  test('an empty transcript_path keeps the known path', async ($, on) => {
+    const w = world(on)
+    w.files['/t/p1.jsonl'] = TRANSCRIPT
+    await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/p1.jsonl' })
+    await $.classic.UserPromptSubmit({ prompt: 'hi', transcript_path: '' })
+    await start($)
+    expect(w.reads).toEqual(['/t/p1.jsonl'])
+  })
+
+  test('an unreadable transcript falls back to the api-form history', async ($, on) => {
+    const w = world(on)
+    await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/missing.jsonl' })
+    await start($)
+    await w.clock.advance(1000)
+    expect(w.reads).toEqual(['/t/missing.jsonl'])
+    expect((w.syncs[0]!.events[1] as any).events).toEqual([
+      { type: 'user_text', uuid: 'snap-0', text: 'earlier question' },
+      { type: 'assistant_text', uuid: 'snap-1#0', text: 'earlier answer' },
+    ])
+  })
+
+  test('a transcript without message rows falls back to the api-form history', async ($, on) => {
+    const w = world(on)
+    w.files['/t/p1.jsonl'] = JSON.stringify({ type: 'queue-operation' })
+    await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/p1.jsonl' })
+    await start($)
+    await w.clock.advance(1000)
+    expect((w.syncs[0]!.events[1] as any).events.map((e: any) => e.uuid)).toEqual(['snap-0', 'snap-1#0'])
+  })
+
+  test('live rows carry the time they were queued', () => {
+    const s = state('w1:p1')
+    const before = Date.now()
+    queueAppended(s, { door: 'response', uuid: 'a1', message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }, { type: 'tool_use', id: 't1', name: 'Bash', input: {} }] } }, undefined)
+    expect(s.pending.length).toBe(2)
+    for (const e of s.pending as any[]) {
+      expect(typeof e.ts).toBe('number')
+      expect(e.ts >= before && e.ts <= Date.now()).toBe(true)
+    }
   })
 })

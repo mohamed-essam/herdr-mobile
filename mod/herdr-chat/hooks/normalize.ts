@@ -1,9 +1,10 @@
+// `ts`: epoch milliseconds, when known (optional on the wire).
 export type ChatEvent =
-  | { type: 'user_text'; uuid: string; text: string }
-  | { type: 'assistant_text'; uuid: string; text: string }
-  | { type: 'tool_use'; uuid: string; toolUseId: string; tool: string; summary: string }
-  | { type: 'tool_result'; toolUseId: string; isError: boolean; preview: string }
-  | { type: 'task_notice'; uuid: string; status: string; summary: string }
+  | { type: 'user_text'; uuid: string; text: string; ts?: number }
+  | { type: 'assistant_text'; uuid: string; text: string; ts?: number }
+  | { type: 'tool_use'; uuid: string; toolUseId: string; tool: string; summary: string; ts?: number }
+  | { type: 'tool_result'; toolUseId: string; isError: boolean; preview: string; ts?: number }
+  | { type: 'task_notice'; uuid: string; status: string; summary: string; ts?: number }
 
 export const MAX_TEXT = 64 * 1024
 export const PREVIEW = 400
@@ -69,7 +70,7 @@ function tag(doc: string, name: string): string {
   return m?.[1]?.trim() ?? ''
 }
 
-export function normalizeBlocks(role: 'user' | 'assistant', content: unknown, uuid: string): ChatEvent[] {
+export function normalizeBlocks(role: 'user' | 'assistant', content: unknown, uuid: string, ts?: number): ChatEvent[] {
   const blocks: Block[] =
     typeof content === 'string' ? [{ type: 'text', text: content }] : Array.isArray(content) ? content : []
   const out: ChatEvent[] = []
@@ -106,6 +107,7 @@ export function normalizeBlocks(role: 'user' | 'assistant', content: unknown, uu
   })
   const text = userTexts.join('\n').trim()
   if (text) out.unshift({ type: 'user_text', uuid, text: cap(text) })
+  if (ts !== undefined) for (const ev of out) ev.ts = ts
   return out
 }
 
