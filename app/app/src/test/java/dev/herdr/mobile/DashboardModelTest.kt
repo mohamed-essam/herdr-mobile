@@ -192,6 +192,8 @@ class DashboardModelTest {
     @Test fun formatters() {
         assertEquals("▸ Bash npm run build", activityLine(PaneActivity("tool", "Bash", "npm run build", 1)))
         assertEquals("▸ Read", activityLine(PaneActivity("tool", "Read", "", 1)))
+        assertEquals("▸ Edit ui/TerminalKeys.kt", activityLine(PaneActivity("tool", "Edit", "Edit: /home/u/app/ui/TerminalKeys.kt", 1)))
+        assertEquals("▸ Bash npm test", activityLine(PaneActivity("tool", "Bash", "Bash: npm test", 1)))
         assertEquals("first line", activityLine(PaneActivity("text", null, "\n first line \nsecond", 1)))
         assertNull(activityLine(PaneActivity("text", null, "  ", 1)))
         assertNull(activityLine(null))

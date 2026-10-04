@@ -218,8 +218,13 @@ fun tabOf(paneId: String, tree: List<WorkspaceNode>): TabNode? =
 fun activityLine(a: PaneActivity?): String? {
     if (a == null) return null
     val text = a.text.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() } ?: ""
-    val line = if (a.kind == "tool") listOf("▸", a.tool.orEmpty(), text).filter { it.isNotBlank() }.joinToString(" ")
-    else text
+    val tool = a.tool.orEmpty()
+    val line = when {
+        a.kind != "tool" -> text
+        // The mod's summaries read "Read: /abs/path"; shorten them like the chat rail.
+        tool.isNotBlank() && text.startsWith("$tool:") -> "▸ ${toolLine(tool, text)}"
+        else -> listOf("▸", tool, text).filter { it.isNotBlank() }.joinToString(" ")
+    }
     return line.takeIf { it.isNotBlank() && it != "▸" }
 }
 
