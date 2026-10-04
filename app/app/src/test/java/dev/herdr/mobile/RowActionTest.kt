@@ -1,9 +1,11 @@
 package dev.herdr.mobile
 
+import dev.herdr.mobile.net.Pane
+import dev.herdr.mobile.net.Tab
 import dev.herdr.mobile.ui.NodeKind
 import dev.herdr.mobile.ui.RowAction
-import dev.herdr.mobile.ui.closeConfirmMessage
-import dev.herdr.mobile.ui.closeConfirmMessageWith
+import dev.herdr.mobile.ui.TabNode
+import dev.herdr.mobile.ui.paneAction
 import dev.herdr.mobile.ui.needsCloseConfirm
 import org.junit.Assert.*
 import org.junit.Test
@@ -24,32 +26,25 @@ class RowActionTest {
         assertTrue(needsCloseConfirm(RowAction(NodeKind.WORKSPACE, "w7", "omega3")))
     }
 
-    @Test fun confirmCopyNamesTargetAndBlastRadius() {
-        assertTrue(closeConfirmMessage(RowAction(NodeKind.PANE, "w6:p1", "claude", isAgent = true)).contains("agent"))
-        assertTrue(closeConfirmMessage(RowAction(NodeKind.TAB, "w7:t1", "build", paneCount = 3)).let {
-            it.contains("build") && it.contains("3")
-        })
-        assertTrue(closeConfirmMessage(RowAction(NodeKind.WORKSPACE, "w7", "omega3", paneCount = 4, tabCount = 2)).let {
-            it.contains("omega3") && it.contains("4") && it.contains("2")
-        })
-    }
-
     @Test fun nodeKindWireStringsAreStable() {
         assertEquals("workspace", NodeKind.WORKSPACE.wire)
         assertEquals("tab", NodeKind.TAB.wire)
         assertEquals("pane", NodeKind.PANE.wire)
     }
 
-    @Test fun closeConfirmMessageWithNoSiblingsIsBaseCopy() {
-        val a = RowAction(NodeKind.WORKSPACE, "w1", "main", paneCount = 2, tabCount = 1)
-        assertEquals(closeConfirmMessage(a), closeConfirmMessageWith(a, emptyList()))
+    private fun tabNode(tabId: String, ws: String, panes: List<Pane>) =
+        TabNode(Tab(tabId = tabId, workspaceId = ws), panes)
+
+    @Test fun paneActionSuppressesPivotForBlankIdTab() {
+        val blankTab = tabNode("", "", listOf(Pane(paneId = "o1")))
+        assertNull(paneAction(Pane(paneId = "o1"), blankTab).mergedTab)
     }
 
-    @Test fun closeConfirmMessageWithSiblingsAppendsLine() {
-        val a = RowAction(NodeKind.WORKSPACE, "w1", "main", paneCount = 2, tabCount = 1)
-        val msg = closeConfirmMessageWith(a, listOf("ops", "feat/a"))
-        assertTrue(msg.startsWith(closeConfirmMessage(a)))
-        assertTrue(msg.contains("ops"))
-        assertTrue(msg.contains("feat/a"))
+    @Test fun paneActionAttachesPivotForRealTab() {
+        val p = Pane(paneId = "p1", workspaceId = "w1", tabId = "t1", agent = "claude")
+        val action = paneAction(p, tabNode("t1", "w1", listOf(p)))
+        assertEquals(NodeKind.TAB, action.mergedTab?.kind)
+        assertEquals("w1", action.mergedTab?.workspaceId)
+        assertTrue(action.isAgent)
     }
 }
