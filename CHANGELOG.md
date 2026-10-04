@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format is based on
 ## Unreleased
 
 - Chat view for Claude Code panes via the new herdr-chat Claude Code plugin (companion protocol 8).
+- Chat view v1.1 (companion protocol 9): Markdown-rendered assistant messages, long-press to select and copy,
+  timestamps, and history rebuilt from the session transcript (5000 events kept per pane; the app shows the latest
+  300 and loads older pages as you scroll up). Images Claude reads and images in your prompts render inline with
+  full-screen pinch-zoom (latest 30 per pane kept). `AskUserQuestion` shows a question card you can answer from the
+  phone or the terminal. Only http, https and mailto links open. Update both the companion and the herdr-chat
+  plugin; an older app keeps working against a newer companion.
 
 ## [1.0.0] - 2026-07-12
 

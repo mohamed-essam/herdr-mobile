@@ -104,6 +104,20 @@ you); otherwise the companion refuses to listen and logs why. Set
 `--chat-socket <path>` to the companion, set `HERDR_MOBILE_CHAT_SOCK` to the same
 path in the environment Claude runs in, since the plugin cannot see the flag.
 
+The chat shows assistant replies as Markdown (long-press to select and copy) with
+timestamps, and loads older history as you scroll to the top: the companion keeps
+the last 5000 events per pane and the app shows the latest 300 first. Images Claude
+reads, and images in your prompts, render inline; tap one for full-screen
+pinch-zoom. The companion keeps the latest 30 images per pane, and older ones show
+"image unavailable". When Claude asks a question (`AskUserQuestion`) the phone
+shows a question card; answer from the phone or the terminal, whichever comes
+first, and the card collapses to the answer. Only `http`, `https` and `mailto`
+links open (in a browser).
+
+Chat view v1.1 uses companion protocol 9. Update both the companion (rebuild and
+restart it) and the plugin (`/reload-plugins` or restart Claude Code); an older app
+keeps working against a newer companion.
+
 ### App
 
 Download `app-debug.apk` from the [latest release](https://github.com/mohamed-essam/herdr-mobile/releases/latest)
