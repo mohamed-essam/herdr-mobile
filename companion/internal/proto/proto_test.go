@@ -78,11 +78,11 @@ func TestTermFrames(t *testing.T) {
 	}
 }
 
-func TestWelcomeAdvertisesProtocol8(t *testing.T) {
+func TestWelcomeAdvertisesProtocol9(t *testing.T) {
 	var got map[string]any
 	json.Unmarshal(Welcome("0.7.1", 14), &got)
-	if got["companionProtocol"].(float64) != 8 {
-		t.Fatalf("want companionProtocol 8, got %v", got["companionProtocol"])
+	if got["companionProtocol"].(float64) != 9 {
+		t.Fatalf("want companionProtocol 9, got %v", got["companionProtocol"])
 	}
 }
 
@@ -106,5 +106,49 @@ func TestChatFrames(t *testing.T) {
 	json.Unmarshal(ChatSendResult("c2", true, ""), &m)
 	if _, has := m["error"]; has {
 		t.Fatalf("ok result must omit error: %v", m)
+	}
+}
+
+func TestChatSnapshotCarriesHasMore(t *testing.T) {
+	var got map[string]any
+	if err := json.Unmarshal(ChatSnapshot(chatbridge.Snapshot{PaneID: "p", HasMore: true}), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["hasMore"] != true {
+		t.Fatalf("hasMore: %v", got)
+	}
+}
+
+func TestChatHistoryPageNeverNullEvents(t *testing.T) {
+	var got map[string]any
+	json.Unmarshal(ChatHistoryPage("r", "p", 2, nil, false, true), &got)
+	if got["t"] != "chat_history_page" || got["stale"] != true || got["hasMore"] != false {
+		t.Fatalf("%v", got)
+	}
+	if evs, ok := got["events"].([]any); !ok || len(evs) != 0 {
+		t.Fatalf("events: %v", got["events"])
+	}
+	got = nil
+	json.Unmarshal(ChatHistoryPage("r", "p", 2, nil, true, false), &got)
+	if _, has := got["stale"]; has {
+		t.Fatalf("stale must be omitted when false: %v", got)
+	}
+}
+
+func TestChatImageAndAnswerFrames(t *testing.T) {
+	var got map[string]any
+	json.Unmarshal(ChatImageData("p", "i#0", "image/png", "QQ=="), &got)
+	if got["t"] != "chat_image_data" || got["mediaType"] != "image/png" || got["data"] != "QQ==" {
+		t.Fatalf("%v", got)
+	}
+	got = nil
+	json.Unmarshal(ChatImageMissing("p", "i#0"), &got)
+	if got["missing"] != true || got["id"] != "i#0" {
+		t.Fatalf("%v", got)
+	}
+	got = nil
+	json.Unmarshal(ChatAnswerResult("r", false, "empty"), &got)
+	if got["t"] != "chat_answer_result" || got["ok"] != false || got["error"] != "empty" {
+		t.Fatalf("%v", got)
 	}
 }

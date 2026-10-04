@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"runtime"
 	"strings"
@@ -324,8 +325,8 @@ func TestInitialSnapshotIncludesWorkspacesAndTabs(t *testing.T) {
 	defer c.Close(websocket.StatusNormalClosure, "")
 
 	welcome := readUntil(t, ctx, c, "welcome")
-	if welcome["companionProtocol"].(float64) != 8 {
-		t.Fatalf("want companionProtocol 8, got %v", welcome["companionProtocol"])
+	if welcome["companionProtocol"].(float64) != 9 {
+		t.Fatalf("want companionProtocol 9, got %v", welcome["companionProtocol"])
 	}
 	ws := readUntil(t, ctx, c, "workspaces")
 	arr := ws["workspaces"].([]any)
@@ -741,6 +742,11 @@ func (f *fakeChat) Subscribe(paneID string) (chatbridge.Snapshot, <-chan chatbri
 }
 
 func (f *fakeChat) Send(string, string) error { return nil }
+func (f *fakeChat) History(string, int, int, int) ([]chatbridge.Entry, bool, bool) {
+	return nil, false, false
+}
+func (f *fakeChat) Image(string, string) (string, string, bool)    { return "", "", false }
+func (f *fakeChat) Answer(string, string, map[string]string) error { return nil }
 
 func (f *fakeChat) sub(i int) chan chatbridge.Update {
 	f.mu.Lock()
@@ -850,6 +856,123 @@ func TestChatCloseWinsAgainstParkedForwarder(t *testing.T) {
 		time.Sleep(time.Millisecond)
 		if len(c.send) != 0 {
 			t.Fatalf("iteration %d: stale frame enqueued after closeChat returned", i)
+		}
+	}
+}
+
+func chatEvents(n int) []json.RawMessage {
+	evs := make([]json.RawMessage, n)
+	for i := range evs {
+		evs[i] = json.RawMessage(fmt.Sprintf(`{"type":"user_text","uuid":"u%d","text":"t%d"}`, i, i))
+	}
+	return evs
+}
+
+func TestChatSnapshotHasMoreAndHistoryPages(t *testing.T) {
+	hub := chatbridge.NewHub(nil)
+	hub.Sync("w1:p1", "s", chatEvents(450))
+	c, ctx := dialChat(t, hub)
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"chat_open","paneId":"w1:p1"}`))
+	snap := readUntil(t, ctx, c, "chat_snapshot")
+	if snap["hasMore"] != true {
+		t.Fatalf("snapshot hasMore: %v", snap["hasMore"])
+	}
+	epoch := int(snap["epoch"].(float64))
+	first := int(snap["events"].([]any)[0].(map[string]any)["seq"].(float64))
+
+	req := fmt.Sprintf(`{"t":"chat_history","reqId":"h1","paneId":"w1:p1","epoch":%d,"beforeSeq":%d,"limit":100}`, epoch, first)
+	c.Write(ctx, websocket.MessageText, []byte(req))
+	p1 := readUntil(t, ctx, c, "chat_history_page")
+	if p1["reqId"] != "h1" || p1["hasMore"] != true || len(p1["events"].([]any)) != 100 {
+		t.Fatalf("page1: %v hasMore=%v", p1["reqId"], p1["hasMore"])
+	}
+	first = int(p1["events"].([]any)[0].(map[string]any)["seq"].(float64))
+	req = fmt.Sprintf(`{"t":"chat_history","reqId":"h2","paneId":"w1:p1","epoch":%d,"beforeSeq":%d,"limit":300}`, epoch, first)
+	c.Write(ctx, websocket.MessageText, []byte(req))
+	p2 := readUntil(t, ctx, c, "chat_history_page")
+	if p2["hasMore"] != false || len(p2["events"].([]any)) != 50 {
+		t.Fatalf("page2: hasMore=%v n=%d", p2["hasMore"], len(p2["events"].([]any)))
+	}
+	if _, stale := p2["stale"]; stale {
+		t.Fatalf("page2 must not be stale")
+	}
+}
+
+func TestChatHistoryStaleEpoch(t *testing.T) {
+	hub := chatbridge.NewHub(nil)
+	hub.Sync("w1:p1", "s", chatEvents(3))
+	c, ctx := dialChat(t, hub)
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"chat_history","reqId":"h1","paneId":"w1:p1","epoch":999,"beforeSeq":3,"limit":10}`))
+	p := readUntil(t, ctx, c, "chat_history_page")
+	evs, isArr := p["events"].([]any)
+	if !isArr || len(evs) != 0 || p["hasMore"] != false || p["stale"] != true {
+		t.Fatalf("stale page: %v", p)
+	}
+}
+
+func TestChatImageFrames(t *testing.T) {
+	hub := chatbridge.NewHub(nil)
+	hub.SyncBody("w1:p1", "s", chatEvents(1), map[string]chatbridge.Image{"u0#0": {MediaType: "image/png", Data: "QUJD"}})
+	c, ctx := dialChat(t, hub)
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"chat_image","paneId":"w1:p1","id":"u0#0"}`))
+	got := readUntil(t, ctx, c, "chat_image_data")
+	if got["id"] != "u0#0" || got["mediaType"] != "image/png" || got["data"] != "QUJD" || got["paneId"] != "w1:p1" {
+		t.Fatalf("image: %v", got)
+	}
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"chat_image","paneId":"w1:p1","id":"nope"}`))
+	got = readUntil(t, ctx, c, "chat_image_data")
+	if got["missing"] != true || got["id"] != "nope" {
+		t.Fatalf("missing: %v", got)
+	}
+}
+
+func TestChatAnswerResults(t *testing.T) {
+	hub := chatbridge.NewHub(nil)
+	c, ctx := dialChat(t, hub)
+	ask := func(frame string) map[string]any {
+		c.Write(ctx, websocket.MessageText, []byte(frame))
+		return readUntil(t, ctx, c, "chat_answer_result")
+	}
+	if r := ask(`{"t":"chat_answer","reqId":"a1","paneId":"w1:p1","toolUseId":"tu1","answers":{"Q":"A"}}`); r["ok"] != false || r["error"] != "no_mod" {
+		t.Fatalf("no_mod: %v", r)
+	}
+	hub.Heartbeat("w1:p1")
+	if r := ask(`{"t":"chat_answer","reqId":"a2","paneId":"w1:p1","toolUseId":"tu1","answers":{"Q":"A"}}`); r["ok"] != false || r["error"] != "no_question" {
+		t.Fatalf("no_question: %v", r)
+	}
+	if r := ask(`{"t":"chat_answer","reqId":"a3","paneId":"w1:p1","toolUseId":"tu1","answers":{}}`); r["ok"] != false || r["error"] != "empty" {
+		t.Fatalf("empty: %v", r)
+	}
+	hub.Sync("w1:p1", "s", []json.RawMessage{json.RawMessage(`{"type":"question","uuid":"tu1","toolUseId":"tu1","questions":[{"question":"Q","options":[{"label":"A"}]}],"ts":1}`)})
+	r := ask(`{"t":"chat_answer","reqId":"a4","paneId":"w1:p1","toolUseId":"tu1","answers":{"Q":"A"}}`)
+	if r["ok"] != true || r["reqId"] != "a4" {
+		t.Fatalf("ok: %v", r)
+	}
+	if _, has := r["error"]; has {
+		t.Fatalf("error on ok: %v", r)
+	}
+}
+
+func TestOldClientGetsNoNewFrameTypes(t *testing.T) {
+	hub := chatbridge.NewHub(nil)
+	hub.Sync("w1:p1", "s", chatEvents(2))
+	c, ctx := dialChat(t, hub)
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"chat_open","paneId":"w1:p1"}`))
+	readUntil(t, ctx, c, "chat_snapshot")
+	hub.Sync("w1:p1", "s", chatEvents(3))
+	newTypes := map[any]bool{"chat_history_page": true, "chat_image_data": true, "chat_answer_result": true}
+	deadline := time.Now().Add(300 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		rctx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+		_, b, err := c.Read(rctx)
+		cancel()
+		if err != nil {
+			continue
+		}
+		var m map[string]any
+		json.Unmarshal(b, &m)
+		if newTypes[m["t"]] {
+			t.Fatalf("old client got new frame: %v", m)
 		}
 	}
 }

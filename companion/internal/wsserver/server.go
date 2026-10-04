@@ -41,6 +41,9 @@ type HerdrRPC interface {
 type ChatHub interface {
 	Subscribe(paneID string) (chatbridge.Snapshot, <-chan chatbridge.Update, func())
 	Send(paneID, text string) error
+	History(paneID string, epoch, beforeSeq, limit int) (events []chatbridge.Entry, hasMore bool, ok bool)
+	Image(paneID, id string) (mediaType, data string, ok bool)
+	Answer(paneID, toolUseID string, answers map[string]string) error
 }
 
 type Server struct {
@@ -227,6 +230,12 @@ func (s *Server) readLoop(ctx context.Context, c *client) {
 			c.closeChat(m.PaneID)
 		case "chat_send":
 			s.sendChat(c, m)
+		case "chat_history":
+			s.chatHistory(ctx, c, m)
+		case "chat_image":
+			s.chatImage(ctx, c, m)
+		case "chat_answer":
+			s.chatAnswer(ctx, c, m)
 		case "action":
 			s.handleAction(ctx, c, m)
 		case "create":
@@ -537,6 +546,39 @@ func (s *Server) sendChat(c *client, m proto.ClientMsg) {
 		return
 	}
 	c.send <- proto.ChatSendResult(m.ReqID, true, "")
+}
+
+func (s *Server) chatHistory(ctx context.Context, c *client, m proto.ClientMsg) {
+	if s.chat == nil {
+		sendBlocking(ctx, c, proto.ChatHistoryPage(m.ReqID, m.PaneID, m.Epoch, nil, false, true))
+		return
+	}
+	events, hasMore, ok := s.chat.History(m.PaneID, m.Epoch, m.BeforeSeq, m.Limit)
+	sendBlocking(ctx, c, proto.ChatHistoryPage(m.ReqID, m.PaneID, m.Epoch, events, hasMore, !ok))
+}
+
+// chatImage uses sendBlocking so a burst of large image frames backpressures
+// this client's read loop instead of dropping frames.
+func (s *Server) chatImage(ctx context.Context, c *client, m proto.ClientMsg) {
+	if s.chat != nil {
+		if mt, data, ok := s.chat.Image(m.PaneID, m.ID); ok {
+			sendBlocking(ctx, c, proto.ChatImageData(m.PaneID, m.ID, mt, data))
+			return
+		}
+	}
+	sendBlocking(ctx, c, proto.ChatImageMissing(m.PaneID, m.ID))
+}
+
+func (s *Server) chatAnswer(ctx context.Context, c *client, m proto.ClientMsg) {
+	err := chatbridge.ErrNoMod
+	if s.chat != nil {
+		err = s.chat.Answer(m.PaneID, m.ToolUseID, m.Answers)
+	}
+	if err != nil {
+		sendBlocking(ctx, c, proto.ChatAnswerResult(m.ReqID, false, err.Error()))
+		return
+	}
+	sendBlocking(ctx, c, proto.ChatAnswerResult(m.ReqID, true, ""))
 }
 
 func (c *client) closeChat(paneID string) {

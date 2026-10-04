@@ -25,8 +25,14 @@ type ClientMsg struct {
 	Data          string `json:"data"`
 	Op            string `json:"op"`
 	Kind          string `json:"kind"`
-	ID            string `json:"id"`
+	ID            string `json:"id"` // also the chat_image id
 	Label         string `json:"label"`
+
+	Epoch     int               `json:"epoch"`
+	BeforeSeq int               `json:"beforeSeq"`
+	Limit     int               `json:"limit"`
+	ToolUseID string            `json:"toolUseId"`
+	Answers   map[string]string `json:"answers"`
 
 	What        string   `json:"what"`
 	AgentName   string   `json:"agentName"`
@@ -46,7 +52,7 @@ func ParseClient(b []byte) (ClientMsg, error) {
 func must(v any) []byte { b, _ := json.Marshal(v); return b }
 
 func Welcome(version string, protocol int) []byte {
-	return must(map[string]any{"t": "welcome", "herdrVersion": version, "herdrProtocol": protocol, "companionProtocol": 8})
+	return must(map[string]any{"t": "welcome", "herdrVersion": version, "herdrProtocol": protocol, "companionProtocol": 9})
 }
 func PanesSnapshot(p []state.Pane) []byte {
 	return must(map[string]any{"t": "panes", "panes": p})
@@ -124,7 +130,7 @@ func ChatSnapshot(s chatbridge.Snapshot) []byte {
 	if events == nil {
 		events = []chatbridge.Entry{}
 	}
-	return must(map[string]any{"t": "chat_snapshot", "paneId": s.PaneID, "epoch": s.Epoch, "state": s.State, "events": events})
+	return must(map[string]any{"t": "chat_snapshot", "paneId": s.PaneID, "epoch": s.Epoch, "state": s.State, "events": events, "hasMore": s.HasMore})
 }
 
 func ChatEvent(paneID string, epoch int, e chatbridge.Entry) []byte {
@@ -137,6 +143,35 @@ func ChatState(paneID, st string) []byte {
 
 func ChatSendResult(reqID string, ok bool, errCode string) []byte {
 	m := map[string]any{"t": "chat_send_result", "reqId": reqID, "ok": ok}
+	if errCode != "" {
+		m["error"] = errCode
+	}
+	return must(m)
+}
+
+// ChatHistoryPage answers chat_history. events is never null; stale marks a
+// request whose epoch is no longer the pane's current one.
+func ChatHistoryPage(reqID, paneID string, epoch int, events []chatbridge.Entry, hasMore, stale bool) []byte {
+	if events == nil {
+		events = []chatbridge.Entry{}
+	}
+	m := map[string]any{"t": "chat_history_page", "reqId": reqID, "paneId": paneID, "epoch": epoch, "events": events, "hasMore": hasMore}
+	if stale {
+		m["stale"] = true
+	}
+	return must(m)
+}
+
+func ChatImageData(paneID, id, mediaType, data string) []byte {
+	return must(map[string]any{"t": "chat_image_data", "paneId": paneID, "id": id, "mediaType": mediaType, "data": data})
+}
+
+func ChatImageMissing(paneID, id string) []byte {
+	return must(map[string]any{"t": "chat_image_data", "paneId": paneID, "id": id, "missing": true})
+}
+
+func ChatAnswerResult(reqID string, ok bool, errCode string) []byte {
+	m := map[string]any{"t": "chat_answer_result", "reqId": reqID, "ok": ok}
 	if errCode != "" {
 		m["error"] = errCode
 	}
