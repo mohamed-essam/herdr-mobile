@@ -11,42 +11,68 @@ import androidx.compose.ui.graphics.Color
  * https://catppuccin.com
  */
 
+/** One Catppuccin flavor, the subset the app uses. */
+data class HerdrPalette(
+    val crust: Color,
+    val mantle: Color,
+    val base: Color,
+    val surface0: Color,
+    val surface1: Color,
+    val surface2: Color,
+    val overlay0: Color,
+    val overlay2: Color,
+    val subtext1: Color,
+    val text: Color,
+    val mauve: Color,
+    val blue: Color,
+    val green: Color,
+    val yellow: Color,
+    val peach: Color,
+    val red: Color,
+)
+
 // ── Catppuccin Mocha (dark) ───────────────────────────────────────────────
-private object Mocha {
-    val crust = Color(0xFF11111B)
-    val mantle = Color(0xFF181825)
-    val base = Color(0xFF1E1E2E)
-    val surface0 = Color(0xFF313244)
-    val surface1 = Color(0xFF45475A)
-    val surface2 = Color(0xFF585B70)
-    val overlay0 = Color(0xFF6C7086)
-    val subtext1 = Color(0xFFBAC2DE)
-    val text = Color(0xFFCDD6F4)
-    val mauve = Color(0xFFCBA6F7)
-    val blue = Color(0xFF89B4FA)
-    val green = Color(0xFFA6E3A1)
-    val yellow = Color(0xFFF9E2AF)
-    val peach = Color(0xFFFAB387)
-    val red = Color(0xFFF38BA8)
-    val overlay2 = Color(0xFF9399B2)
-}
+val MochaPalette = HerdrPalette(
+    crust = Color(0xFF11111B),
+    mantle = Color(0xFF181825),
+    base = Color(0xFF1E1E2E),
+    surface0 = Color(0xFF313244),
+    surface1 = Color(0xFF45475A),
+    surface2 = Color(0xFF585B70),
+    overlay0 = Color(0xFF6C7086),
+    overlay2 = Color(0xFF9399B2),
+    subtext1 = Color(0xFFBAC2DE),
+    text = Color(0xFFCDD6F4),
+    mauve = Color(0xFFCBA6F7),
+    blue = Color(0xFF89B4FA),
+    green = Color(0xFFA6E3A1),
+    yellow = Color(0xFFF9E2AF),
+    peach = Color(0xFFFAB387),
+    red = Color(0xFFF38BA8),
+)
 
 // ── Catppuccin Latte (light) ──────────────────────────────────────────────
-private object Latte {
-    val crust = Color(0xFFDCE0E8)
-    val base = Color(0xFFEFF1F5)
-    val surface0 = Color(0xFFCCD0DA)
-    val surface1 = Color(0xFFBCC0CC)
-    val overlay0 = Color(0xFF9CA0B0)
-    val subtext1 = Color(0xFF5C5F77)
-    val text = Color(0xFF4C4F69)
-    val mauve = Color(0xFF8839EF)
-    val blue = Color(0xFF1E66F5)
-    val green = Color(0xFF40A02B)
-    val yellow = Color(0xFFDF8E1D)
-    val peach = Color(0xFFFE640B)
-    val red = Color(0xFFD20F39)
-}
+val LattePalette = HerdrPalette(
+    crust = Color(0xFFDCE0E8),
+    mantle = Color(0xFFE6E9EF),
+    base = Color(0xFFEFF1F5),
+    surface0 = Color(0xFFCCD0DA),
+    surface1 = Color(0xFFBCC0CC),
+    surface2 = Color(0xFFACB0BE),
+    overlay0 = Color(0xFF9CA0B0),
+    overlay2 = Color(0xFF7C7F93),
+    subtext1 = Color(0xFF5C5F77),
+    text = Color(0xFF4C4F69),
+    mauve = Color(0xFF8839EF),
+    blue = Color(0xFF1E66F5),
+    green = Color(0xFF40A02B),
+    yellow = Color(0xFFDF8E1D),
+    peach = Color(0xFFFE640B),
+    red = Color(0xFFD20F39),
+)
+
+private val Mocha = MochaPalette
+private val Latte = LattePalette
 
 val MochaColorScheme = darkColorScheme(
     primary = Mocha.mauve,
@@ -142,4 +168,14 @@ private val avatarAccentsLight = listOf(Latte.mauve, Latte.blue, Latte.green, La
 fun avatarColor(seed: String, dark: Boolean): Color {
     val palette = if (dark) avatarAccentsDark else avatarAccentsLight
     return palette[colorIndexFor(seed, palette.size)]
+}
+
+/**
+ * A workspace's badge color, cycled by its herdr number (blue, green, peach,
+ * mauve) so the same workspace keeps its color on every screen.
+ */
+fun badgeColor(number: Int, dark: Boolean): Color {
+    val p = if (dark) Mocha else Latte
+    val cycle = listOf(p.blue, p.green, p.peach, p.mauve)
+    return cycle[((number - 1) % cycle.size + cycle.size) % cycle.size]
 }

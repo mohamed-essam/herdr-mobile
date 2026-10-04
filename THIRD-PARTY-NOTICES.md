@@ -18,10 +18,21 @@ license. The upstream files retain their original headers where present.
 
 ## JetBrains Mono
 
-- **File:** `app/app/src/main/assets/fonts/JetBrainsMono-Regular.ttf`
+- **Files:** `app/app/src/main/assets/fonts/JetBrainsMono-Regular.ttf`,
+  `app/app/src/main/res/font/jetbrains_mono_regular.ttf`,
+  `app/app/src/main/res/font/jetbrains_mono_semibold.ttf`
 - **Source:** [JetBrains/JetBrainsMono](https://github.com/JetBrains/JetBrainsMono)
 - **License:** SIL Open Font License 1.1 — full text in
   [`app/app/src/main/assets/fonts/OFL.txt`](app/app/src/main/assets/fonts/OFL.txt)
+
+## Geist
+
+- **Files:** `app/app/src/main/res/font/geist_regular.ttf`,
+  `app/app/src/main/res/font/geist_semibold.ttf`
+- **Source:** [vercel/geist-font](https://github.com/vercel/geist-font)
+- **License:** SIL Open Font License 1.1 — full text in
+  [`app/app/src/main/assets/fonts/GEIST-OFL.txt`](app/app/src/main/assets/fonts/GEIST-OFL.txt)
+- **Copyright:** © 2024 The Geist Project Authors
 
 ## Runtime dependencies
 
