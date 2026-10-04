@@ -326,4 +326,33 @@ class ProtocolTest {
         assertEquals("""{"t":"chat_answer","reqId":"q1","paneId":"p","toolUseId":"tq","answers":{"Color?":"Red, Blue","N?":"3"}}""",
             ClientMsg.chatAnswer("q1", "p", "tq", linkedMapOf("Color?" to "Red, Blue", "N?" to "3")))
     }
+
+    @Test fun paneWithoutSummaryHasNullActivityAndAsk() {
+        val p = (parseServerFrame("""{"t":"pane_update","pane":{"paneId":"w1:p1","chat":true}}""") as ServerFrame.PaneUpdate).pane
+        assertTrue(p.chat)
+        assertNull(p.activity)
+        assertNull(p.ask)
+    }
+
+    @Test fun parsesPaneActivityAndAsk() {
+        val f = parseServerFrame("""{"t":"panes","panes":[{"paneId":"w1:p1","chat":true,""" +
+            """"activity":{"kind":"tool","tool":"Bash","text":"npm run build","ts":1700000000000},""" +
+            """"ask":{"toolUseId":"tq","questions":[{"question":"Which layout?","header":"Layout","options":[{"label":"Grid","description":"2x2"},{"label":"List"}],"multiSelect":true}]}}]}""")
+        val p = (f as ServerFrame.Panes).panes.single()
+        assertEquals(PaneActivity(kind = "tool", tool = "Bash", text = "npm run build", ts = 1700000000000), p.activity)
+        val ask = p.ask!!
+        assertEquals("tq", ask.toolUseId)
+        val q = ask.items.single()
+        assertEquals("Which layout?", q.question)
+        assertEquals("Layout", q.header)
+        assertTrue(q.multiSelect)
+        assertEquals(listOf(QuestionOption("Grid", "2x2"), QuestionOption("List")), q.options)
+    }
+
+    @Test fun parsesTextActivityWithoutTool() {
+        val p = (parseServerFrame("""{"t":"pane_update","pane":{"paneId":"w1:p1","activity":{"kind":"question","text":"Which layout?","ts":5}}}""") as ServerFrame.PaneUpdate).pane
+        assertEquals("question", p.activity!!.kind)
+        assertNull(p.activity?.tool)
+        assertNull(p.ask)
+    }
 }

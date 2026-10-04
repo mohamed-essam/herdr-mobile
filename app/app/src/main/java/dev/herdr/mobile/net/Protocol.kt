@@ -16,7 +16,33 @@ data class Pane(
     val agent: String? = null,
     val agentStatus: String? = null,
     val chat: Boolean = false,
+    /** What the agent last did; null when no herdr-chat mod is live. */
+    val activity: PaneActivity? = null,
+    /** The newest pending AskUserQuestion, answerable with chat_answer. */
+    val ask: PaneAsk? = null,
 )
+
+/**
+ * A one-line summary of a pane's latest chat event. [kind] is "tool", "text",
+ * "user", "question" or "notice"; [tool] is set only for "tool". [ts] is epoch ms.
+ */
+@Serializable
+data class PaneActivity(
+    val kind: String = "",
+    val tool: String? = null,
+    val text: String = "",
+    val ts: Long = 0,
+)
+
+/** A pending AskUserQuestion; [questions] is the question event's array, verbatim. */
+@Serializable
+data class PaneAsk(
+    val toolUseId: String = "",
+    val questions: JsonArray = JsonArray(emptyList()),
+) {
+    /** [questions] parsed like a chat question event's. */
+    val items: List<QuestionItem> get() = questions.mapNotNull(::parseQuestionItem)
+}
 
 @Serializable
 data class Worktree(
@@ -96,7 +122,7 @@ private fun JsonObject.double(k: String) = (this[k] as? JsonPrimitive)?.doubleOr
 private fun JsonObject.strings(k: String) =
     (this[k] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()
 
-private fun parseQuestionItem(el: JsonElement): QuestionItem? {
+internal fun parseQuestionItem(el: JsonElement): QuestionItem? {
     val o = el as? JsonObject ?: return null
     return QuestionItem(
         question = o.str("question"),
