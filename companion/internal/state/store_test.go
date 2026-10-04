@@ -1,6 +1,8 @@
 package state
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/herdr"
@@ -213,5 +215,55 @@ func TestRemovedPaneForgetsChat(t *testing.T) {
 	ch, _ := s.Apply(infos(herdr.PaneInfo{PaneID: "w1:p1", WorkspaceID: "w1"}))
 	if ch[0].Pane.Chat {
 		t.Fatal("a re-created pane id must not inherit the old chat flag")
+	}
+}
+
+func TestSetSummaryFlagsKnownPaneAndSurvivesPoll(t *testing.T) {
+	s := NewStore()
+	s.Apply(infos(herdr.PaneInfo{PaneID: "w1:p1", WorkspaceID: "w1", Agent: "claude"}))
+	act := &Activity{Kind: "tool", Tool: "Bash", Text: "npm run build", TS: 5}
+	ask := &Ask{ToolUseID: "t1", Questions: json.RawMessage(`[{"question":"Q?"}]`)}
+	p, changed := s.SetSummary("w1:p1", act, ask)
+	if !changed || p.Activity == nil || p.Activity.Tool != "Bash" || p.Ask == nil || p.Ask.ToolUseID != "t1" {
+		t.Fatalf("SetSummary: changed=%v pane=%+v", changed, p)
+	}
+	if _, again := s.SetSummary("w1:p1", &Activity{Kind: "tool", Tool: "Bash", Text: "npm run build", TS: 5}, &Ask{ToolUseID: "t1", Questions: json.RawMessage(`[{"question":"Q?"}]`)}); again {
+		t.Fatal("an equal summary should report no change")
+	}
+	ch, _ := s.Apply(infos(herdr.PaneInfo{PaneID: "w1:p1", WorkspaceID: "w1", Agent: "claude"}))
+	if len(ch) != 0 || s.Snapshot()[0].Activity == nil || s.Snapshot()[0].Ask == nil {
+		t.Fatalf("poll lost summary: changes=%+v snap=%+v", ch, s.Snapshot())
+	}
+	if p, changed := s.SetSummary("w1:p1", nil, nil); !changed || p.Activity != nil || p.Ask != nil {
+		t.Fatalf("clear: %v %+v", changed, p)
+	}
+}
+
+func TestSummaryJSONOmittedWhenEmpty(t *testing.T) {
+	b, _ := json.Marshal(Pane{PaneID: "p"})
+	if strings.Contains(string(b), "activity") || strings.Contains(string(b), "ask") {
+		t.Fatalf("empty summary should be omitted: %s", b)
+	}
+	b, _ = json.Marshal(Pane{PaneID: "p", Activity: &Activity{Kind: "tool", Tool: "Bash", Text: "ls", TS: 7},
+		Ask: &Ask{ToolUseID: "t", Questions: json.RawMessage(`[{"question":"Q?"}]`)}})
+	want := `"activity":{"kind":"tool","tool":"Bash","text":"ls","ts":7},"ask":{"toolUseId":"t","questions":[{"question":"Q?"}]}`
+	if !strings.Contains(string(b), want) {
+		t.Fatalf("json = %s", b)
+	}
+}
+
+func TestSetSummaryBeforePaneAppearsAndRemovedForgets(t *testing.T) {
+	s := NewStore()
+	if _, changed := s.SetSummary("w2:p1", &Activity{Kind: "text", Text: "hi"}, nil); changed {
+		t.Fatal("unknown pane: nothing to broadcast yet")
+	}
+	ch, _ := s.Apply(infos(herdr.PaneInfo{PaneID: "w2:p1", WorkspaceID: "w2"}))
+	if len(ch) != 1 || ch[0].Pane.Activity == nil {
+		t.Fatalf("new pane should carry the summary: %+v", ch)
+	}
+	s.Apply(infos())
+	ch, _ = s.Apply(infos(herdr.PaneInfo{PaneID: "w2:p1", WorkspaceID: "w2"}))
+	if ch[0].Pane.Activity != nil {
+		t.Fatal("a re-created pane id must not inherit the old summary")
 	}
 }

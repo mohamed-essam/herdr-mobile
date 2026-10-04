@@ -1,6 +1,8 @@
 package state
 
 import (
+	"bytes"
+	"encoding/json"
 	"reflect"
 	"sync"
 	"time"
@@ -22,6 +24,41 @@ type Pane struct {
 	// Chat is true while the herdr-chat mod in this pane is syncing (the app
 	// opens the chat view for it). omitempty keeps older apps unaffected.
 	Chat bool `json:"chat,omitempty"`
+	// Activity is the latest thing the pane's agent did, and Ask its newest
+	// pending AskUserQuestion, both from the herdr-chat mod's events (nil
+	// while no mod is live). omitempty keeps older apps unaffected.
+	Activity *Activity `json:"activity,omitempty"`
+	Ask      *Ask      `json:"ask,omitempty"`
+}
+
+// Activity is a one-line summary of a pane's latest chat event. Kind is
+// "tool" | "text" | "user" | "question" | "notice"; Tool is set for "tool".
+// TS is epoch milliseconds.
+type Activity struct {
+	Kind string `json:"kind"`
+	Tool string `json:"tool,omitempty"`
+	Text string `json:"text"`
+	TS   int64  `json:"ts"`
+}
+
+// Ask is a pending AskUserQuestion: Questions is the question event's
+// questions array, verbatim.
+type Ask struct {
+	ToolUseID string          `json:"toolUseId"`
+	Questions json.RawMessage `json:"questions"`
+}
+
+type summary struct {
+	activity *Activity
+	ask      *Ask
+}
+
+func sameActivity(a, b *Activity) bool {
+	return a == b || (a != nil && b != nil && *a == *b)
+}
+
+func sameAsk(a, b *Ask) bool {
+	return a == b || (a != nil && b != nil && a.ToolUseID == b.ToolUseID && bytes.Equal(a.Questions, b.Questions))
 }
 
 type Worktree struct {
@@ -65,6 +102,9 @@ type Store struct {
 	mu    sync.Mutex
 	panes map[string]Pane
 	chat  map[string]bool
+	// summary holds each pane's Activity/Ask, set by SetSummary; the pointers
+	// are never mutated, so Pane values stay comparable across polls.
+	summary map[string]summary
 
 	workspaces   []Workspace
 	tabs         []Tab
@@ -76,6 +116,7 @@ func NewStore() *Store {
 	return &Store{
 		panes:        map[string]Pane{},
 		chat:         map[string]bool{},
+		summary:      map[string]summary{},
 		lastActivity: map[string]int64{},
 		now:          func() int64 { return time.Now().UnixMilli() },
 	}
@@ -96,6 +137,8 @@ func (s *Store) Apply(infos []herdr.PaneInfo) ([]Change, []Transition) {
 	for _, i := range infos {
 		np := toPane(i)
 		np.Chat = s.chat[np.PaneID]
+		sum := s.summary[np.PaneID]
+		np.Activity, np.Ask = sum.activity, sum.ask
 		seen[np.PaneID] = true
 		old, existed := s.panes[np.PaneID]
 		if !existed {
@@ -119,6 +162,7 @@ func (s *Store) Apply(infos []herdr.PaneInfo) ([]Change, []Transition) {
 			ws := s.panes[id].WorkspaceID
 			delete(s.panes, id)
 			delete(s.chat, id)
+			delete(s.summary, id)
 			changes = append(changes, Change{Kind: "removed", PaneID: id})
 			s.lastActivity[ws] = s.now() // removed
 		}
@@ -143,6 +187,36 @@ func (s *Store) SetChat(paneID string, on bool) (Pane, bool) {
 		return Pane{}, false
 	}
 	p.Chat = on
+	s.panes[paneID] = p
+	return p, true
+}
+
+// SetSummary records the pane's latest activity and pending question (nil
+// clears). Like SetChat it reports the updated pane and true only when a
+// known pane's summary actually changed, and keeps a summary set before herdr
+// reports the pane.
+func (s *Store) SetSummary(paneID string, activity *Activity, ask *Ask) (Pane, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Keep the stored pointers when the value is unchanged, so Apply's pane
+	// comparison sees no change.
+	old := s.summary[paneID]
+	if sameActivity(old.activity, activity) {
+		activity = old.activity
+	}
+	if sameAsk(old.ask, ask) {
+		ask = old.ask
+	}
+	if activity == nil && ask == nil {
+		delete(s.summary, paneID)
+	} else {
+		s.summary[paneID] = summary{activity: activity, ask: ask}
+	}
+	p, ok := s.panes[paneID]
+	if !ok || (sameActivity(p.Activity, activity) && sameAsk(p.Ask, ask)) {
+		return Pane{}, false
+	}
+	p.Activity, p.Ask = activity, ask
 	s.panes[paneID] = p
 	return p, true
 }

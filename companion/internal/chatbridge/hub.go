@@ -4,6 +4,7 @@
 package chatbridge
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -34,6 +35,8 @@ const (
 	QuestionTTL = time.Hour
 	// AnswerWait is how long the mod's /answer long-poll is held.
 	AnswerWait = 25 * time.Second
+	// SummaryMax caps an Activity's text, in runes.
+	SummaryMax = 120
 )
 
 var (
@@ -78,10 +81,45 @@ type Image struct {
 	Data      string `json:"data"`
 }
 
-// question is a pending AskUserQuestion, keyed by its toolUseId.
+// Activity is a one-line summary of a pane's latest chat event. Kind is
+// "tool" | "text" | "user" | "question" | "notice"; Tool is set for "tool".
+// TS is epoch milliseconds. Never mutated once built.
+type Activity struct {
+	Kind string `json:"kind"`
+	Tool string `json:"tool,omitempty"`
+	Text string `json:"text"`
+	TS   int64  `json:"ts"`
+}
+
+// Ask is a pending AskUserQuestion: Questions is the question event's
+// questions array, verbatim. Never mutated once built.
+type Ask struct {
+	ToolUseID string          `json:"toolUseId"`
+	Questions json.RawMessage `json:"questions"`
+}
+
+// Summary is what the dashboard shows for a pane: its latest activity and
+// newest pending question. Both are nil while the pane's mod is not live.
+type Summary struct {
+	Activity *Activity
+	Ask      *Ask
+}
+
+func (s Summary) empty() bool { return s.Activity == nil && s.Ask == nil }
+
+func sameSummary(a, b Summary) bool {
+	actEq := a.Activity == b.Activity || (a.Activity != nil && b.Activity != nil && *a.Activity == *b.Activity)
+	askEq := a.Ask == b.Ask || (a.Ask != nil && b.Ask != nil && a.Ask.ToolUseID == b.Ask.ToolUseID && bytes.Equal(a.Ask.Questions, b.Ask.Questions))
+	return actEq && askEq
+}
+
+// question is a pending AskUserQuestion, keyed by its toolUseId. order ranks
+// questions by arrival; questions is the event's questions array.
 type question struct {
-	added  time.Time
-	answer map[string]string
+	added     time.Time
+	answer    map[string]string
+	order     int
+	questions json.RawMessage
 }
 
 type pane struct {
@@ -102,6 +140,9 @@ type pane struct {
 	imageOrder []string
 	imageBytes int
 	questions  map[string]*question
+	qorder     int
+	// activity is the latest activity-bearing chat event's summary.
+	activity *Activity
 	// answered is closed (and cleared) when an answer is stored or the pane
 	// is dropped, waking every WaitAnswer on the pane.
 	answered chan struct{}
@@ -112,26 +153,36 @@ type Hub struct {
 	panes      map[string]*pane
 	now        func() time.Time
 	onLiveness func(paneID string, live bool)
+	onSummary  func(paneID string, s Summary)
 	nextSub    int
 	nextMsg    int
 	answerWait time.Duration // the /answer hold; tests shorten it
 
-	// cbMu serializes liveness delivery; notified is the last value delivered
-	// per pane. Callbacks must not call back into the Hub.
-	cbMu     sync.Mutex
-	notified map[string]bool
+	// cbMu serializes liveness and summary delivery; notified and summaries
+	// are the last values delivered per pane. Callbacks must not call back
+	// into the Hub.
+	cbMu      sync.Mutex
+	notified  map[string]bool
+	summaries map[string]Summary
 }
 
 func NewHub(now func() time.Time) *Hub {
 	if now == nil {
 		now = time.Now
 	}
-	return &Hub{panes: map[string]*pane{}, now: now, onLiveness: func(string, bool) {}, notified: map[string]bool{}, answerWait: AnswerWait}
+	return &Hub{panes: map[string]*pane{}, now: now, onLiveness: func(string, bool) {}, onSummary: func(string, Summary) {},
+		notified: map[string]bool{}, summaries: map[string]Summary{}, answerWait: AnswerWait}
 }
 
 // SetOnLiveness registers the callback for chat-capable flips. It is called
 // without the hub's lock held. Set it before the hub is used.
 func (h *Hub) SetOnLiveness(fn func(paneID string, live bool)) { h.onLiveness = fn }
+
+// SetOnSummary registers the callback for summary changes (activity or
+// pending question). It is called without the hub's lock held, serialized
+// with liveness delivery, and only when the summary changed. A sync's whole
+// batch yields at most one call. Set it before the hub is used.
+func (h *Hub) SetOnSummary(fn func(paneID string, s Summary)) { h.onSummary = fn }
 
 func (h *Hub) get(id string) *pane {
 	p := h.panes[id]
@@ -166,7 +217,6 @@ func (h *Hub) SyncBody(paneID, sessionID string, events []json.RawMessage, image
 	p := h.get(paneID)
 	now := h.now()
 	p.lastSeen = now
-	flipped := !p.live
 	p.live = true
 	sawHello := false
 	for _, ev := range events {
@@ -186,9 +236,7 @@ func (h *Hub) SyncBody(paneID, sessionID string, events []json.RawMessage, image
 	out := p.outbox
 	p.outbox = nil
 	h.mu.Unlock()
-	if flipped {
-		h.notify(paneID)
-	}
+	h.notify(paneID) // liveness flip and/or summary change; deduped
 	if out == nil {
 		out = []OutMsg{}
 	}
@@ -210,6 +258,7 @@ func (p *pane) apply(paneID, sessionID string, raw json.RawMessage, now time.Tim
 		SessionID string            `json:"sessionId"`
 		State     string            `json:"state"`
 		ToolUseID string            `json:"toolUseId"`
+		Questions json.RawMessage   `json:"questions"`
 		Events    []json.RawMessage `json:"events"`
 	}
 	if json.Unmarshal(raw, &head) != nil {
@@ -255,7 +304,7 @@ func (p *pane) apply(paneID, sessionID string, raw json.RawMessage, now time.Tim
 		p.state = head.State
 		p.fan(Update{Kind: "state", Epoch: p.epoch, State: p.state})
 	case isChatEvent(head.Type):
-		p.track(head.Type, head.ToolUseID, now)
+		p.observe(head.Type, head.ToolUseID, head.Questions, raw, now)
 		e := p.push(raw)
 		p.fan(Update{Kind: "event", Epoch: p.epoch, Entry: e})
 	}
@@ -268,30 +317,119 @@ func (p *pane) swap(paneID string, evs []json.RawMessage, now time.Time) {
 	p.epoch++
 	p.seq = 0
 	p.events = nil
+	p.activity = nil // recomputed from the new history
 	for _, ev := range evs {
 		var inner struct {
-			Type      string `json:"type"`
-			ToolUseID string `json:"toolUseId"`
+			Type      string          `json:"type"`
+			ToolUseID string          `json:"toolUseId"`
+			Questions json.RawMessage `json:"questions"`
 		}
 		if json.Unmarshal(ev, &inner) == nil && isChatEvent(inner.Type) {
-			p.track(inner.Type, inner.ToolUseID, now)
+			p.observe(inner.Type, inner.ToolUseID, inner.Questions, ev, now)
 			p.push(ev)
 		}
 	}
 	p.fan(Update{Kind: "snapshot", Epoch: p.epoch, Snapshot: p.snapshot(paneID)})
 }
 
+// observe updates the pane's pending questions and latest activity for one
+// chat event.
+func (p *pane) observe(typ, toolUseID string, questions, raw json.RawMessage, now time.Time) {
+	p.track(typ, toolUseID, questions, now)
+	if a := activityOf(typ, raw, now); a != nil {
+		p.activity = a
+	}
+}
+
+// activityOf summarizes an activity-bearing chat event; nil for any other
+// (tool_result) or a malformed one.
+func activityOf(typ string, raw json.RawMessage, now time.Time) *Activity {
+	var ev struct {
+		Tool      string  `json:"tool"`
+		Summary   string  `json:"summary"`
+		Text      string  `json:"text"`
+		TS        float64 `json:"ts"`
+		Questions []struct {
+			Question string `json:"question"`
+		} `json:"questions"`
+	}
+	if json.Unmarshal(raw, &ev) != nil {
+		return nil
+	}
+	a := &Activity{TS: int64(ev.TS)}
+	if a.TS <= 0 {
+		a.TS = now.UnixMilli()
+	}
+	switch typ {
+	case "tool_use":
+		a.Kind, a.Tool, a.Text = "tool", ev.Tool, oneLine(ev.Summary)
+	case "assistant_text":
+		a.Kind, a.Text = "text", oneLine(ev.Text)
+	case "user_text":
+		a.Kind, a.Text = "user", oneLine(ev.Text)
+	case "task_notice":
+		a.Kind, a.Text = "notice", oneLine(ev.Summary)
+	case "question":
+		a.Kind = "question"
+		if len(ev.Questions) > 0 {
+			a.Text = oneLine(ev.Questions[0].Question)
+		}
+	default:
+		return nil
+	}
+	return a
+}
+
+// oneLine returns s's first non-empty line, trimmed and capped at SummaryMax
+// runes (an ellipsis marking a cut).
+func oneLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if r := []rune(line); len(r) > SummaryMax {
+			return string(r[:SummaryMax-1]) + "…"
+		}
+		return line
+	}
+	return ""
+}
+
+// summary is the pane's dashboard summary: empty unless the mod is live; Ask
+// is the newest unanswered, unexpired question.
+func (p *pane) summary(now time.Time) Summary {
+	if p == nil || !p.live {
+		return Summary{}
+	}
+	s := Summary{Activity: p.activity}
+	var best *question
+	for id, q := range p.questions {
+		if q.answer != nil || now.Sub(q.added) >= QuestionTTL || (best != nil && q.order < best.order) {
+			continue
+		}
+		best = q
+		qs := q.questions
+		if len(qs) == 0 {
+			qs = json.RawMessage("[]")
+		}
+		s.Ask = &Ask{ToolUseID: id, Questions: qs}
+	}
+	return s
+}
+
 // track maintains the pending questions: a question event adds its
 // toolUseId (idempotent: a re-sent one keeps its age and stored answer), the
 // tool_result for it removes it.
-func (p *pane) track(typ, toolUseID string, now time.Time) {
+func (p *pane) track(typ, toolUseID string, questions json.RawMessage, now time.Time) {
 	if toolUseID == "" {
 		return
 	}
 	switch typ {
 	case "question":
 		if _, ok := p.questions[toolUseID]; !ok {
-			p.questions[toolUseID] = &question{added: now}
+			p.qorder++
+			p.questions[toolUseID] = &question{added: now, order: p.qorder, questions: append(json.RawMessage(nil), questions...)}
 		}
 	case "tool_result":
 		delete(p.questions, toolUseID)
@@ -444,13 +582,14 @@ func (h *Hub) Answer(paneID, toolUseID string, answers map[string]string) error 
 		return ErrEmpty
 	}
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	p := h.panes[paneID]
 	if p == nil || !p.live {
+		h.mu.Unlock()
 		return ErrNoMod
 	}
 	q := p.pending(toolUseID, h.now())
 	if q == nil {
+		h.mu.Unlock()
 		return ErrNoQuestion
 	}
 	q.answer = maps.Clone(answers)
@@ -458,6 +597,8 @@ func (h *Hub) Answer(paneID, toolUseID string, answers map[string]string) error 
 		close(p.answered)
 		p.answered = nil
 	}
+	h.mu.Unlock()
+	h.notify(paneID) // an answered question is no longer asked
 	return nil
 }
 
@@ -558,6 +699,7 @@ func (h *Hub) Tick() {
 	var dead []string
 	h.mu.Lock()
 	for id, p := range h.panes {
+		n := len(p.questions)
 		for tid := range p.questions {
 			p.pending(tid, now) // forgets an expired one
 		}
@@ -567,10 +709,12 @@ func (h *Hub) Tick() {
 			p.setIdle()     // a dead mod is not working
 			p.staging = nil // it restarts its chunked snapshot after recovery
 			dead = append(dead, id)
+		} else if len(p.questions) != n {
+			dead = append(dead, id) // still live, but its ask may have changed
 		}
 	}
 	h.mu.Unlock()
-	for _, id := range dead {
+	for _, id := range dead { // liveness and/or summary changed
 		h.notify(id)
 	}
 }
@@ -591,6 +735,10 @@ func (h *Hub) Drop(paneID string) {
 	// holds cbMu then takes mu.
 	h.cbMu.Lock()
 	delete(h.notified, paneID)
+	if !h.summaries[paneID].empty() {
+		h.onSummary(paneID, Summary{})
+	}
+	delete(h.summaries, paneID)
 	h.cbMu.Unlock()
 	if p == nil {
 		return
@@ -601,16 +749,27 @@ func (h *Hub) Drop(paneID string) {
 	}
 }
 
-// notify delivers the pane's current liveness to the observer. Delivery is
-// serialized and re-reads the truth under the delivery lock, so a stale flip
-// can never land after a newer one.
+// notify delivers the pane's current liveness and summary to the observers,
+// each only when it changed. Delivery is serialized and re-reads the truth
+// under the delivery lock, so a stale value can never land after a newer one.
 func (h *Hub) notify(paneID string) {
 	h.cbMu.Lock()
 	defer h.cbMu.Unlock()
-	live := h.Live(paneID)
-	if h.notified[paneID] == live {
-		return
+	h.mu.Lock()
+	p := h.panes[paneID]
+	live := p != nil && p.live
+	sum := p.summary(h.now())
+	h.mu.Unlock()
+	if h.notified[paneID] != live {
+		h.notified[paneID] = live
+		h.onLiveness(paneID, live)
 	}
-	h.notified[paneID] = live
-	h.onLiveness(paneID, live)
+	if !sameSummary(h.summaries[paneID], sum) {
+		if sum.empty() {
+			delete(h.summaries, paneID)
+		} else {
+			h.summaries[paneID] = sum
+		}
+		h.onSummary(paneID, sum)
+	}
 }

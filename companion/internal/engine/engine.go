@@ -62,6 +62,14 @@ func New(cfg Config) *Engine {
 			e.srv.Broadcast(proto.PaneUpdate(p))
 		}
 	})
+	// Summary callbacks follow the same rules as liveness (serialized with
+	// it, never call back into the hub). The hub delivers at most one per mod
+	// sync (about once a second per pane) and only on a change.
+	e.hub.SetOnSummary(func(paneID string, s chatbridge.Summary) {
+		if p, changed := e.store.SetSummary(paneID, (*state.Activity)(s.Activity), (*state.Ask)(s.Ask)); changed {
+			e.srv.Broadcast(proto.PaneUpdate(p))
+		}
+	})
 	e.srv.SetChat(e.hub)
 	e.srv.SetInitialSnapshot(e.store.Snapshot)
 	e.srv.SetWorkspaceSnapshot(e.store.Workspaces)

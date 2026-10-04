@@ -13,6 +13,10 @@ All notable changes to this project are documented here. The format is based on
   full-screen pinch-zoom (latest 30 per pane kept). `AskUserQuestion` shows a question card you can answer from the
   phone or the terminal. Only http, https and mailto links open. Update both the companion and the herdr-chat
   plugin; an older app keeps working against a newer companion.
+- Pane state carries what a chat-capable agent is doing: `activity` (`{kind, tool?, text, ts}`, kind one of
+  `tool`/`text`/`user`/`question`/`notice`, text a one-line summary of at most 120 characters, ts epoch ms) and
+  `ask` (`{toolUseId, questions}`, the newest pending `AskUserQuestion`, answerable with `chat_answer`). Both are
+  omitted while no herdr-chat mod is live, so older apps are unaffected.
 
 ## [1.0.0] - 2026-07-12
 
