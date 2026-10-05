@@ -1,9 +1,10 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { BODY_BYTES, HISTORY_IMAGE_BYTES, IMAGE_BYTES, queueAppended, type State } from '../hooks/register'
+import { BODY_BYTES, HISTORY_IMAGE_BYTES, IMAGE_BYTES, linkWorkflowAgents, queueAppended, type State } from '../hooks/register'
 import { eventsFromTranscript } from '../hooks/transcript'
+import { linkSpawn, newAgentsState, recordWorkflow } from '../hooks/agents'
 
-const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], imageQueue: [], offline: false, inFlight: false, building: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined, historyLacksPath: false, openQuestions: new Map() })
+const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], imageQueue: [], offline: false, inFlight: false, building: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined, historyLacksPath: false, openQuestions: new Map(), agents: newAgentsState() })
 
 const MB = 1024 * 1024
 const FETCH_BODY_LIMIT = 4 * MB
@@ -216,11 +217,30 @@ describe('herdr-chat', () => {
     expect(s.imageQueue).toEqual([{ id: 'r1#0.0', img, bytes: JSON.stringify(img).length }])
   })
 
-  test('attachment-door rows and subagent rows are dropped', () => {
+  test('a linked agent’s rows are queued tagged; attachment-door rows are dropped', () => {
     const s = state('w1:p1')
-    queueAppended(s, { door: 'attachment', uuid: 'x1', message: { role: 'user', content: [] } }, undefined)
-    queueAppended(s, { door: 'response', uuid: 's1', agentId: 'sub', message: { role: 'assistant', content: [{ type: 'text', text: 'subagent' }] } }, undefined)
+    linkSpawn(s.agents, { tool_use_id: 'toolu_1', description: 'd', subagentType: 'general-purpose' }, 'aa1', 1)
+    queueAppended(s, { door: 'attachment', uuid: 'x1', agentId: 'aa1', message: { role: 'user', content: [] } }, undefined)
+    queueAppended(s, { door: 'attachment', uuid: 'x2', message: { role: 'user', content: [] } }, undefined)
     expect(s.pending).toEqual([])
+    queueAppended(s, { door: 'response', uuid: 's1', agentId: 'aa1', message: { role: 'assistant', content: [{ type: 'text', text: 'subagent' }] } }, undefined)
+    expect(s.pending).toEqual([{ type: 'assistant_text', uuid: 's1#0', text: 'subagent', agentId: 'aa1', ts: expect.any(Number) }])
+  })
+
+  test('a row from an unknown agent is held, not queued', () => {
+    const s = state('w1:p1')
+    queueAppended(s, { door: 'response', uuid: 's1', agentId: 'zz9', message: { role: 'assistant', content: [{ type: 'text', text: 'early' }] } }, undefined)
+    expect(s.pending).toEqual([])
+    expect(s.agents.held.get('zz9')?.events.length).toBe(1)
+  })
+
+  test('a row from a finished agent sets it running again, control first', () => {
+    const s = state('w1:p1')
+    linkSpawn(s.agents, { tool_use_id: 'toolu_1', description: 'd', subagentType: 'general-purpose' }, 'aa1', 1)
+    s.agents.links.get('aa1')!.status = 'done'
+    queueAppended(s, { door: 'response', uuid: 's1', agentId: 'aa1', message: { role: 'assistant', content: [{ type: 'text', text: 'again' }] } }, undefined)
+    expect(s.pending.map(e => e.type)).toEqual(['agent', 'assistant_text'])
+    expect((s.pending[0] as any).agent.status).toBe('running')
   })
 
   test('stored (rewritten) content is preferred over the incoming content', () => {
@@ -247,6 +267,72 @@ describe('herdr-chat', () => {
     await w.clock.advance(1000)
     const states = w.all().filter(e => e.type === 'state')
     expect(states).toEqual([{ type: 'state', state: 'working' }, { type: 'state', state: 'idle' }])
+  })
+
+  test('a subagent turn.complete queues its status; the main state events are unchanged', async ($, on) => {
+    const w = world(on)
+    on('turn.complete', () => ({ text: 'answer' }))
+    on('agent.spawn', () => ({ model: 'haiku', agentId: 'aa1' }))
+    await start($)
+    await w.clock.advance(2000)
+    await $.agent.spawn({ prompt: 'p', description: 'd' } as never)
+    const done = (isAborted: boolean) => $.turn.complete({ answer: 'a', durationMs: 1, isAborted, turnId: 't1', agentId: 'aa1', reason: 'completed' } as never)
+    await done(false)
+    await done(true)
+    await w.clock.advance(1000)
+    const agents = w.all().filter(e => e.type === 'agent').map((e: any) => [e.agent.agentId, e.agent.status])
+    expect(agents).toEqual([['aa1', 'running'], ['aa1', 'done'], ['aa1', 'failed']])
+    expect(w.all().filter(e => e.type === 'state')).toEqual([])
+  })
+
+  // The kit cannot answer session.append and the plugin's state is out of
+  // reach, so the tick's journal step runs on a state of the test's own, over
+  // a fake `tail` of its own.
+  test('a held row’s workflow agent links from the journal, its control first', async () => {
+    const files: Record<string, string> = {}
+    const $ = {
+      process: {
+        run: async (argv: string[]) => {
+          expect([argv[0], argv[1], argv[3], argv.length]).toEqual(['tail', '-n', '--', 5])
+          const file = files[argv[4]!]
+          if (file === undefined) return { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+          return { exitCode: 0, stdout: file.split('\n').slice(Number(argv[2]!.slice(1)) - 1).join('\n'), stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+        },
+      },
+    } as never
+    const w = { files }
+    const s = state('w1:p1')
+    recordWorkflow(s.agents, 'toolu_wf', { status: 'async_launched', taskId: 'wfu18ne1l', runId: 'wf_4ddcdf59-066', workflowName: 'tiny-two-agents', summary: 's', transcriptDir: '/p/wf' })
+    queueAppended(s, { door: 'response', uuid: 'r1', agentId: 'a3ffd04f6c0bcfe58', message: { role: 'assistant', content: [{ type: 'text', text: 'hi from agent' }] } }, undefined)
+    expect(s.pending).toEqual([])
+    // Not there yet: nothing links, the cursor stays.
+    await linkWorkflowAgents($, s)
+    expect(s.pending).toEqual([])
+    w.files['/p/wf/journal.jsonl'] = '{"type":"launched"}\n{"type":"started","agentId":"a3ffd04f6c0bcfe58","label":"Say one","phase":"Reply"}\n{"type":"res'
+    await linkWorkflowAgents($, s)
+    expect(s.pending.map(e => e.type)).toEqual(['agent', 'assistant_text'])
+    expect((s.pending[0] as any).agent).toMatchObject({ agentId: 'a3ffd04f6c0bcfe58', parentToolUseId: 'toolu_wf', kind: 'workflow', label: 'Say one', phase: 'Reply', status: 'running' })
+    expect(s.pending[1]).toMatchObject({ text: 'hi from agent', agentId: 'a3ffd04f6c0bcfe58' })
+    // The cut last line is read again, whole, next time.
+    w.files['/p/wf/journal.jsonl'] += 'ult","agentId":"a3ffd04f6c0bcfe58","result":"x"}\n'
+    s.pending = []
+    await linkWorkflowAgents($, s)
+    expect(s.pending.map(e => [e.type, (e as any).agent?.status])).toEqual([['agent', 'done']])
+  })
+
+  test('/clear resets the agents: a later completion of the old agent queues nothing', async ($, on) => {
+    const w = world(on)
+    on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+    on('turn.complete', () => ({ text: 'answer' }))
+    on('agent.spawn', () => ({ model: 'haiku', agentId: 'aa1' }))
+    await start($)
+    await w.clock.advance(2000)
+    await $.agent.spawn({ prompt: 'p', description: 'd' } as never)
+    await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+    await w.clock.advance(2000)
+    await $.turn.complete({ answer: 'a', durationMs: 1, isAborted: false, turnId: 't1', agentId: 'aa1', reason: 'completed' } as never)
+    await w.clock.advance(1000)
+    expect(w.all().filter(e => e.type === 'agent')).toEqual([])
   })
 
   test('outbox messages are submitted as the user, in order', async ($, on) => {

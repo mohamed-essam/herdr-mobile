@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { askPhone, type State } from '../hooks/register'
+import { newAgentsState } from '../hooks/agents'
 
 type Sync = { paneId: string; sessionId: string; events: { type: string; [k: string]: unknown }[] }
 type Poll = { paneId: string; toolUseId: string }
@@ -65,7 +66,7 @@ function world(on: On, opts: { pane?: boolean } = {}) {
   }
 }
 
-const state = (): State => ({ paneId: 'w1:p1', sessionId: '', cwd: '', socketPath: '/s/chat.sock', pending: [], imageQueue: [], offline: false, inFlight: false, building: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined, historyLacksPath: false, openQuestions: new Map() })
+const state = (): State => ({ paneId: 'w1:p1', sessionId: '', cwd: '', socketPath: '/s/chat.sock', pending: [], imageQueue: [], offline: false, inFlight: false, building: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined, historyLacksPath: false, openQuestions: new Map(), agents: newAgentsState() })
 
 const start = ($: any) => $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
 const ask = ($: any) => $.tool.call({ tool: 'AskUserQuestion', questions: QUESTIONS })

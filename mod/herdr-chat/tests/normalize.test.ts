@@ -12,8 +12,10 @@ describe('shouldForward', () => {
       expect(shouldForward(row({ door }) as never)).toBe(true)
     }
   })
-  test('subagent rows, meta rows and injected doors are dropped', () => {
-    expect(shouldForward(row({ agentId: 'a1' }) as never)).toBe(false)
+  test('agent rows pass; meta rows and injected doors are dropped, agent or not', () => {
+    expect(shouldForward({ door: 'response', agentId: 'aa1', message: { role: 'assistant' } } as never)).toBe(true)
+    expect(shouldForward(row({ agentId: 'aa1', door: 'attachment' }) as never)).toBe(false)
+    expect(shouldForward(row({ agentId: 'aa1', message: { role: 'user', isMeta: true } }) as never)).toBe(false)
     expect(shouldForward(row({ message: { role: 'user', isMeta: true } }) as never)).toBe(false)
     for (const door of ['attachment', 'hook-context', 'note', 'compaction', 'notice', 'command', 'tool-message']) {
       expect(shouldForward(row({ door }) as never)).toBe(false)

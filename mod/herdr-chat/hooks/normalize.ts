@@ -5,12 +5,13 @@ import { imageSize } from './imagesize'
 // `imageSizes`: [width, height] in pixels of those whose header parsed, so the
 // phone can reserve their space before the bytes arrive.
 export type ImageSizes = Record<string, [number, number]>
+// `agentId`: set on a subagent's or workflow agent's rows (see agents.ts).
 export type ChatEvent =
-  | { type: 'user_text'; uuid: string; text: string; images?: string[]; imageSizes?: ImageSizes; ts?: number }
-  | { type: 'assistant_text'; uuid: string; text: string; ts?: number }
-  | { type: 'tool_use'; uuid: string; toolUseId: string; tool: string; summary: string; ts?: number }
-  | { type: 'tool_result'; toolUseId: string; isError: boolean; preview: string; images?: string[]; imageSizes?: ImageSizes; ts?: number }
-  | { type: 'task_notice'; uuid: string; status: string; summary: string; ts?: number }
+  | { type: 'user_text'; uuid: string; text: string; images?: string[]; imageSizes?: ImageSizes; ts?: number; agentId?: string }
+  | { type: 'assistant_text'; uuid: string; text: string; ts?: number; agentId?: string }
+  | { type: 'tool_use'; uuid: string; toolUseId: string; tool: string; summary: string; ts?: number; agentId?: string }
+  | { type: 'tool_result'; toolUseId: string; isError: boolean; preview: string; images?: string[]; imageSizes?: ImageSizes; ts?: number; agentId?: string }
+  | { type: 'task_notice'; uuid: string; status: string; summary: string; ts?: number; agentId?: string }
 
 export type ChatImage = { mediaType: string; data: string }
 // Events plus the images they reference, by id.
@@ -47,11 +48,9 @@ export function summarize(tool: string, input: Record<string, unknown>): string 
 
 export function shouldForward(e: {
   door: string
-  agentId?: string
   message: { isMeta?: true; role?: string }
 }): boolean {
   return (
-    !e.agentId &&
     !e.message.isMeta &&
     FORWARDED_DOORS.has(e.door) &&
     (e.message.role === 'user' || e.message.role === 'assistant')

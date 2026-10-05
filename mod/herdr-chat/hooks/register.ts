@@ -1,4 +1,5 @@
 import type { EngineInterface, Register } from 'claude-code'
+import { linkJournal, linkSpawn, newAgentsState, recordWorkflow, releaseHeld, resetAgents, routeAgentEvents, setStatus, type AgentControl, type AgentsState, type Workflow } from './agents'
 import { normalizeBlocks, normalizeSnapshot, shouldForward, utf8Bytes, type ChatEvent, type ChatImage, type Normalized } from './normalize'
 import { addTranscriptLine, finishTranscriptHistory, HISTORY_IMAGES, newTranscriptHistory, splitPiece } from './transcript'
 
@@ -11,6 +12,8 @@ type Control =
   | { type: 'state'; state: 'working' | 'idle' }
   // An AskUserQuestion dialog the phone may answer (its tool input's questions).
   | { type: 'question'; uuid: string; toolUseId: string; questions: unknown[]; ts: number }
+  // A subagent or workflow agent linked to its parent call, or its new status.
+  | AgentControl
 type Outgoing = ChatEvent | Control
 
 // A chunk's events serialize to at most CHUNK_BYTES; a /sync body, images
@@ -65,6 +68,7 @@ export type State = {
   // Question events whose dialog race has not settled, by toolUseId: every
   // resync re-sends them (the history has no question events).
   openQuestions: Map<string, Outgoing>
+  agents: AgentsState
 }
 
 export type QueuedImage = { id: string; img: ChatImage; bytes: number }
@@ -285,6 +289,35 @@ function takeBody(s: State): { events: Outgoing[]; images: Record<string, ChatIm
   return { events, images }
 }
 
+// The workflow journal's new complete lines (one read per tick), advancing
+// the workflow's line cursor past them; none when the read fails or the file
+// is not there yet. A cut piece's last line is read again whole next time; a
+// single line over the read limit is skipped.
+async function readJournal($: EngineInterface, wf: Workflow): Promise<string[]> {
+  try {
+    const r = await $.process.run(['tail', '-n', `+${wf.journalLine}`, '--', `${wf.transcriptDir}/journal.jsonl`])
+    if (r.exitCode !== 0) return []
+    const piece = splitPiece(r.stdout, r.isStdoutTruncated)
+    // A whole piece's last element is '' or a line still being written.
+    const lines = r.isStdoutTruncated ? piece.lines : piece.lines.slice(0, -1)
+    wf.journalLine += r.isStdoutTruncated ? piece.advance : lines.length
+    return lines
+  } catch {
+    return []
+  }
+}
+
+// Links workflow agents from their journals and releases the rows held for
+// agents now linked (their control first), then ages the rest.
+export async function linkWorkflowAgents($: EngineInterface, s: State) {
+  const controls: AgentControl[] = []
+  for (const [runId, wf] of s.agents.workflows) {
+    const lines = await readJournal($, wf)
+    if (lines.length) controls.push(...linkJournal(s.agents, runId, lines, Date.now()))
+  }
+  s.pending.push(...controls, ...releaseHeld(s.agents))
+}
+
 async function tick($: EngineInterface, s: State) {
   if (s.inFlight || !s.paneId) return
   s.inFlight = true
@@ -293,6 +326,7 @@ async function tick($: EngineInterface, s: State) {
     // Offline: an empty probe. Building: a heartbeat; queued rows wait for
     // the history to go first.
     const held = s.offline || s.building
+    if (!held && s.agents.held.size) await linkWorkflowAgents($, s)
     const { events, images } = held ? { events: [], images: {} } : takeBody(s)
     const res = await $.http.fetch('http://chat/sync', {
       method: 'POST',
@@ -418,7 +452,12 @@ export function queueAppended(s: State, e: Appended, stored: { content?: unknown
   const role = e.message.role
   if (role !== 'user' && role !== 'assistant') return
   const n = normalizeBlocks(role, stored?.content ?? e.message.content, e.uuid, Date.now())
-  s.pending.push(...n.events)
+  if (e.agentId) {
+    // Its row: the agent is running (again), and its control goes first.
+    const revived = n.events.length && s.agents.links.get(e.agentId)?.status !== 'running' ? setStatus(s.agents, e.agentId, 'running', Date.now()) : null
+    if (revived) s.pending.push(revived)
+    s.pending.push(...routeAgentEvents(s.agents, e.agentId, n.events))
+  } else s.pending.push(...n.events)
   for (const [id, img] of Object.entries(n.images)) if (img.data) s.imageQueue.push(queued(id, img))
 }
 
@@ -440,6 +479,7 @@ export const register: Register = on => {
     transcriptPath: undefined,
     historyLacksPath: false,
     openQuestions: new Map(),
+    agents: newAgentsState(),
   }
 
   // Only remembers the path; the read happens at the next resync.
@@ -496,6 +536,7 @@ export const register: Register = on => {
       // named by its own classic event (whose arrival upgrades an api-form
       // stand-in).
       s.transcriptPath = undefined
+      resetAgents(s.agents)
     }
     return r
   })
@@ -526,6 +567,23 @@ export const register: Register = on => {
     return { deny: 'interrupted' }
   })
 
+  // Subagents are linked to their Agent call here: the hook only records.
+  on('agent.spawn', async ($, e, next) => {
+    const r = await next(e)
+    if (s.paneId && 'agentId' in r) {
+      const c = linkSpawn(s.agents, e, r.agentId, Date.now())
+      if (c) s.pending.push(c)
+    }
+    return r
+  })
+
+  // A workflow's agents are linked later, from its journal (see tick).
+  on('tool.call', { tool: 'Workflow' }, async ($, e, next) => {
+    const r = await next(e)
+    if (s.paneId && 'result' in r) recordWorkflow(s.agents, e.tool_use_id, r.result)
+    return r
+  })
+
   on('turn.start', async ($, e, next) => {
     const r = await next(e)
     if (s.paneId) {
@@ -537,7 +595,10 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     const r = await next(e)
-    if (s.paneId && !e.agentId) {
+    if (s.paneId && e.agentId) {
+      const c = setStatus(s.agents, e.agentId, e.isAborted ? 'failed' : 'done', Date.now())
+      if (c) s.pending.push(c)
+    } else if (s.paneId) {
       s.lastState = 'idle'
       s.pending.push({ type: 'state', state: 'idle' })
     }
