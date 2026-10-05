@@ -312,6 +312,8 @@ func (p *pane) apply(paneID, sessionID string, raw json.RawMessage, now time.Tim
 		p.applyTasks(head.Tasks)
 	case isChatEvent(head.Type) && head.AgentID != "":
 		p.applyThreadEvent(head.AgentID, head.Type, raw, now)
+	case head.Type == "snapshot" && head.AgentID != "":
+		return false // a thread is only ever sent chunked: never a main swap
 	case head.Type == "snapshot":
 		p.staging = nil
 		p.swap(paneID, head.Events, now)

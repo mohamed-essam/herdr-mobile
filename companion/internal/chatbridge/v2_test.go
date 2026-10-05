@@ -452,3 +452,17 @@ func TestDropClosesThreadSubscribers(t *testing.T) {
 	}
 	cancel()
 }
+
+// A non-chunked snapshot naming an agent is not a main swap: it is ignored.
+func TestAgentTaggedPlainSnapshotIsIgnored(t *testing.T) {
+	h := NewHub(nil)
+	h.Sync("p", "s", []json.RawMessage{hello("s"), raw(`{"type":"snapshot","events":[` + string(userText(1)) + `]}`)})
+	before, _, c := h.Subscribe("p", "")
+	c()
+	h.Sync("p", "s", []json.RawMessage{raw(`{"type":"snapshot","agentId":"aa1","events":[]}`)})
+	after, _, c2 := h.Subscribe("p", "")
+	c2()
+	if after.Epoch != before.Epoch || len(after.Events) != 1 {
+		t.Fatalf("agent-tagged snapshot swapped the main stream: before %+v after %+v", before, after)
+	}
+}

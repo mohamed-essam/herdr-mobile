@@ -159,8 +159,8 @@ func TestChatSnapshotProtocol10Shapes(t *testing.T) {
 	if a, ok := m["agents"].([]any); !ok || len(a) != 0 {
 		t.Fatalf("main snapshot agents must be []: %v", m)
 	}
-	if _, has := m["tasks"]; has {
-		t.Fatalf("nil tasks must be omitted: %v", m)
+	if tk, ok := m["tasks"].([]any); !ok || len(tk) != 0 {
+		t.Fatalf("main snapshot tasks must always be present, [] when nil: %v", m)
 	}
 	if _, has := m["agentId"]; has {
 		t.Fatalf("main snapshot has no agentId: %v", m)

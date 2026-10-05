@@ -1089,6 +1089,69 @@ func TestChatCloseWithAgentIDLeavesMainOpen(t *testing.T) {
 	}
 }
 
+// A thread the hub discards (here by a main resync) while the client has it
+// open answers a missing thread snapshot instead of going silent.
+func TestChatThreadClosedByHubSendsMissingSnapshot(t *testing.T) {
+	hub := chatbridge.NewHub(nil)
+	hub.Sync("p", "s", []json.RawMessage{
+		json.RawMessage(`{"type":"hello","sessionId":"s","cwd":"/x"}`),
+		json.RawMessage(`{"type":"snapshot","events":[]}`),
+		json.RawMessage(`{"type":"assistant_text","agentId":"aa1","uuid":"a1","text":"t"}`),
+	})
+	c, ctx := dialChat(t, hub)
+	writeJSON(t, ctx, c, `{"t":"chat_open","paneId":"p","agentId":"aa1"}`)
+	if s := readUntil(t, ctx, c, "chat_snapshot"); s["agentId"] != "aa1" || s["missing"] == true {
+		t.Fatalf("thread snapshot: %v", s)
+	}
+	hub.Sync("p", "s", []json.RawMessage{json.RawMessage(`{"type":"snapshot","events":[]}`)})
+	m := readUntil(t, ctx, c, "chat_snapshot")
+	if m["agentId"] != "aa1" || m["missing"] != true || m["hasMore"] != false || len(m["events"].([]any)) != 0 || m["paneId"] != "p" {
+		t.Fatalf("missing thread snapshot: %v", m)
+	}
+	if _, ok := m["epoch"].(float64); !ok {
+		t.Fatalf("missing snapshot epoch: %v", m)
+	}
+}
+
+// A thread the client closed itself sends nothing more when the channel closes.
+func TestChatThreadClosedByClientSendsNoMissingSnapshot(t *testing.T) {
+	hub := chatbridge.NewHub(nil)
+	hub.Sync("p", "s", []json.RawMessage{json.RawMessage(`{"type":"assistant_text","agentId":"aa1","uuid":"a1","text":"t"}`)})
+	c, ctx := dialChat(t, hub)
+	writeJSON(t, ctx, c, `{"t":"chat_open","paneId":"p","agentId":"aa1"}`)
+	readUntil(t, ctx, c, "chat_snapshot")
+	// No chat_snapshot may arrive before the pong that follows a settle window.
+	noSnapshotBeforePong := func() {
+		t.Helper()
+		time.Sleep(150 * time.Millisecond)
+		writeJSON(t, ctx, c, `{"t":"ping"}`)
+		for {
+			_, b, err := c.Read(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var m map[string]any
+			json.Unmarshal(b, &m)
+			if m["t"] == "chat_snapshot" {
+				t.Fatalf("unexpected snapshot: %v", m)
+			}
+			if m["t"] == "pong" {
+				return
+			}
+		}
+	}
+	writeJSON(t, ctx, c, `{"t":"chat_close","paneId":"p","agentId":"aa1"}`)
+	noSnapshotBeforePong()
+	// Re-opening (a replacement) is not reported as missing either.
+	writeJSON(t, ctx, c, `{"t":"chat_open","paneId":"p","agentId":"aa1"}`)
+	readUntil(t, ctx, c, "chat_snapshot")
+	writeJSON(t, ctx, c, `{"t":"chat_open","paneId":"p","agentId":"aa1"}`)
+	if s := readUntil(t, ctx, c, "chat_snapshot"); s["missing"] == true {
+		t.Fatalf("replacement reported missing: %v", s)
+	}
+	noSnapshotBeforePong()
+}
+
 func TestChatHistoryEchoesAgentID(t *testing.T) {
 	f := &fakeChat{}
 	c, ctx := dialFake(t, f)

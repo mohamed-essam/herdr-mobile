@@ -497,14 +497,35 @@ func (s *Server) openChat(ctx context.Context, c *client, paneID, agentID string
 	c.smu.Unlock()
 	sendBlocking(ctx, c, proto.ChatSnapshot(snap))
 	go func() {
+		epoch := snap.Epoch // the newest epoch this subscription has seen
 		for {
 			var u chatbridge.Update
 			select {
 			case x, ok := <-ch:
 				if !ok {
+					// The hub closed a thread (evicted, or discarded by a main
+					// resync) the client still has open: tell it the thread is
+					// gone, so it can re-open rather than freeze silently. A
+					// subscription the client stopped (close, replacement,
+					// disconnect) has stopped set and sends nothing.
+					if agentID != "" {
+						f := proto.ChatSnapshot(chatbridge.Snapshot{PaneID: paneID, AgentID: agentID, Epoch: epoch, Events: []chatbridge.Entry{}, Missing: true})
+						mu.Lock()
+						if !stopped.Load() {
+							select {
+							case c.send <- f:
+							case <-done:
+							case <-ctx.Done():
+							}
+						}
+						mu.Unlock()
+					}
 					return
 				}
 				u = x
+				if u.Epoch != 0 {
+					epoch = u.Epoch
+				}
 			case <-done:
 				return
 			}

@@ -128,8 +128,9 @@ func TermError(reqID, termID, message string) []byte {
 
 // ChatSnapshot builds chat_snapshot. A thread snapshot (AgentID set) carries
 // agentId and, when the thread is unknown, missing. A main snapshot carries
-// agents (always an array) and tasks (omitted when nil); a protocol-9 app
-// ignores both.
+// agents and tasks, both always arrays (`[]` when nil: a new session whose
+// mod sends no tasks must still clear the phone's old strip); a protocol-9
+// app ignores both.
 func ChatSnapshot(s chatbridge.Snapshot) []byte {
 	events := s.Events
 	if events == nil {
@@ -148,9 +149,11 @@ func ChatSnapshot(s chatbridge.Snapshot) []byte {
 			agents = []json.RawMessage{}
 		}
 		m["agents"] = agents
-		if s.Tasks != nil {
-			m["tasks"] = s.Tasks
+		tasks := s.Tasks
+		if tasks == nil {
+			tasks = json.RawMessage(`[]`)
 		}
+		m["tasks"] = tasks
 	}
 	return must(m)
 }
