@@ -78,11 +78,11 @@ func TestTermFrames(t *testing.T) {
 	}
 }
 
-func TestWelcomeAdvertisesProtocol9(t *testing.T) {
+func TestWelcomeAdvertisesProtocol10(t *testing.T) {
 	var got map[string]any
 	json.Unmarshal(Welcome("0.7.1", 14), &got)
-	if got["companionProtocol"].(float64) != 9 {
-		t.Fatalf("want companionProtocol 9, got %v", got["companionProtocol"])
+	if got["companionProtocol"].(float64) != 10 {
+		t.Fatalf("want companionProtocol 10, got %v", got["companionProtocol"])
 	}
 }
 
@@ -92,7 +92,7 @@ func TestChatFrames(t *testing.T) {
 	if m["t"] != "chat_snapshot" || m["epoch"].(float64) != 3 || m["events"] == nil {
 		t.Fatalf("snapshot: %v", m)
 	}
-	json.Unmarshal(ChatEvent("w1:p1", 3, chatbridge.Entry{Seq: 7, Event: json.RawMessage(`{"type":"user_text","uuid":"u","text":"hi"}`)}), &m)
+	json.Unmarshal(ChatEvent("w1:p1", "", 3, chatbridge.Entry{Seq: 7, Event: json.RawMessage(`{"type":"user_text","uuid":"u","text":"hi"}`)}), &m)
 	ev := m["event"].(map[string]any)
 	if m["t"] != "chat_event" || m["seq"].(float64) != 7 || ev["text"] != "hi" {
 		t.Fatalf("event: %v", m)
@@ -121,7 +121,7 @@ func TestChatSnapshotCarriesHasMore(t *testing.T) {
 
 func TestChatHistoryPageNeverNullEvents(t *testing.T) {
 	var got map[string]any
-	json.Unmarshal(ChatHistoryPage("r", "p", 2, nil, false, true), &got)
+	json.Unmarshal(ChatHistoryPage("r", "p", "", 2, nil, false, true), &got)
 	if got["t"] != "chat_history_page" || got["stale"] != true || got["hasMore"] != false {
 		t.Fatalf("%v", got)
 	}
@@ -129,7 +129,7 @@ func TestChatHistoryPageNeverNullEvents(t *testing.T) {
 		t.Fatalf("events: %v", got["events"])
 	}
 	got = nil
-	json.Unmarshal(ChatHistoryPage("r", "p", 2, nil, true, false), &got)
+	json.Unmarshal(ChatHistoryPage("r", "p", "", 2, nil, true, false), &got)
 	if _, has := got["stale"]; has {
 		t.Fatalf("stale must be omitted when false: %v", got)
 	}
@@ -150,5 +150,99 @@ func TestChatImageAndAnswerFrames(t *testing.T) {
 	json.Unmarshal(ChatAnswerResult("r", false, "empty"), &got)
 	if got["t"] != "chat_answer_result" || got["ok"] != false || got["error"] != "empty" {
 		t.Fatalf("%v", got)
+	}
+}
+
+func TestChatSnapshotProtocol10Shapes(t *testing.T) {
+	var m map[string]any
+	json.Unmarshal(ChatSnapshot(chatbridge.Snapshot{PaneID: "p"}), &m)
+	if a, ok := m["agents"].([]any); !ok || len(a) != 0 {
+		t.Fatalf("main snapshot agents must be []: %v", m)
+	}
+	if _, has := m["tasks"]; has {
+		t.Fatalf("nil tasks must be omitted: %v", m)
+	}
+	if _, has := m["agentId"]; has {
+		t.Fatalf("main snapshot has no agentId: %v", m)
+	}
+	m = nil
+	json.Unmarshal(ChatSnapshot(chatbridge.Snapshot{PaneID: "p",
+		Agents: []json.RawMessage{json.RawMessage(`{"id":"aa1"}`)}, Tasks: json.RawMessage(`[{"id":"t1"}]`)}), &m)
+	if len(m["agents"].([]any)) != 1 || len(m["tasks"].([]any)) != 1 {
+		t.Fatalf("agents/tasks: %v", m)
+	}
+	m = nil
+	json.Unmarshal(ChatSnapshot(chatbridge.Snapshot{PaneID: "p", AgentID: "aa1", Agents: []json.RawMessage{json.RawMessage(`{}`)}, Tasks: json.RawMessage(`[]`)}), &m)
+	if m["agentId"] != "aa1" {
+		t.Fatalf("thread snapshot agentId: %v", m)
+	}
+	if _, has := m["agents"]; has {
+		t.Fatalf("thread snapshot has no agents: %v", m)
+	}
+	if _, has := m["tasks"]; has {
+		t.Fatalf("thread snapshot has no tasks: %v", m)
+	}
+	if _, has := m["missing"]; has {
+		t.Fatalf("missing only when set: %v", m)
+	}
+	m = nil
+	json.Unmarshal(ChatSnapshot(chatbridge.Snapshot{PaneID: "p", AgentID: "zz", Missing: true}), &m)
+	if m["missing"] != true || m["agentId"] != "zz" {
+		t.Fatalf("missing: %v", m)
+	}
+}
+
+func TestChatEventAgentID(t *testing.T) {
+	e := chatbridge.Entry{Seq: 1, Event: json.RawMessage(`{}`)}
+	var m map[string]any
+	json.Unmarshal(ChatEvent("p", "", 1, e), &m)
+	if _, has := m["agentId"]; has {
+		t.Fatalf("main event has no agentId: %v", m)
+	}
+	m = nil
+	json.Unmarshal(ChatEvent("p", "aa1", 1, e), &m)
+	if m["agentId"] != "aa1" {
+		t.Fatalf("thread event: %v", m)
+	}
+}
+
+func TestChatAgentAndTasksFrames(t *testing.T) {
+	var m map[string]any
+	json.Unmarshal(ChatAgent("p", json.RawMessage(`{"id":"aa1","status":"running"}`)), &m)
+	if m["t"] != "chat_agent" || m["paneId"] != "p" || m["agent"].(map[string]any)["id"] != "aa1" {
+		t.Fatalf("chat_agent: %v", m)
+	}
+	if _, has := m["removed"]; has {
+		t.Fatalf("chat_agent update is not a removal: %v", m)
+	}
+	m = nil
+	json.Unmarshal(ChatAgentRemoved("p", "aa1"), &m)
+	if m["t"] != "chat_agent" || m["agentId"] != "aa1" || m["removed"] != true {
+		t.Fatalf("removed: %v", m)
+	}
+	m = nil
+	json.Unmarshal(ChatTasks("p", json.RawMessage(`[{"id":"t1"}]`)), &m)
+	if m["t"] != "chat_tasks" || m["paneId"] != "p" || len(m["tasks"].([]any)) != 1 {
+		t.Fatalf("chat_tasks: %v", m)
+	}
+}
+
+func TestChatHistoryPageEchoesAgentID(t *testing.T) {
+	var m map[string]any
+	json.Unmarshal(ChatHistoryPage("r", "p", "aa1", 2, nil, false, false), &m)
+	if m["agentId"] != "aa1" {
+		t.Fatalf("agentId: %v", m)
+	}
+	m = nil
+	json.Unmarshal(ChatHistoryPage("r", "p", "", 2, nil, false, false), &m)
+	if _, has := m["agentId"]; has {
+		t.Fatalf("main page has no agentId: %v", m)
+	}
+}
+
+func TestParseClientAgentID(t *testing.T) {
+	m, err := ParseClient([]byte(`{"t":"chat_open","paneId":"p","agentId":"aa1"}`))
+	if err != nil || m.AgentID != "aa1" {
+		t.Fatalf("%+v %v", m, err)
 	}
 }

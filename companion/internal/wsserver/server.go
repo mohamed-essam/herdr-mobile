@@ -70,7 +70,7 @@ type client struct {
 	send     chan []byte
 	sessions map[string]*termSession
 	smu      sync.Mutex
-	chats    map[string]func() // chat subscriptions by pane, guarded by smu
+	chats    map[string]func() // chat subscriptions by chatKey(pane, agent), guarded by smu
 }
 
 // termSession wraps a pty.Session with a closing flag so onExit can tell an
@@ -225,9 +225,9 @@ func (s *Server) readLoop(ctx context.Context, c *client) {
 		case "term_close":
 			c.closeTerm(m.TermID)
 		case "chat_open":
-			s.openChat(ctx, c, m.PaneID)
+			s.openChat(ctx, c, m.PaneID, m.AgentID)
 		case "chat_close":
-			c.closeChat(m.PaneID)
+			c.closeChat(m.PaneID, m.AgentID)
 		case "chat_send":
 			s.sendChat(c, m)
 		case "chat_history":
@@ -464,13 +464,18 @@ func (c *client) closeAll() {
 var chatForwardHook atomic.Pointer[func()]
 
 // openChat subscribes this client to a pane's chat: the snapshot first, then
-// live updates in order. Re-opening a pane replaces the previous subscription.
-func (s *Server) openChat(ctx context.Context, c *client, paneID string) {
+// live updates in order. agentID "" is the main stream, otherwise one thread.
+// Re-opening a subscription replaces it, and opening a thread also closes the
+// pane's previous thread (a client keeps at most one) but never the main one.
+func (s *Server) openChat(ctx context.Context, c *client, paneID, agentID string) {
 	if s.chat == nil || paneID == "" {
 		return
 	}
-	c.closeChat(paneID)
-	snap, ch, cancel := s.chat.Subscribe(paneID, "")
+	if agentID != "" {
+		c.closePaneThreads(paneID)
+	}
+	c.closeChat(paneID, agentID)
+	snap, ch, cancel := s.chat.Subscribe(paneID, agentID)
 	// stopped is set BEFORE cancel closes the channel, so the forwarder never
 	// delivers updates still buffered for a closed/replaced subscription.
 	//
@@ -482,7 +487,7 @@ func (s *Server) openChat(ctx context.Context, c *client, paneID string) {
 	var mu sync.Mutex
 	done := make(chan struct{})
 	c.smu.Lock()
-	c.chats[paneID] = func() {
+	c.chats[chatKey(paneID, agentID)] = func() {
 		stopped.Store(true)
 		close(done)
 		mu.Lock()
@@ -506,11 +511,17 @@ func (s *Server) openChat(ctx context.Context, c *client, paneID string) {
 			var f []byte
 			switch u.Kind {
 			case "event":
-				f = proto.ChatEvent(paneID, u.Epoch, u.Entry)
+				f = proto.ChatEvent(paneID, u.AgentID, u.Epoch, u.Entry)
 			case "state":
 				f = proto.ChatState(paneID, u.State)
 			case "snapshot":
 				f = proto.ChatSnapshot(u.Snapshot)
+			case "agent":
+				f = proto.ChatAgent(paneID, u.Agent)
+			case "agent_removed":
+				f = proto.ChatAgentRemoved(paneID, u.AgentID)
+			case "tasks":
+				f = proto.ChatTasks(paneID, u.Tasks)
 			default:
 				continue
 			}
@@ -550,11 +561,11 @@ func (s *Server) sendChat(c *client, m proto.ClientMsg) {
 
 func (s *Server) chatHistory(ctx context.Context, c *client, m proto.ClientMsg) {
 	if s.chat == nil {
-		sendBlocking(ctx, c, proto.ChatHistoryPage(m.ReqID, m.PaneID, m.Epoch, nil, false, true))
+		sendBlocking(ctx, c, proto.ChatHistoryPage(m.ReqID, m.PaneID, m.AgentID, m.Epoch, nil, false, true))
 		return
 	}
-	events, hasMore, ok := s.chat.History(m.PaneID, "", m.Epoch, m.BeforeSeq, m.Limit)
-	sendBlocking(ctx, c, proto.ChatHistoryPage(m.ReqID, m.PaneID, m.Epoch, events, hasMore, !ok))
+	events, hasMore, ok := s.chat.History(m.PaneID, m.AgentID, m.Epoch, m.BeforeSeq, m.Limit)
+	sendBlocking(ctx, c, proto.ChatHistoryPage(m.ReqID, m.PaneID, m.AgentID, m.Epoch, events, hasMore, !ok))
 }
 
 // chatImage uses sendBlocking so a burst of large image frames backpressures
@@ -581,12 +592,33 @@ func (s *Server) chatAnswer(ctx context.Context, c *client, m proto.ClientMsg) {
 	sendBlocking(ctx, c, proto.ChatAnswerResult(m.ReqID, true, ""))
 }
 
-func (c *client) closeChat(paneID string) {
+// chatKey keys client.chats: the pane, a NUL, then the agent id ("" = main).
+func chatKey(paneID, agentID string) string { return paneID + "\x00" + agentID }
+
+func (c *client) closeChat(paneID, agentID string) {
+	key := chatKey(paneID, agentID)
 	c.smu.Lock()
-	cancel := c.chats[paneID]
-	delete(c.chats, paneID)
+	cancel := c.chats[key]
+	delete(c.chats, key)
 	c.smu.Unlock()
 	if cancel != nil {
+		cancel()
+	}
+}
+
+// closePaneThreads closes the pane's thread subscriptions, leaving the main one.
+func (c *client) closePaneThreads(paneID string) {
+	prefix := paneID + "\x00"
+	var cancels []func()
+	c.smu.Lock()
+	for k, cancel := range c.chats {
+		if k != prefix && strings.HasPrefix(k, prefix) {
+			cancels = append(cancels, cancel)
+			delete(c.chats, k)
+		}
+	}
+	c.smu.Unlock()
+	for _, cancel := range cancels {
 		cancel()
 	}
 }

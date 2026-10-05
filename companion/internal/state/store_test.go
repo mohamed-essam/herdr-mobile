@@ -223,18 +223,18 @@ func TestSetSummaryFlagsKnownPaneAndSurvivesPoll(t *testing.T) {
 	s.Apply(infos(herdr.PaneInfo{PaneID: "w1:p1", WorkspaceID: "w1", Agent: "claude"}))
 	act := &Activity{Kind: "tool", Tool: "Bash", Text: "npm run build", TS: 5}
 	ask := &Ask{ToolUseID: "t1", Questions: json.RawMessage(`[{"question":"Q?"}]`)}
-	p, changed := s.SetSummary("w1:p1", act, ask)
+	p, changed := s.SetSummary("w1:p1", act, ask, 0)
 	if !changed || p.Activity == nil || p.Activity.Tool != "Bash" || p.Ask == nil || p.Ask.ToolUseID != "t1" {
 		t.Fatalf("SetSummary: changed=%v pane=%+v", changed, p)
 	}
-	if _, again := s.SetSummary("w1:p1", &Activity{Kind: "tool", Tool: "Bash", Text: "npm run build", TS: 5}, &Ask{ToolUseID: "t1", Questions: json.RawMessage(`[{"question":"Q?"}]`)}); again {
+	if _, again := s.SetSummary("w1:p1", &Activity{Kind: "tool", Tool: "Bash", Text: "npm run build", TS: 5}, &Ask{ToolUseID: "t1", Questions: json.RawMessage(`[{"question":"Q?"}]`)}, 0); again {
 		t.Fatal("an equal summary should report no change")
 	}
 	ch, _ := s.Apply(infos(herdr.PaneInfo{PaneID: "w1:p1", WorkspaceID: "w1", Agent: "claude"}))
 	if len(ch) != 0 || s.Snapshot()[0].Activity == nil || s.Snapshot()[0].Ask == nil {
 		t.Fatalf("poll lost summary: changes=%+v snap=%+v", ch, s.Snapshot())
 	}
-	if p, changed := s.SetSummary("w1:p1", nil, nil); !changed || p.Activity != nil || p.Ask != nil {
+	if p, changed := s.SetSummary("w1:p1", nil, nil, 0); !changed || p.Activity != nil || p.Ask != nil {
 		t.Fatalf("clear: %v %+v", changed, p)
 	}
 }
@@ -254,7 +254,7 @@ func TestSummaryJSONOmittedWhenEmpty(t *testing.T) {
 
 func TestSetSummaryBeforePaneAppearsAndRemovedForgets(t *testing.T) {
 	s := NewStore()
-	if _, changed := s.SetSummary("w2:p1", &Activity{Kind: "text", Text: "hi"}, nil); changed {
+	if _, changed := s.SetSummary("w2:p1", &Activity{Kind: "text", Text: "hi"}, nil, 0); changed {
 		t.Fatal("unknown pane: nothing to broadcast yet")
 	}
 	ch, _ := s.Apply(infos(herdr.PaneInfo{PaneID: "w2:p1", WorkspaceID: "w2"}))
@@ -265,5 +265,31 @@ func TestSetSummaryBeforePaneAppearsAndRemovedForgets(t *testing.T) {
 	ch, _ = s.Apply(infos(herdr.PaneInfo{PaneID: "w2:p1", WorkspaceID: "w2"}))
 	if ch[0].Pane.Activity != nil {
 		t.Fatal("a re-created pane id must not inherit the old summary")
+	}
+}
+
+func TestSetSummaryBgRunning(t *testing.T) {
+	s := NewStore()
+	s.Apply(infos(herdr.PaneInfo{PaneID: "w1:p1", WorkspaceID: "w1"}))
+	p, changed := s.SetSummary("w1:p1", nil, nil, 2)
+	if !changed || p.BgRunning != 2 {
+		t.Fatalf("bgRunning 2: changed=%v pane=%+v", changed, p)
+	}
+	if _, again := s.SetSummary("w1:p1", nil, nil, 2); again {
+		t.Fatal("same bgRunning should report no change")
+	}
+	if ch, _ := s.Apply(infos(herdr.PaneInfo{PaneID: "w1:p1", WorkspaceID: "w1"})); len(ch) != 0 || s.Snapshot()[0].BgRunning != 2 {
+		t.Fatalf("poll lost bgRunning: %+v", ch)
+	}
+	if p, changed := s.SetSummary("w1:p1", nil, nil, 0); !changed || p.BgRunning != 0 {
+		t.Fatalf("clear: %v %+v", changed, p)
+	}
+	b, _ := json.Marshal(Pane{PaneID: "p"})
+	if strings.Contains(string(b), "bgRunning") {
+		t.Fatalf("bgRunning omitted at 0: %s", b)
+	}
+	b, _ = json.Marshal(Pane{PaneID: "p", BgRunning: 3})
+	if !strings.Contains(string(b), `"bgRunning":3`) {
+		t.Fatalf("json = %s", b)
 	}
 }

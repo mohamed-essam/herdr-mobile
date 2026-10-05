@@ -325,8 +325,8 @@ func TestInitialSnapshotIncludesWorkspacesAndTabs(t *testing.T) {
 	defer c.Close(websocket.StatusNormalClosure, "")
 
 	welcome := readUntil(t, ctx, c, "welcome")
-	if welcome["companionProtocol"].(float64) != 9 {
-		t.Fatalf("want companionProtocol 9, got %v", welcome["companionProtocol"])
+	if welcome["companionProtocol"].(float64) != 10 {
+		t.Fatalf("want companionProtocol 10, got %v", welcome["companionProtocol"])
 	}
 	ws := readUntil(t, ctx, c, "workspaces")
 	arr := ws["workspaces"].([]any)
@@ -729,16 +729,18 @@ func TestChatReopenDropsStaleFramesFromOldSubscription(t *testing.T) {
 // cancel does not close the channel, so tests can push into a "cancelled"
 // subscription and prove the server no longer forwards it.
 type fakeChat struct {
-	mu   sync.Mutex
-	subs []chan chatbridge.Update
+	mu     sync.Mutex
+	subs   []chan chatbridge.Update
+	agents []string // agentID each subscription was opened with
 }
 
-func (f *fakeChat) Subscribe(paneID, _ string) (chatbridge.Snapshot, <-chan chatbridge.Update, func()) {
+func (f *fakeChat) Subscribe(paneID, agentID string) (chatbridge.Snapshot, <-chan chatbridge.Update, func()) {
 	ch := make(chan chatbridge.Update, 16)
 	f.mu.Lock()
 	f.subs = append(f.subs, ch)
+	f.agents = append(f.agents, agentID)
 	f.mu.Unlock()
-	return chatbridge.Snapshot{PaneID: paneID, State: "idle"}, ch, func() {}
+	return chatbridge.Snapshot{PaneID: paneID, AgentID: agentID, State: "idle"}, ch, func() {}
 }
 
 func (f *fakeChat) Send(string, string) error { return nil }
@@ -813,10 +815,10 @@ func TestChatCloseIsABarrierAgainstInFlightForwarding(t *testing.T) {
 	defer cancel()
 	for i := 0; i < 3000; i++ {
 		c := &client{send: make(chan []byte, 64), chats: map[string]func(){}}
-		s.openChat(ctx, c, "p")
+		s.openChat(ctx, c, "p", "")
 		<-c.send // snapshot
 		f.sub(i) <- staleUpdate()
-		c.closeChat("p")
+		c.closeChat("p", "")
 		n := len(c.send)
 		for j := 0; j < 20; j++ {
 			runtime.Gosched()
@@ -847,11 +849,11 @@ func TestChatCloseWinsAgainstParkedForwarder(t *testing.T) {
 	defer cancel()
 	for i := 0; i < 200; i++ {
 		c := &client{send: make(chan []byte, 64), chats: map[string]func(){}}
-		s.openChat(ctx, c, "p")
+		s.openChat(ctx, c, "p", "")
 		<-c.send // snapshot
 		f.sub(i) <- staleUpdate()
 		<-parked
-		c.closeChat("p")
+		c.closeChat("p", "")
 		release <- struct{}{}
 		time.Sleep(time.Millisecond)
 		if len(c.send) != 0 {
@@ -974,5 +976,125 @@ func TestOldClientGetsNoNewFrameTypes(t *testing.T) {
 		if newTypes[m["t"]] {
 			t.Fatalf("old client got new frame: %v", m)
 		}
+	}
+}
+
+func seqUpdate(agentID string, seq int) chatbridge.Update {
+	return chatbridge.Update{Kind: "event", Epoch: 1, AgentID: agentID, Entry: chatbridge.Entry{Seq: seq, Event: json.RawMessage(`{"type":"user_text","uuid":"u","text":"x"}`)}}
+}
+
+func writeJSON(t *testing.T, ctx context.Context, c *websocket.Conn, s string) {
+	t.Helper()
+	if err := c.Write(ctx, websocket.MessageText, []byte(s)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestChatMainStreamFansAgentAndTaskFrames(t *testing.T) {
+	f := &fakeChat{}
+	c, ctx := dialFake(t, f)
+	writeJSON(t, ctx, c, `{"t":"chat_open","paneId":"p"}`)
+	snap := readUntil(t, ctx, c, "chat_snapshot")
+	if _, has := snap["agentId"]; has {
+		t.Fatalf("main snapshot must not carry agentId: %v", snap)
+	}
+	if a, ok := snap["agents"].([]any); !ok || len(a) != 0 {
+		t.Fatalf("agents: %v", snap)
+	}
+	f.sub(0) <- chatbridge.Update{Kind: "agent", AgentID: "aa1", Agent: json.RawMessage(`{"id":"aa1","status":"running"}`)}
+	ag := readUntil(t, ctx, c, "chat_agent")
+	if ag["agent"].(map[string]any)["id"] != "aa1" {
+		t.Fatalf("chat_agent: %v", ag)
+	}
+	f.sub(0) <- chatbridge.Update{Kind: "agent_removed", AgentID: "aa1"}
+	rm := readUntil(t, ctx, c, "chat_agent")
+	if rm["removed"] != true || rm["agentId"] != "aa1" {
+		t.Fatalf("removal: %v", rm)
+	}
+	f.sub(0) <- chatbridge.Update{Kind: "tasks", Tasks: json.RawMessage(`[{"id":"t1"}]`)}
+	tk := readUntil(t, ctx, c, "chat_tasks")
+	if len(tk["tasks"].([]any)) != 1 {
+		t.Fatalf("chat_tasks: %v", tk)
+	}
+	// A protocol-9 client (never sends agentId) sees no agentId on main events.
+	f.sub(0) <- seqUpdate("", 5)
+	ev := readUntil(t, ctx, c, "chat_event")
+	if _, has := ev["agentId"]; has {
+		t.Fatalf("main event must not carry agentId: %v", ev)
+	}
+}
+
+func TestChatThreadOpenGetsThreadSnapshotAndOnlyItsEvents(t *testing.T) {
+	f := &fakeChat{}
+	c, ctx := dialFake(t, f)
+	writeJSON(t, ctx, c, `{"t":"chat_open","paneId":"p","agentId":"aa1"}`)
+	snap := readUntil(t, ctx, c, "chat_snapshot")
+	if snap["agentId"] != "aa1" {
+		t.Fatalf("thread snapshot: %v", snap)
+	}
+	if _, has := snap["agents"]; has {
+		t.Fatalf("thread snapshot has no agents: %v", snap)
+	}
+	f.mu.Lock()
+	got := f.agents[0]
+	f.mu.Unlock()
+	if got != "aa1" {
+		t.Fatalf("subscribed with %q", got)
+	}
+	f.sub(0) <- seqUpdate("aa1", 3)
+	ev := readUntil(t, ctx, c, "chat_event")
+	if ev["agentId"] != "aa1" || ev["seq"].(float64) != 3 {
+		t.Fatalf("thread event: %v", ev)
+	}
+}
+
+func TestChatOpeningSecondThreadClosesFirstButNotMain(t *testing.T) {
+	f := &fakeChat{}
+	c, ctx := dialFake(t, f)
+	writeJSON(t, ctx, c, `{"t":"chat_open","paneId":"p"}`)
+	readUntil(t, ctx, c, "chat_snapshot")
+	writeJSON(t, ctx, c, `{"t":"chat_open","paneId":"p","agentId":"aa1"}`)
+	readUntil(t, ctx, c, "chat_snapshot")
+	writeJSON(t, ctx, c, `{"t":"chat_open","paneId":"p","agentId":"bb2"}`)
+	if s := readUntil(t, ctx, c, "chat_snapshot"); s["agentId"] != "bb2" {
+		t.Fatalf("second thread snapshot: %v", s)
+	}
+	f.sub(1) <- seqUpdate("aa1", 50) // first thread: closed
+	time.Sleep(150 * time.Millisecond)
+	f.sub(2) <- seqUpdate("bb2", 51)
+	if ev := readUntil(t, ctx, c, "chat_event"); ev["seq"].(float64) != 51 {
+		t.Fatalf("first thread leaked after second opened: %v", ev)
+	}
+	f.sub(0) <- seqUpdate("", 52) // main stays live
+	if ev := readUntil(t, ctx, c, "chat_event"); ev["seq"].(float64) != 52 {
+		t.Fatalf("main stream lost: %v", ev)
+	}
+}
+
+func TestChatCloseWithAgentIDLeavesMainOpen(t *testing.T) {
+	f := &fakeChat{}
+	c, ctx := dialFake(t, f)
+	writeJSON(t, ctx, c, `{"t":"chat_open","paneId":"p"}`)
+	readUntil(t, ctx, c, "chat_snapshot")
+	writeJSON(t, ctx, c, `{"t":"chat_open","paneId":"p","agentId":"aa1"}`)
+	readUntil(t, ctx, c, "chat_snapshot")
+	writeJSON(t, ctx, c, `{"t":"chat_close","paneId":"p","agentId":"aa1"}`)
+	writeJSON(t, ctx, c, `{"t":"ping"}`)
+	readUntil(t, ctx, c, "pong")
+	f.sub(1) <- seqUpdate("aa1", 60)
+	time.Sleep(150 * time.Millisecond)
+	f.sub(0) <- seqUpdate("", 61)
+	if ev := readUntil(t, ctx, c, "chat_event"); ev["seq"].(float64) != 61 {
+		t.Fatalf("closed thread leaked or main closed: %v", ev)
+	}
+}
+
+func TestChatHistoryEchoesAgentID(t *testing.T) {
+	f := &fakeChat{}
+	c, ctx := dialFake(t, f)
+	writeJSON(t, ctx, c, `{"t":"chat_history","reqId":"r","paneId":"p","agentId":"aa1","epoch":1,"beforeSeq":9,"limit":5}`)
+	pg := readUntil(t, ctx, c, "chat_history_page")
+	if pg["agentId"] != "aa1" {
+		t.Fatalf("page: %v", pg)
 	}
 }

@@ -29,6 +29,9 @@ type Pane struct {
 	// while no mod is live). omitempty keeps older apps unaffected.
 	Activity *Activity `json:"activity,omitempty"`
 	Ask      *Ask      `json:"ask,omitempty"`
+	// BgRunning counts the pane's running background tasks (dashboard badge);
+	// omitted at 0.
+	BgRunning int `json:"bgRunning,omitempty"`
 }
 
 // Activity is a one-line summary of a pane's latest chat event. Kind is
@@ -49,8 +52,9 @@ type Ask struct {
 }
 
 type summary struct {
-	activity *Activity
-	ask      *Ask
+	activity  *Activity
+	ask       *Ask
+	bgRunning int
 }
 
 func sameActivity(a, b *Activity) bool {
@@ -138,7 +142,7 @@ func (s *Store) Apply(infos []herdr.PaneInfo) ([]Change, []Transition) {
 		np := toPane(i)
 		np.Chat = s.chat[np.PaneID]
 		sum := s.summary[np.PaneID]
-		np.Activity, np.Ask = sum.activity, sum.ask
+		np.Activity, np.Ask, np.BgRunning = sum.activity, sum.ask, sum.bgRunning
 		seen[np.PaneID] = true
 		old, existed := s.panes[np.PaneID]
 		if !existed {
@@ -191,11 +195,11 @@ func (s *Store) SetChat(paneID string, on bool) (Pane, bool) {
 	return p, true
 }
 
-// SetSummary records the pane's latest activity and pending question (nil
+// SetSummary records the pane's latest activity, running background-task count and pending question (nil
 // clears). Like SetChat it reports the updated pane and true only when a
 // known pane's summary actually changed, and keeps a summary set before herdr
 // reports the pane.
-func (s *Store) SetSummary(paneID string, activity *Activity, ask *Ask) (Pane, bool) {
+func (s *Store) SetSummary(paneID string, activity *Activity, ask *Ask, bgRunning int) (Pane, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Keep the stored pointers when the value is unchanged, so Apply's pane
@@ -207,16 +211,16 @@ func (s *Store) SetSummary(paneID string, activity *Activity, ask *Ask) (Pane, b
 	if sameAsk(old.ask, ask) {
 		ask = old.ask
 	}
-	if activity == nil && ask == nil {
+	if activity == nil && ask == nil && bgRunning == 0 {
 		delete(s.summary, paneID)
 	} else {
-		s.summary[paneID] = summary{activity: activity, ask: ask}
+		s.summary[paneID] = summary{activity: activity, ask: ask, bgRunning: bgRunning}
 	}
 	p, ok := s.panes[paneID]
-	if !ok || (sameActivity(p.Activity, activity) && sameAsk(p.Ask, ask)) {
+	if !ok || (sameActivity(p.Activity, activity) && sameAsk(p.Ask, ask) && p.BgRunning == bgRunning) {
 		return Pane{}, false
 	}
-	p.Activity, p.Ask = activity, ask
+	p.Activity, p.Ask, p.BgRunning = activity, ask, bgRunning
 	s.panes[paneID] = p
 	return p, true
 }
