@@ -1,6 +1,6 @@
 import type { EngineInterface, Register } from 'claude-code'
 import { agentControls, linkFromMeta, linkJournal, linkSpawn, newAgentsState, recordWorkflow, releaseHeld, resetAgents, routeAgentEvents, setStatus, type AgentControl, type AgentsState, type Workflow } from './agents'
-import { listStatus, newestAgents, parseListing, runningSubagentTasks, THREAD_EVENTS, type AgentFile } from './resync'
+import { listStatus, newestAgents, parseListing, resyncTasks, THREAD_EVENTS, type AgentFile } from './resync'
 import { expireTasks, noticeStatus, taskFromLaunch, taskFromNotice, tasksControl, type TasksControl, type TasksState } from './tasks'
 import { normalizeBlocks, normalizeSnapshot, shouldForward, utf8Bytes, type ChatEvent, type ChatImage, type Normalized } from './normalize'
 import { addTranscriptLine, finishTranscriptHistory, HISTORY_IMAGES, newTranscriptHistory, splitPiece, type FinishedHistory, type TranscriptOpts } from './transcript'
@@ -76,8 +76,18 @@ export type State = {
   agents: AgentsState
   // Cleared only by /clear and /resume, never by a resync.
   tasks: TasksState
-  // A tasks control has been queued at some point (even an empty one).
+  // The tasks have changed at some point (even to an empty list): every
+  // resync sends them, as the companion may hold a list.
   tasksQueued: boolean
+  // Agent thread snapshots, sent after `pending` in what room a body has
+  // left (low priority: live rows never wait behind them).
+  threadQueue: Outgoing[]
+  // The companion takes agents, threads and tasks (its /sync answer says
+  // `threads: true`; an older one would read a thread snapshot as the main
+  // one). Until then none of them is queued: they are dropped, and
+  // `threadsMissed` asks for a resync once it says so.
+  threads: boolean
+  threadsMissed: boolean
 }
 
 export type QueuedImage = { id: string; img: ChatImage; bytes: number }
@@ -88,11 +98,23 @@ function queued(id: string, img: ChatImage): QueuedImage {
 
 const SYNC_MS = 1000
 
+function isV2(ev: Outgoing): boolean {
+  return ev.type === 'agent' || ev.type === 'tasks' || ('agentId' in ev && ev.agentId !== undefined)
+}
+
+// Queues agent rows and controls, and tasks controls, only for a companion
+// that takes them (see State.threads).
+function queueV2(s: State, events: readonly Outgoing[]) {
+  if (!events.length) return
+  if (s.threads) s.pending.push(...events)
+  else s.threadsMissed = true
+}
+
 // Queues the tasks as they stand; one still queued from earlier is dropped.
 function queueTasks(s: State) {
-  s.pending = s.pending.filter(ev => ev.type !== 'tasks')
-  s.pending.push(tasksControl(s.tasks))
   s.tasksQueued = true
+  s.pending = s.pending.filter(ev => ev.type !== 'tasks')
+  queueV2(s, [tasksControl(s.tasks)])
 }
 
 async function resolveSocket($: EngineInterface): Promise<string> {
@@ -218,6 +240,7 @@ export function chunkEvents(events: readonly ChatEvent[]): ChatEvent[][] {
 function resync($: EngineInterface, s: State) {
   s.pending = []
   s.imageQueue = []
+  s.threadQueue = []
   if (s.building) {
     s.needResync = true
     return
@@ -248,19 +271,29 @@ async function buildHistory($: EngineInterface, s: State) {
     } catch {
       agents = null
     }
-    if (agents) head.push(...agents.head)
     // The tasks as they stand (the history has none; a resync never clears
-    // them), once any have been queued: the companion may hold a list.
-    if (agents?.tasksChanged) s.tasksQueued = true
-    if (s.tasksQueued) head.push(tasksControl(s.tasks))
+    // them) once they have changed, the running subagents `$.agent.list()`
+    // knows merged in (in this control only: a foreground one never gets a
+    // notice to end it).
+    const tasks = agents ? resyncTasks(s.tasks, agents.list, s.agents, Date.now()) : { control: tasksControl(s.tasks), extra: false }
+    const sendTasks = s.tasksQueued || tasks.extra
+    // All of it only for a companion that takes it (see State.threads): the
+    // agent controls ahead of the rows queued meanwhile, the threads behind
+    // everything (s.threadQueue).
+    const v2: Outgoing[] = [...(agents?.controls ?? []), ...(sendTasks ? [tasks.control] : [])]
+    if (s.threads) {
+      head.push(...v2)
+      // The companion now holds a list: later resyncs replace it.
+      if (sendTasks) s.tasksQueued = true
+    } else if (v2.length || agents?.threads.length) s.threadsMissed = true
+    s.threadQueue = s.threads && agents ? agents.threads : []
     // A question queued during the build is in both: send it once, here; the
     // same for a tasks control.
-    const queued = s.pending.filter(ev => !(ev.type === 'tasks' && s.tasksQueued) && !(ev.type === 'question' && s.openQuestions.has(ev.toolUseId)))
+    const queued = s.pending.filter(ev => !(ev.type === 'tasks' && s.threads && sendTasks) && !(ev.type === 'question' && s.openQuestions.has(ev.toolUseId)))
     s.pending = [...head, ...queued]
-    // Thread images share the history's window (see HISTORY_IMAGES).
-    const allEvents = agents ? [...events, ...agents.events] : events
-    const images = agents ? { ...history.images, ...agents.images } : history.images
-    s.imageQueue = [...historyImages(allEvents, images), ...s.imageQueue]
+    // Thread images get what room the history's own leave (see historyImages).
+    const threaded = s.threads && agents ? agents : null
+    s.imageQueue = [...historyImages(events, history.images, threaded?.events ?? [], threaded?.images ?? {}), ...s.imageQueue]
   } catch {
     // A failed session read: retry on the next tick.
     s.needResync = true
@@ -306,11 +339,11 @@ async function listAgentFiles($: EngineInterface, dir: string, suffix: string, t
 // subagents from their meta files and the workflow agents from the journals
 // of the runs the transcript launched (each run recorded, so its later agents
 // link live), takes each one's status from `$.agent.list()` where it has
-// one, and replays the threads of the newest (see THREADS_MAX). Every path
+// one, and reads the threads of the newest (see THREADS_MAX). Every path
 // is built from `sessionDir` and an id that is a plain one. Returns every
-// agent's control followed by the thread snapshots, the threads' events and
-// images, and whether running subagents were added to the tasks. A failed
-// listing or read skips that agent or run.
+// agent's control, the thread snapshots, the threads' events and images,
+// and `$.agent.list()`'s answer. A failed listing or read skips that agent
+// or run.
 async function rebuildAgents($: EngineInterface, s: State, sessionDir: string, runs: Map<string, string>) {
   const now = Date.now()
   const subagents = `${sessionDir}/subagents`
@@ -334,7 +367,8 @@ async function rebuildAgents($: EngineInterface, s: State, sessionDir: string, r
     const status = listStatus(info.status)
     if (status) setStatus(s.agents, info.id, status, now)
   }
-  const head: Outgoing[] = agentControls(s.agents)
+  const controls: Outgoing[] = agentControls(s.agents)
+  const threads: Outgoing[] = []
   const events: ChatEvent[] = []
   const images: Record<string, ChatImage> = {}
   for (const f of newestAgents(files, s.agents)) {
@@ -347,21 +381,26 @@ async function rebuildAgents($: EngineInterface, s: State, sessionDir: string, r
     if (!thread) continue
     const tagged: ChatEvent[] = []
     for (const ev of thread.events.slice(-THREAD_EVENTS)) tagged.push({ ...ev, agentId: f.id })
-    head.push(...snapshot(tagged, f.id))
+    threads.push(...snapshot(tagged, f.id))
     events.push(...tagged)
     Object.assign(images, thread.images)
   }
-  return { head, events, images, tasksChanged: runningSubagentTasks(s.tasks, list, s.agents, now) }
+  return { controls, threads, events, images, list }
 }
 
 // The history images to send (see HISTORY_IMAGE_BYTES): the newest of those
 // the sent events reference, newest first, skipping empty and over-IMAGE_BYTES
-// ones (never sent), until the next would pass the companion's byte cap.
-export function historyImages(events: readonly ChatEvent[], images: Record<string, ChatImage>): QueuedImage[] {
-  const referenced = new Set<string>()
-  for (const ev of events) if ('images' in ev) for (const id of ev.images ?? []) referenced.add(id)
-  // Entries keep history order (ids are never integer-like keys).
-  const newest = Object.entries(images).filter(([id]) => referenced.has(id)).slice(-HISTORY_IMAGES).reverse()
+// ones (never sent), until the next would pass the companion's byte cap. The
+// main history's fill the window first; the agent threads' (`threadEvents`,
+// `threadImages`) get only what is left of it, newest first.
+export function historyImages(
+  events: readonly ChatEvent[],
+  images: Record<string, ChatImage>,
+  threadEvents: readonly ChatEvent[] = [],
+  threadImages: Record<string, ChatImage> = {},
+): QueuedImage[] {
+  const main = newestReferenced(events, images, HISTORY_IMAGES)
+  const newest = [...main, ...newestReferenced(threadEvents, threadImages, HISTORY_IMAGES - main.length)]
   const out: QueuedImage[] = []
   let stored = 0
   for (const [id, img] of newest) {
@@ -374,9 +413,20 @@ export function historyImages(events: readonly ChatEvent[], images: Record<strin
   return out
 }
 
+// Up to `n` of the images the events reference, newest first (entries keep
+// history order: ids are never integer-like keys).
+function newestReferenced(events: readonly ChatEvent[], images: Record<string, ChatImage>, n: number): [string, ChatImage][] {
+  if (n <= 0) return []
+  const referenced = new Set<string>()
+  for (const ev of events) if ('images' in ev) for (const id of ev.images ?? []) referenced.add(id)
+  return Object.entries(images).filter(([id]) => referenced.has(id)).slice(-n).reverse()
+}
+
 // Takes the next /sync body's share of the queues: rows up to (not past) a
-// second snapshot chunk, then images while the body stays ≤ BODY_BYTES. An
-// image that doesn't fit waits; one over IMAGE_BYTES is dropped.
+// second snapshot chunk, then images while the body stays ≤ BODY_BYTES (an
+// image that doesn't fit waits; one over IMAGE_BYTES is dropped), then, once
+// `pending` is empty, thread snapshot parts in order while the body still
+// has room (the first one goes even alone in a body too small for it).
 function takeBody(s: State): { events: Outgoing[]; images: Record<string, ChatImage> } {
   let bytes = utf8Bytes(JSON.stringify({ paneId: s.paneId, sessionId: s.sessionId, events: [], images: {} }))
   let n = 0
@@ -406,6 +456,16 @@ function takeBody(s: State): { events: Outgoing[]; images: Record<string, ChatIm
     count++
   }
   s.imageQueue = rest
+  if (!s.pending.length) {
+    let t = 0
+    for (; t < s.threadQueue.length; t++) {
+      const size = utf8Bytes(JSON.stringify(s.threadQueue[t])) + (events.length + t ? 1 : 0)
+      if ((events.length || t) && bytes + size > BODY_BYTES) break
+      bytes += size
+    }
+    events.push(...s.threadQueue.slice(0, t))
+    s.threadQueue = s.threadQueue.slice(t)
+  }
   return { events, images }
 }
 
@@ -435,7 +495,7 @@ export async function linkWorkflowAgents($: EngineInterface, s: State) {
     const lines = await readJournal($, wf)
     if (lines.length) controls.push(...linkJournal(s.agents, runId, lines, Date.now()))
   }
-  s.pending.push(...controls, ...releaseHeld(s.agents))
+  queueV2(s, [...controls, ...releaseHeld(s.agents)])
 }
 
 async function tick($: EngineInterface, s: State) {
@@ -465,9 +525,24 @@ async function tick($: EngineInterface, s: State) {
       s.offline = false
       resync($, s)
     }
-    const { messages = [], resync: again } = JSON.parse(res.text) as {
+    const { messages = [], resync: again, threads } = JSON.parse(res.text) as {
       messages?: { id: string; text: string }[]
       resync?: boolean
+      threads?: boolean
+    }
+    // A companion that takes agents, threads and tasks says so in every
+    // answer; the first such answer resends what was dropped before it.
+    if (threads !== true) {
+      // None (any more): what is still queued for it is dropped too.
+      if (s.threads) s.pending = s.pending.filter(ev => !isV2(ev))
+      s.threads = false
+      s.threadQueue = []
+    } else if (!s.threads) {
+      s.threads = true
+      if (s.threadsMissed) {
+        s.threadsMissed = false
+        s.needResync = true
+      }
     }
     // The companion has no hello for this session (e.g. it restarted
     // between two ticks): rebuild and resend. A heartbeat sent while the
@@ -483,6 +558,7 @@ async function tick($: EngineInterface, s: State) {
     s.offline = true
     s.pending = []
     s.imageQueue = []
+    s.threadQueue = []
   } finally {
     s.inFlight = false
   }
@@ -576,8 +652,7 @@ export function queueAppended(s: State, e: Appended, stored: { content?: unknown
   if (e.agentId) {
     // Its row: the agent is running (again), and its control goes first.
     const revived = n.events.length && s.agents.links.get(e.agentId)?.status !== 'running' ? setStatus(s.agents, e.agentId, 'running', Date.now()) : null
-    if (revived) s.pending.push(revived)
-    s.pending.push(...routeAgentEvents(s.agents, e.agentId, n.events))
+    queueV2(s, [...(revived ? [revived] : []), ...routeAgentEvents(s.agents, e.agentId, n.events)])
   } else {
     s.pending.push(...n.events)
     let changed = false
@@ -587,7 +662,7 @@ export function queueAppended(s: State, e: Appended, stored: { content?: unknown
       changed = taskFromNotice(s.tasks, ev, now) || changed
       // A subagent's notice ends that agent too, when its task id is a linked one.
       const ended = ev.taskId ? setStatus(s.agents, ev.taskId, noticeStatus(ev.status), now) : null
-      if (ended) s.pending.push(ended)
+      if (ended) queueV2(s, [ended])
     }
     if (changed) queueTasks(s)
   }
@@ -615,6 +690,9 @@ export const register: Register = on => {
     agents: newAgentsState(),
     tasks: new Map(),
     tasksQueued: false,
+    threadQueue: [],
+    threads: false,
+    threadsMissed: false,
   }
 
   // Only remembers the path; the read happens at the next resync.
@@ -666,6 +744,7 @@ export const register: Register = on => {
     if (s.paneId && (e.reason === 'clear' || e.reason === 'resume')) {
       s.pending = []
       s.imageQueue = []
+      s.threadQueue = []
       s.needResync = true
       // The new session's transcript is found by its new id at the resync, or
       // named by its own classic event (whose arrival upgrades an api-form
@@ -709,7 +788,7 @@ export const register: Register = on => {
     const r = await next(e)
     if (s.paneId && 'agentId' in r) {
       const c = linkSpawn(s.agents, e, r.agentId, Date.now())
-      if (c) s.pending.push(c)
+      if (c) queueV2(s, [c])
     }
     return r
   })
@@ -754,7 +833,7 @@ export const register: Register = on => {
     const r = await next(e)
     if (s.paneId && e.agentId) {
       const c = setStatus(s.agents, e.agentId, e.isAborted ? 'failed' : 'done', Date.now())
-      if (c) s.pending.push(c)
+      if (c) queueV2(s, [c])
     } else if (s.paneId) {
       s.lastState = 'idle'
       s.pending.push({ type: 'state', state: 'idle' })

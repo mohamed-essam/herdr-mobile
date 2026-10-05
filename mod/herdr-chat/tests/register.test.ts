@@ -1,11 +1,11 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { BODY_BYTES, HISTORY_IMAGE_BYTES, IMAGE_BYTES, linkWorkflowAgents, queueAppended, type State } from '../hooks/register'
+import { BODY_BYTES, HISTORY_IMAGE_BYTES, historyImages, IMAGE_BYTES, linkWorkflowAgents, queueAppended, type State } from '../hooks/register'
 import { eventsFromTranscript } from '../hooks/transcript'
 import { linkSpawn, newAgentsState, recordWorkflow } from '../hooks/agents'
 import { taskFromLaunch } from '../hooks/tasks'
 
-const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], imageQueue: [], offline: false, inFlight: false, building: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined, historyLacksPath: false, openQuestions: new Map(), agents: newAgentsState(), tasks: new Map(), tasksQueued: false })
+const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], imageQueue: [], offline: false, inFlight: false, building: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined, historyLacksPath: false, openQuestions: new Map(), agents: newAgentsState(), tasks: new Map(), tasksQueued: false, threadQueue: [], threads: true, threadsMissed: false })
 
 const MB = 1024 * 1024
 const FETCH_BODY_LIMIT = 4 * MB
@@ -37,7 +37,7 @@ const RESYNC = ['hello', 'snapshot_begin', 'snapshot_chunk', 'snapshot_end']
 
 // Wires the world beneath the plugin: env, clock, session reads, and a fake
 // companion that records each /sync body and answers with queued messages.
-function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boolean; xdg?: string; env?: Record<string, string> } = {}) {
+function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boolean; xdg?: string; env?: Record<string, string>; threads?: boolean } = {}) {
   if (opts.xdg) mock.env(on, { HERDR_PANE_ID: 'w1:p1', XDG_RUNTIME_DIR: opts.xdg })
   else if (opts.nosock) mock.env(on, { HERDR_PANE_ID: 'w1:p1' })
   else mock.env(on, opts.pane === undefined ? { HERDR_PANE_ID: 'w1:p1', HERDR_MOBILE_CHAT_SOCK: '/s/chat.sock', ...opts.env } : opts.pane ? { HERDR_PANE_ID: opts.pane, HERDR_MOBILE_CHAT_SOCK: '/s/chat.sock' } : {})
@@ -46,7 +46,8 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
   const sizes: number[] = []
   const outbox: { id: string; text: string }[] = []
   const submitted: string[] = []
-  const answer = { resync: false }
+  // `threads`: the answer says the companion takes agents, threads and tasks.
+  const answer = { resync: false, threads: opts.threads ?? true }
   const current = { id: 'sess-1', history: [
     { role: 'user', content: [{ type: 'text', text: 'earlier question' }] },
     { role: 'assistant', content: [{ type: 'text', text: 'earlier answer' }] },
@@ -138,7 +139,7 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
     sizes.push(String(e.init?.body).length)
     syncs.push(JSON.parse(String(e.init?.body)))
     const messages = outbox.splice(0)
-    const body = answer.resync ? { messages, resync: true } : { messages }
+    const body = { messages, ...(answer.resync ? { resync: true } : {}), ...(answer.threads ? { threads: true } : {}) }
     answer.resync = false
     return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(body) } }
   })
@@ -423,8 +424,9 @@ describe('herdr-chat', () => {
     ])
   })
 
-  test('agent.list sets the status; a running subagent is listed as a running task, after the threads', async ($, on) => {
+  test('agent.list sets the status; a running subagent is listed as a running task in the resync’s control only', async ($, on) => {
     const w = world(on)
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { backgroundTaskId: 'b4prbe90d' }, text: '' }) as never)
     sessionFiles(w)
     w.agentList.push({ id: 'aa1', status: 'running', description: 'Background echo test', type: 'general-purpose' })
     await startAt($)
@@ -433,7 +435,73 @@ describe('herdr-chat', () => {
     expect(all.filter(e => e.type === 'agent').map(e => [e.agent.agentId, e.agent.status])).toEqual([['aa1', 'running'], ['bb2', 'done']])
     const tasks = all.findIndex(e => e.type === 'tasks')
     expect(all[tasks].tasks).toMatchObject([{ id: 'aa1', kind: 'subagent', label: 'Background echo test', toolUseId: 'toolu_A', status: 'running' }])
-    expect(tasks > all.findLastIndex(e => e.type === 'snapshot_end')).toBe(true)
+    expect(tasks > all.findLastIndex(e => e.type === 'agent')).toBe(true)
+    // A later tasks emission holds the launches alone (a foreground subagent
+    // would never get a notice to end it).
+    await $.tool.call({ tool: 'Bash', command: 'sleep 25', run_in_background: true } as never)
+    await w.clock.advance(1000)
+    const last = tasksOf(w.all() as never).at(-1)!
+    expect(last.tasks.map(t => t.id)).toEqual(['b4prbe90d'])
+  })
+
+  test('live rows queued while threads drain go out in the next body, not after every thread', async ($, on) => {
+    const w = world(on)
+    on('turn.start', ($, e) => ({ turnId: e.turnId }))
+    w.files[`${SESS}.jsonl`] = JSON.stringify({ type: 'user', uuid: 'u1', timestamp: '2026-10-05T09:20:00.000Z', message: { role: 'user', content: 'go' } })
+    // Three threads of 40 rows of 64 KB text (~2.6 MB, two chunks) each.
+    for (const id of ['d1', 'd2', 'd3']) {
+      w.files[`${SESS}/subagents/agent-${id}.meta.json`] = meta(`toolu_${id}`, id)
+      w.files[`${SESS}/subagents/agent-${id}.jsonl`] = Array.from({ length: 40 }, (_, i) => sideRow(id, `x${id}${i}`, 'assistant', 'y'.repeat(64 * 1024 - 8))).join('\n') + '\n'
+    }
+    await startAt($)
+    await w.clock.advance(2000)
+    const threadEnds = () => w.syncs.map((s, i) => (s.events.some(e => e.type === 'snapshot_end' && e.agentId) ? i : -1)).filter(i => i >= 0)
+    expect(threadEnds().length).toBe(1)
+    await $.turn.start({ text: 'hi', turnId: 't1' })
+    await w.clock.advance(1000)
+    expect(w.kinds(w.syncs.length - 1)[0]).toBe('state')
+    await w.clock.advance(3000)
+    expect(threadEnds().length).toBe(3)
+    const stateAt = w.syncs.findIndex(s => s.events.some(e => e.type === 'state'))
+    expect(stateAt < threadEnds()[2]!).toBe(true)
+    for (const n of w.sizes) expect(n).toBeLessThanOrEqual(BODY_BYTES)
+  })
+
+  // An older companion (no `threads` in its answer) would read a thread
+  // snapshot as the main one: nothing agent-related goes to it.
+  test('without threads in the answer, agent rows, controls, threads and tasks are never sent', async ($, on) => {
+    const w = world(on, { threads: false })
+    on('agent.spawn', () => ({ model: 'haiku', agentId: 'aa9' }))
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { backgroundTaskId: 'b4prbe90d' }, text: '' }) as never)
+    sessionFiles(w)
+    await startAt($)
+    await w.clock.advance(3000)
+    await $.agent.spawn({ prompt: 'p', description: 'd' } as never)
+    await $.tool.call({ tool: 'Bash', command: 'sleep 25', run_in_background: true } as never)
+    await w.clock.advance(3000)
+    const all = w.all() as any[]
+    expect(all.filter(e => e.type === 'agent' || e.type === 'tasks' || e.agentId)).toEqual([])
+    expect(w.snapshots().length).toBe(1)
+    // The companion now takes them: the next resync carries them all.
+    w.answer.threads = true
+    await w.clock.advance(6000)
+    const after = w.all() as any[]
+    expect(after.filter(e => e.type === 'agent').map(e => e.agent.agentId).sort()).toEqual(['aa1', 'aa9', 'bb2'])
+    expect(w.threads().map(t => t.agentId)).toEqual(['aa1', 'bb2'])
+    expect(tasksOf(after as never).at(-1)!.tasks.map(t => t.id)).toEqual(['b4prbe90d'])
+    expect(w.snapshots().length).toBe(2)
+  })
+
+  test('a companion that stops answering threads gets no more agent controls', async ($, on) => {
+    const w = world(on)
+    on('agent.spawn', () => ({ model: 'haiku', agentId: 'aa9' }))
+    await start($)
+    await w.clock.advance(2000)
+    w.answer.threads = false
+    await w.clock.advance(1000)
+    await $.agent.spawn({ prompt: 'p', description: 'd' } as never)
+    await w.clock.advance(2000)
+    expect(w.all().filter(e => e.type === 'agent')).toEqual([])
   })
 
   test('a meta file whose name is not a plain agent id is never read', async ($, on) => {
@@ -1057,6 +1125,29 @@ describe('herdr-chat', () => {
     expect(snap!.events.length).toBe(5000)
     expect(snap!.events[0].uuid).toBe('u3')
     expect(snap!.events[4999].uuid).toBe('u5002')
+  })
+
+  // The main chat's images fill the window first; threads get what is left.
+  const imageSet = (prefix: string, n: number) => {
+    const events: any[] = []
+    const images: Record<string, { mediaType: string; data: string }> = {}
+    for (let i = 0; i < n; i++) {
+      events.push({ type: 'user_text', uuid: `${prefix}${i}`, text: '', images: [`${prefix}${i}#0`] })
+      images[`${prefix}${i}#0`] = { mediaType: 'image/png', data: 'QUJD' }
+    }
+    return { events, images }
+  }
+  test('30 main images leave no room for thread images', () => {
+    const main = imageSet('m', 30)
+    const thread = imageSet('t', 10)
+    const ids = historyImages(main.events, main.images, thread.events, thread.images).map(q => q.id)
+    expect(ids).toEqual(Array.from({ length: 30 }, (_, i) => `m${29 - i}#0`))
+  })
+  test('25 main images leave room for the 5 newest thread images', () => {
+    const main = imageSet('m', 25)
+    const thread = imageSet('t', 10)
+    const ids = historyImages(main.events, main.images, thread.events, thread.images).map(q => q.id)
+    expect(ids).toEqual([...Array.from({ length: 25 }, (_, i) => `m${24 - i}#0`), 't9#0', 't8#0', 't7#0', 't6#0', 't5#0'])
   })
 
   test('an image over IMAGE_BYTES is dropped, never sent, and does not block the rest', async ($, on) => {

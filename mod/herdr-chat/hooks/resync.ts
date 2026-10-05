@@ -1,5 +1,5 @@
 import { AGENT_ID, type AgentsState, type AgentStatus } from './agents'
-import type { TasksState } from './tasks'
+import { tasksControl, type TasksControl, type TasksState } from './tasks'
 
 // Pure parts of the resync's agent rebuild (no `$`: register.ts lists and
 // reads the session's files). Of the linked agents, the threads of the
@@ -53,16 +53,17 @@ export function listStatus(status: string): AgentStatus | undefined {
   return undefined
 }
 
-// Lists each linked subagent `$.agent.list()` says is running, and the tasks
-// do not, as a running task (a background one launched before the mod
-// loaded is known no other way). True when the list changed.
-export function runningSubagentTasks(t: TasksState, list: readonly { id: string; status: string; description: string }[], a: AgentsState, now: number): boolean {
-  let changed = false
+// The resync's tasks control: the tasks plus each linked subagent
+// `$.agent.list()` says is running that they lack, as a running task (a
+// background one launched before the mod loaded is known no other way).
+// The tasks themselves are left as they are: a foreground subagent is listed
+// too and never gets a notice to end it. `extra`: one was merged in.
+export function resyncTasks(t: TasksState, list: readonly { id: string; status: string; description: string }[], a: AgentsState, now: number): { control: TasksControl; extra: boolean } {
+  const merged: TasksState = new Map(t)
   for (const info of list) {
     const l = a.links.get(info.id)
-    if (!l || l.kind !== 'subagent' || listStatus(info.status) !== 'running' || t.has(info.id)) continue
-    t.set(info.id, { id: info.id, kind: 'subagent', label: info.description || l.label, toolUseId: l.parentToolUseId, status: 'running', startedAt: now })
-    changed = true
+    if (!l || l.kind !== 'subagent' || listStatus(info.status) !== 'running' || merged.has(info.id)) continue
+    merged.set(info.id, { id: info.id, kind: 'subagent', label: info.description || l.label, toolUseId: l.parentToolUseId, status: 'running', startedAt: now })
   }
-  return changed
+  return { control: tasksControl(merged), extra: merged.size > t.size }
 }
