@@ -68,10 +68,10 @@ fun SubagentCard(call: ChatEvent.ToolUse, agent: AgentSummary?, now: Long, onOpe
     CardSurface(if (agent != null) Modifier.clickable { onOpen(agent.agentId) } else Modifier) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatusGlyph(status)
-            Text(label, Modifier.weight(1f, fill = false), style = HerdrType.meta.copy(fontWeight = FontWeight.SemiBold), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            // The label has priority: the type is what gets cut (a smaller weight claims space after the label).
-            agent?.type?.takeIf { it.isNotBlank() }?.let { Text(it, Modifier.weight(0.001f, fill = false), style = HerdrType.meta, color = c.overlay2, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-            Spacer(Modifier.weight(1f))
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(label, Modifier.weight(1f, fill = false), style = HerdrType.meta.copy(fontWeight = FontWeight.SemiBold), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                agent?.type?.takeIf { it.isNotBlank() }?.let { Text(it, Modifier.weight(0.6f, fill = false), style = HerdrType.meta, color = c.overlay2, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            }
             Text(elapsed, style = HerdrType.meta, color = c.overlay0)
         }
         Text(
