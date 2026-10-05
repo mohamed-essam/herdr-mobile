@@ -4,7 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.SnackbarHost
@@ -28,22 +28,26 @@ import kotlinx.coroutines.delay
 /**
  * A pane's chat: the header, the timeline ([ChatTimelineList]) and the
  * composer (with Interrupt while the agent works) at the bottom; a pending
- * question replaces it as a pinned sheet.
+ * question replaces it as a pinned sheet. [listState] is hoisted to the pane,
+ * so a thread opened on top leaves the scroll position alone.
  */
 @Composable
-fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTerminal: () -> Unit, onOpenThread: (String) -> Unit) {
+fun ChatScreen(
+    vm: DashboardViewModel,
+    pane: Pane,
+    onExit: () -> Unit,
+    onTerminal: () -> Unit,
+    onOpenThread: (String) -> Unit,
+    listState: LazyListState,
+) {
     val c = Herdr.colors
     val view by remember(pane.paneId) { vm.chatView(pane.paneId) }.collectAsState()
     val connected by vm.connected.collectAsState()
     val repoTree by vm.repoTree.collectAsState()
     var draft by rememberSaveable(pane.paneId) { mutableStateOf("") }
-    val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    DisposableEffect(pane.paneId) {
-        vm.openChat(pane.paneId)
-        onDispose { vm.closeChat(pane.paneId) }
-    }
+    // PaneScreen holds the chat subscription, so it stays open under a thread.
     LaunchedEffect(pane.paneId) {
         while (true) { delay(10_000); vm.expireChat() }
     }

@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -101,14 +102,16 @@ fun ChatTimelineList(
     // Follow new output only while the user is at the very bottom, judged by
     // where their own scrolling leaves the list: a folded tool rail can be
     // taller than the screen, so "the last rows are visible" isn't "at bottom".
-    var follow by remember(paneId, agentId) { mutableStateOf(true) }
+    // Saveable (like entryScrolled): the pane keeps the chat's saved state while
+    // a thread is on top, so coming back doesn't count as entering afresh.
+    var follow by rememberSaveable(paneId, agentId) { mutableStateOf(true) }
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
             .collect { (scrolling, canScrollForward) -> follow = followAfterScroll(follow, scrolling, canScrollForward) }
     }
     // Entering the screen (or toggling back from the terminal) with a loaded
     // view opens at the newest item, once; later updates use the follow rule.
-    var entryScrolled by remember(paneId, agentId) { mutableStateOf(false) }
+    var entryScrolled by rememberSaveable(paneId, agentId) { mutableStateOf(false) }
     LaunchedEffect(paneId, agentId, view.loaded) {
         entryScrollTarget(view.loaded, itemCount, entryScrolled)?.let {
             listState.scrollToItem(it, BOTTOM_OFFSET)
