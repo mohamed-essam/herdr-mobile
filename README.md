@@ -115,9 +115,20 @@ shows a question card; answer from the phone or the terminal, whichever comes
 first, and the card collapses to the answer. Only `http`, `https` and `mailto`
 links open (in a browser).
 
-Chat view v1.1 uses companion protocol 9. Update both the companion (rebuild and
-restart it) and the plugin (`/reload-plugins` or restart Claude Code); an older app
-keeps working against a newer companion.
+Subagents and workflow agents appear as cards under the Agent or Workflow call that
+started them, with a live status and activity line. Tap one to open its read-only
+thread; nested subagents stack, and back walks up. A background-tasks strip
+("⟳ 2 running · 1 done") opens a sheet listing each shell, subagent, workflow and
+monitor task with its status and duration; tapping a subagent or workflow task
+scrolls to its card. The dashboard shows a "⟳ N" badge on panes with background
+tasks running. The companion keeps up to 1000 events per thread and 20 threads per
+pane, finished tasks drop off after 10 minutes, and background shells and workflows
+that started before a plugin reload aren't recovered.
+
+Chat view v2 uses companion protocol 10. Update both the companion (rebuild and
+restart it) and the plugin (`/reload-plugins` in running Claude sessions); an older
+app keeps working against a newer companion, and a newer plugin keeps working against
+an older companion.
 
 ### App
 

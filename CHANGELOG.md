@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format is based on
 
 ## Unreleased
 
+- Chat view v2 (companion protocol 10): subagents and workflow agents show as cards under the Agent/Workflow call
+  that started them, with live status and activity; tapping one opens a read-only thread (nested subagents stack,
+  back walks up). A background-tasks strip opens a sheet of shell/subagent/workflow/monitor tasks with status and
+  duration. Pane state gains `bgRunning` (running background task count, omitted when 0), shown as a "⟳ N"
+  dashboard badge. Wire: `chat_open`/`chat_close`/`chat_history` take an optional `agentId`; `chat_snapshot` gains
+  `agentId`/`missing` and, on main snapshots, `agents` and `tasks`; `chat_event` and `chat_history_page` gain
+  `agentId`; new frames `chat_agent` (`{agent}` or `{agentId, removed:true}`) and `chat_tasks`. The herdr-chat
+  plugin sends v2 traffic only once the companion's `/sync` reply carries `"threads": true`. Limits: 1000 events
+  per thread, 20 threads per pane, newest 20 agents replayed on resync; finished tasks drop off after 10 minutes;
+  background shells and workflows started before a plugin reload aren't recovered. Update both the companion and
+  the herdr-chat plugin; an older app keeps working against a newer companion.
 - Chat view for Claude Code panes via the new herdr-chat Claude Code plugin (companion protocol 8).
 - Chat view v1.1 (companion protocol 9): Markdown-rendered assistant messages, long-press to select and copy,
   timestamps, and history rebuilt from the session transcript (5000 events kept per pane; the app shows the latest
