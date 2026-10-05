@@ -74,6 +74,37 @@ export function linkSpawn(
   })
 }
 
+// A subagent's `agent-<id>.meta.json` (read at a resync): links it to its
+// Agent call as finished (a live status comes after, from `$.agent.list()`).
+// One already linked keeps its link. False on bad JSON, no toolUseId (a
+// workflow agent's meta has none) or an id that is not a plain one.
+export function linkFromMeta(a: AgentsState, agentId: string, metaJson: string, now: number): boolean {
+  if (!AGENT_ID.test(agentId)) return false
+  let m: { toolUseId?: unknown; description?: unknown; agentType?: unknown }
+  try {
+    m = JSON.parse(metaJson)
+  } catch {
+    return false
+  }
+  if (!m || typeof m !== 'object' || typeof m.toolUseId !== 'string' || !m.toolUseId) return false
+  if (a.links.has(agentId)) return true
+  link(a, {
+    agentId,
+    parentToolUseId: m.toolUseId,
+    kind: 'subagent',
+    label: typeof m.description === 'string' ? m.description : '',
+    ...(typeof m.agentType === 'string' ? { type: m.agentType } : {}),
+    status: 'done',
+    ts: now,
+  })
+  return true
+}
+
+// A control per linked agent, as each stands now.
+export function agentControls(a: AgentsState): AgentControl[] {
+  return [...a.links.values()].map(control)
+}
+
 // The Workflow tool's launch result: needs a valid runId and a transcriptDir.
 export function recordWorkflow(a: AgentsState, toolUseId: string, result: unknown): void {
   if (!result || typeof result !== 'object') return

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 import {
-  HOLD_EVENTS, linkJournal, linkSpawn, newAgentsState, recordWorkflow, releaseHeld, resetAgents, routeAgentEvents, setStatus,
+  HOLD_EVENTS, linkFromMeta, linkJournal, linkSpawn, newAgentsState, recordWorkflow, releaseHeld, resetAgents, routeAgentEvents, setStatus,
 } from '../hooks/agents'
 import type { ChatEvent } from '../hooks/normalize'
 
@@ -163,5 +163,30 @@ describe('resetAgents', () => {
     a.ignored.add('qq')
     resetAgents(a)
     expect([a.links.size, a.workflows.size, a.held.size, a.ignored.size]).toEqual([0, 0, 0, 0])
+  })
+})
+
+describe('linkFromMeta', () => {
+  const META = '{"agentType":"general-purpose","description":"Background echo test","toolUseId":"toolu_01AHLnnYchSVz4oxU8iSiip3","spawnDepth":1,"requestShape":"background","requestNonInteractive":true,"model":"haiku"}'
+
+  test('the spike’s meta file links a finished subagent to its call', () => {
+    const a = newAgentsState()
+    expect(linkFromMeta(a, 'a0ab069d9186e35de', META, 5)).toBe(true)
+    expect(a.links.get('a0ab069d9186e35de')).toEqual({ agentId: 'a0ab069d9186e35de', parentToolUseId: 'toolu_01AHLnnYchSVz4oxU8iSiip3', kind: 'subagent', label: 'Background echo test', type: 'general-purpose', status: 'done', ts: 5 })
+  })
+
+  test('bad JSON, no toolUseId (a workflow agent’s meta) or a bad id link nothing', () => {
+    const a = newAgentsState()
+    expect(linkFromMeta(a, 'aa1', '{not json', 1)).toBe(false)
+    expect(linkFromMeta(a, 'aa1', '{"agentType":"workflow-subagent","description":"x","workflowPhase":"Reply"}', 1)).toBe(false)
+    expect(linkFromMeta(a, '../x', META, 1)).toBe(false)
+    expect(a.links.size).toBe(0)
+  })
+
+  test('an agent already linked live keeps its link', () => {
+    const a = newAgentsState()
+    linkSpawn(a, spawn, 'aa1', 1)
+    expect(linkFromMeta(a, 'aa1', META, 2)).toBe(true)
+    expect(a.links.get('aa1')).toMatchObject({ parentToolUseId: 'toolu_1', status: 'running', ts: 1 })
   })
 })

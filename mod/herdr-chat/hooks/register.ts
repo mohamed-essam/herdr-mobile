@@ -1,15 +1,17 @@
 import type { EngineInterface, Register } from 'claude-code'
-import { linkJournal, linkSpawn, newAgentsState, recordWorkflow, releaseHeld, resetAgents, routeAgentEvents, setStatus, type AgentControl, type AgentsState, type Workflow } from './agents'
+import { agentControls, linkFromMeta, linkJournal, linkSpawn, newAgentsState, recordWorkflow, releaseHeld, resetAgents, routeAgentEvents, setStatus, type AgentControl, type AgentsState, type Workflow } from './agents'
+import { listStatus, newestAgents, parseListing, runningSubagentTasks, THREAD_EVENTS, type AgentFile } from './resync'
 import { expireTasks, noticeStatus, taskFromLaunch, taskFromNotice, tasksControl, type TasksControl, type TasksState } from './tasks'
 import { normalizeBlocks, normalizeSnapshot, shouldForward, utf8Bytes, type ChatEvent, type ChatImage, type Normalized } from './normalize'
-import { addTranscriptLine, finishTranscriptHistory, HISTORY_IMAGES, newTranscriptHistory, splitPiece } from './transcript'
+import { addTranscriptLine, finishTranscriptHistory, HISTORY_IMAGES, newTranscriptHistory, splitPiece, type FinishedHistory, type TranscriptOpts } from './transcript'
 
-// History goes out as begin (`total`: its event count), chunks, end.
+// History goes out as begin (`total`: its event count), chunks, end; an
+// agent's thread the same, each part naming the agent (`agentId`).
 type Control =
   | { type: 'hello'; sessionId: string; cwd: string }
-  | { type: 'snapshot_begin'; total: number }
-  | { type: 'snapshot_chunk'; events: ChatEvent[] }
-  | { type: 'snapshot_end' }
+  | { type: 'snapshot_begin'; total: number; agentId?: string }
+  | { type: 'snapshot_chunk'; events: ChatEvent[]; agentId?: string }
+  | { type: 'snapshot_end'; agentId?: string }
   | { type: 'state'; state: 'working' | 'idle' }
   // An AskUserQuestion dialog the phone may answer (its tool input's questions).
   | { type: 'question'; uuid: string; toolUseId: string; questions: unknown[]; ts: number }
@@ -111,17 +113,18 @@ async function resolveSocket($: EngineInterface): Promise<string> {
 // line over 4 MiB (a row with large images) is re-read alone with its long
 // base64 `data` strings emptied (those images are then answered `missing`);
 // still too long, it is skipped. Rejects when the file can't be read.
-async function readTranscript($: EngineInterface, path: string) {
+// `opts` goes to each line's parse (an agent's own file: `sidechain`).
+async function readTranscript($: EngineInterface, path: string, opts?: TranscriptOpts) {
   const h = newTranscriptHistory()
   let line = 1
   for (;;) {
     const r = await $.process.run(['tail', '-n', `+${line}`, '--', path])
     if (r.exitCode !== 0) throw new Error(`tail exited ${r.exitCode}`)
     const piece = splitPiece(r.stdout, r.isStdoutTruncated)
-    for (const l of piece.lines) addTranscriptLine(h, l)
+    for (const l of piece.lines) addTranscriptLine(h, l, opts)
     if (piece.overlong) {
       const stripped = await readStripped($, path, line)
-      if (stripped !== undefined) addTranscriptLine(h, stripped)
+      if (stripped !== undefined) addTranscriptLine(h, stripped, opts)
     }
     if (!r.isStdoutTruncated) break
     line += piece.advance
@@ -170,18 +173,20 @@ async function findTranscript($: EngineInterface, sessionId: string): Promise<st
 // History from the transcript file (real uuids, timestamps, meta rows
 // dropped): the classic-supplied path, else the one found by session id. The
 // api-form history when neither is known, the read fails or the file has no
-// message rows.
-async function readHistory($: EngineInterface, s: State, sessionId: string): Promise<Normalized> {
+// message rows. One read from the file names it (`path`) and the workflow
+// runs it launched.
+type History = Normalized & { path?: string; workflowRuns?: Map<string, string> }
+async function readHistory($: EngineInterface, s: State, sessionId: string): Promise<History> {
   const path = s.transcriptPath || (await findTranscript($, sessionId))
   s.historyLacksPath = !path
   if (path) {
-    let history: Normalized | null = null
+    let history: FinishedHistory | null = null
     try {
       history = await readTranscript($, path)
     } catch {
       history = null
     }
-    if (history) return history
+    if (history) return { ...history, path }
   }
   const history = await $.session.messages({ as: 'api' })
   return Array.isArray(history) ? normalizeSnapshot(history) : { events: [], images: {} }
@@ -231,25 +236,122 @@ async function buildHistory($: EngineInterface, s: State) {
     const history = await readHistory($, s, sessionId)
     const events = history.events.slice(-HISTORY_EVENTS)
     s.sessionId = sessionId
-    const head: Outgoing[] = [{ type: 'hello', sessionId, cwd: s.cwd }, { type: 'snapshot_begin', total: events.length }]
-    for (const chunk of chunkEvents(events)) head.push({ type: 'snapshot_chunk', events: chunk })
-    head.push({ type: 'snapshot_end' })
+    const head: Outgoing[] = [{ type: 'hello', sessionId, cwd: s.cwd }, ...snapshot(events)]
     if (s.lastState) head.push({ type: 'state', state: s.lastState })
     head.push(...s.openQuestions.values())
+    // The agents and their threads, from the session's files beside the
+    // transcript (only a history read from one has them). Never fails the
+    // main snapshot.
+    let agents: Awaited<ReturnType<typeof rebuildAgents>> | null = null
+    try {
+      if (history.path) agents = await rebuildAgents($, s, history.path.replace(/\.jsonl$/, ''), history.workflowRuns ?? new Map())
+    } catch {
+      agents = null
+    }
+    if (agents) head.push(...agents.head)
     // The tasks as they stand (the history has none; a resync never clears
     // them), once any have been queued: the companion may hold a list.
+    if (agents?.tasksChanged) s.tasksQueued = true
     if (s.tasksQueued) head.push(tasksControl(s.tasks))
     // A question queued during the build is in both: send it once, here; the
     // same for a tasks control.
     const queued = s.pending.filter(ev => !(ev.type === 'tasks' && s.tasksQueued) && !(ev.type === 'question' && s.openQuestions.has(ev.toolUseId)))
     s.pending = [...head, ...queued]
-    s.imageQueue = [...historyImages(events, history.images), ...s.imageQueue]
+    // Thread images share the history's window (see HISTORY_IMAGES).
+    const allEvents = agents ? [...events, ...agents.events] : events
+    const images = agents ? { ...history.images, ...agents.images } : history.images
+    s.imageQueue = [...historyImages(allEvents, images), ...s.imageQueue]
   } catch {
     // A failed session read: retry on the next tick.
     s.needResync = true
   } finally {
     s.building = false
   }
+}
+
+// A chunked snapshot of the events (an agent's thread when `agentId` is given).
+function snapshot(events: readonly ChatEvent[], agentId?: string): Control[] {
+  const tag = agentId ? { agentId } : {}
+  const out: Control[] = [{ type: 'snapshot_begin', total: events.length, ...tag }]
+  for (const chunk of chunkEvents(events)) out.push({ type: 'snapshot_chunk', events: chunk, ...tag })
+  out.push({ type: 'snapshot_end', ...tag })
+  return out
+}
+
+// A whole small file (a meta file); undefined when it can't be read whole.
+async function readSmall($: EngineInterface, path: string): Promise<string | undefined> {
+  try {
+    const r = await $.process.run(['tail', '-n', '+1', '--', path])
+    return r.exitCode === 0 && !r.isStdoutTruncated ? r.stdout : undefined
+  } catch {
+    return undefined
+  }
+}
+
+// The `agent-<id><suffix>` files directly in `dir` (`timed`: with their
+// modification times); none when the listing fails.
+async function listAgentFiles($: EngineInterface, dir: string, suffix: string, timed: boolean): Promise<AgentFile[]> {
+  try {
+    const argv = ['find', dir, '-maxdepth', '1', '-name', `agent-*${suffix}`]
+    if (timed) argv.push('-printf', '%T@ %p\n')
+    const r = await $.process.run(argv)
+    if (r.exitCode !== 0) return []
+    return parseListing(r.stdout, dir, suffix, timed)
+  } catch {
+    return []
+  }
+}
+
+// Rebuilds the agents from the session's files at a resync: links the
+// subagents from their meta files and the workflow agents from the journals
+// of the runs the transcript launched (each run recorded, so its later agents
+// link live), takes each one's status from `$.agent.list()` where it has
+// one, and replays the threads of the newest (see THREADS_MAX). Every path
+// is built from `sessionDir` and an id that is a plain one. Returns every
+// agent's control followed by the thread snapshots, the threads' events and
+// images, and whether running subagents were added to the tasks. A failed
+// listing or read skips that agent or run.
+async function rebuildAgents($: EngineInterface, s: State, sessionDir: string, runs: Map<string, string>) {
+  const now = Date.now()
+  const subagents = `${sessionDir}/subagents`
+  for (const f of await listAgentFiles($, subagents, '.meta.json', false)) {
+    const meta = await readSmall($, f.path)
+    if (meta !== undefined) linkFromMeta(s.agents, f.id, meta, now)
+  }
+  for (const [runId, toolUseId] of runs) {
+    if (!s.agents.workflows.has(runId)) s.agents.workflows.set(runId, { toolUseId, transcriptDir: `${subagents}/workflows/${runId}`, name: '', journalLine: 1 })
+    linkJournal(s.agents, runId, await readJournal($, s.agents.workflows.get(runId)!), now)
+  }
+  const files = await listAgentFiles($, subagents, '.jsonl', true)
+  for (const runId of s.agents.workflows.keys()) files.push(...(await listAgentFiles($, `${subagents}/workflows/${runId}`, '.jsonl', true)))
+  let list: { id: string; status: string; description: string }[] = []
+  try {
+    list = await $.agent.list()
+  } catch {
+    list = []
+  }
+  for (const info of list) {
+    const status = listStatus(info.status)
+    if (status) setStatus(s.agents, info.id, status, now)
+  }
+  const head: Outgoing[] = agentControls(s.agents)
+  const events: ChatEvent[] = []
+  const images: Record<string, ChatImage> = {}
+  for (const f of newestAgents(files, s.agents)) {
+    let thread: FinishedHistory | null = null
+    try {
+      thread = await readTranscript($, f.path, { sidechain: true })
+    } catch {
+      thread = null
+    }
+    if (!thread) continue
+    const tagged: ChatEvent[] = []
+    for (const ev of thread.events.slice(-THREAD_EVENTS)) tagged.push({ ...ev, agentId: f.id })
+    head.push(...snapshot(tagged, f.id))
+    events.push(...tagged)
+    Object.assign(images, thread.images)
+  }
+  return { head, events, images, tasksChanged: runningSubagentTasks(s.tasks, list, s.agents, now) }
 }
 
 // The history images to send (see HISTORY_IMAGE_BYTES): the newest of those

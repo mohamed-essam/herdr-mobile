@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { addTranscriptLine, eventsFromTranscript, HISTORY_IMAGES, newTranscriptHistory, splitPiece } from '../hooks/transcript'
+import { addTranscriptLine, eventsFromTranscript, finishTranscriptHistory, HISTORY_IMAGES, newTranscriptHistory, splitPiece } from '../hooks/transcript'
 
 const row = (o: object) => JSON.stringify(o)
 const base = { isSidechain: false, sessionId: 's1' }
@@ -90,5 +90,38 @@ describe('transcript images', () => {
     addTranscriptLine(h, imageRow('e1', ''))
     expect(h.images).toEqual({})
     expect(h.events).toEqual([{ type: 'user_text', uuid: 'e1', text: '', images: ['e1#0'], ts: 1791126614835 }])
+  })
+})
+
+describe('agent transcripts', () => {
+  const side = row({ type: 'assistant', uuid: 's1', isSidechain: true, agentId: 'aa1', timestamp: '2026-10-05T09:24:37.482Z', message: { role: 'assistant', content: [{ type: 'text', text: 'from the subagent' }] } })
+
+  test('a sidechain row is dropped by default and kept with { sidechain: true }', () => {
+    const main = newTranscriptHistory()
+    addTranscriptLine(main, side)
+    expect(main.events).toEqual([])
+    const thread = newTranscriptHistory()
+    addTranscriptLine(thread, side, { sidechain: true })
+    expect(thread.events).toEqual([{ type: 'assistant_text', uuid: 's1#0', text: 'from the subagent', ts: Date.parse('2026-10-05T09:24:37.482Z') }])
+  })
+
+  // The Workflow tool_result row as the spike's transcript holds it.
+  const workflowResult = (runId: string) => row({
+    type: 'user', uuid: 'r9', isSidechain: false, timestamp: '2026-10-05T09:30:00.000Z',
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_W', content: 'launched' }] },
+    toolUseResult: { status: 'async_launched', taskId: 'wfu18ne1l', taskType: 'local_workflow', workflowName: 'tiny-two-agents', runId, summary: 's', transcriptDir: '/x/subagents/workflows/' + runId },
+  })
+
+  test('a Workflow tool result names its run, by the call it answers', () => {
+    const h = newTranscriptHistory()
+    addTranscriptLine(h, workflowResult('wf_4ddcdf59-066'))
+    expect(h.workflowRuns.get('wf_4ddcdf59-066')).toBe('toolu_W')
+    expect(finishTranscriptHistory(h)?.workflowRuns.get('wf_4ddcdf59-066')).toBe('toolu_W')
+  })
+
+  test('a run id that is not a plain one is ignored', () => {
+    const h = newTranscriptHistory()
+    addTranscriptLine(h, workflowResult('../x'))
+    expect([...h.workflowRuns]).toEqual([])
   })
 })

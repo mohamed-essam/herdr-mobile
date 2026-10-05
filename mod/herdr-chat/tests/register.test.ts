@@ -65,7 +65,31 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
   const tail = { limit: 4194304 }
   let submitGate: Promise<void> = Promise.resolve()
   let readGate: Promise<void> = Promise.resolve()
+  // A fake `find <dir> -maxdepth 1 -name <glob> [-printf '%T@ %p\n']` (the
+  // resync's listings, kept in `scans`, apart from `finds`) prints each file
+  // whose path is <dir>/<name matching the glob>; `-printf` puts its
+  // `mtimes` entry (default 0) first. It exits 1 when nothing is under <dir>
+  // (as find does for a missing dir), or always with `scan.exit` set.
+  const scans: string[][] = []
+  const mtimes: Record<string, number> = {}
+  const scan = { exit: 0 }
+  const agentList: { id: string; status: string; description: string; type: string; teammateId?: string }[] = []
+  on('agent.list', () => ({ value: agentList as never }))
   on('process.run', async ($, e) => {
+    if (e.argv[0] === 'find' && e.argv[3] === '1') {
+      scans.push([...e.argv])
+      const [, dir, depth, depthN, nameFlag, glob, printf, format] = e.argv
+      expect([depth, depthN, nameFlag]).toEqual(['-maxdepth', '1', '-name'])
+      if (e.argv.length === 8) expect([printf, format]).toEqual(['-printf', '%T@ %p\n'])
+      else expect(e.argv.length).toBe(6)
+      const pattern = glob!.split('*').map(p => p.replace(/[.+?^$()|[\]\\{}]/g, '\\$&')).join('.*')
+      const name = new RegExp('^' + pattern + '$')
+      const under = Object.keys(files).filter(f => f.startsWith(`${dir}/`))
+      const hits = under.filter(f => name.test(f.slice(dir!.length + 1)))
+      const stdout = hits.map(f => (printf ? `${mtimes[f] ?? 0}.0000000000 ${f}\n` : `${f}\n`)).join('')
+      const exitCode = scan.exit || (under.length ? 0 : 1)
+      return { value: { exitCode, stdout: exitCode ? '' : stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     if (e.argv[0] === 'find') {
       finds.push([...e.argv])
       const [, root, depth, depthN, nameFlag, name, print, quit] = e.argv
@@ -124,18 +148,31 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
     return { text: e.text }
   })
   return {
-    clock, syncs, sizes, outbox, submitted, current, answer, files, reads, finds, runs, seds, tail, counts,
+    clock, syncs, sizes, outbox, submitted, current, answer, files, reads, finds, runs, seds, tail, counts, scans, mtimes, scan, agentList,
     hold() { let release!: () => void; submitGate = new Promise(r => (release = r)); return release },
     holdReads() { let release!: () => void; readGate = new Promise(r => (release = r)); return release },
     all: () => syncs.flatMap(s => s.events),
     kinds: (i: number) => syncs[i]!.events.map(e => e.type),
-    // Each complete chunked snapshot in send order: the session its hello
+    // Each complete agent thread snapshot in send order.
+    threads() {
+      const out: { agentId: string; total: number; events: any[] }[] = []
+      const open = new Map<string, { agentId: string; total: number; events: any[] }>()
+      for (const e of syncs.flatMap(s => s.events) as any[]) {
+        if (!e.agentId || !e.type.startsWith('snapshot_')) continue
+        if (e.type === 'snapshot_begin') open.set(e.agentId, { agentId: e.agentId, total: e.total, events: [] })
+        else if (e.type === 'snapshot_chunk') open.get(e.agentId)!.events.push(...e.events)
+        else if (e.type === 'snapshot_end') out.push(open.get(e.agentId)!)
+      }
+      return out
+    },
+    // Each complete chunked (main) snapshot in send order: the session its hello
     // named, its begin's total, its chunks' events, the sync carrying its end.
     snapshots() {
       const out: { sessionId: string; total: number; events: any[]; end: number }[] = []
       let cur = { sessionId: '', total: -1, events: [] as any[], end: -1 }
       syncs.forEach((s, i) => {
         for (const e of s.events as any[]) {
+          if (e.agentId) continue
           if (e.type === 'hello') cur = { sessionId: e.sessionId, total: -1, events: [], end: -1 }
           else if (e.type === 'snapshot_begin') cur.total = e.total
           else if (e.type === 'snapshot_chunk') cur.events.push(...e.events)
@@ -319,6 +356,121 @@ describe('herdr-chat', () => {
     s.pending = []
     await linkWorkflowAgents($, s)
     expect(s.pending.map(e => [e.type, (e as any).agent?.status])).toEqual([['agent', 'done']])
+  })
+
+  // Resync from the session's files: the main transcript with an Agent call
+  // (toolu_A) and a Workflow call (toolu_W, run wf_r1), the subagent's meta
+  // and transcript, the run's journal and its agent's transcript.
+  const SESS = '/c/projects/p/sess-1'
+  const sideRow = (agentId: string, uuid: string, role: 'user' | 'assistant', text: string) =>
+    JSON.stringify({ parentUuid: null, isSidechain: true, agentId, type: role, uuid, timestamp: '2026-10-05T09:24:37.482Z', message: { role, content: role === 'user' ? text : [{ type: 'text', text }] } })
+  const meta = (toolUseId: string, description: string) =>
+    JSON.stringify({ agentType: 'general-purpose', description, toolUseId, spawnDepth: 1, requestShape: 'background', requestNonInteractive: true, model: 'haiku' })
+  function sessionFiles(w: ReturnType<typeof world>) {
+    w.files[`${SESS}.jsonl`] = [
+      JSON.stringify({ type: 'user', uuid: 'u1', timestamp: '2026-10-05T09:20:00.000Z', message: { role: 'user', content: 'go' } }),
+      JSON.stringify({ type: 'assistant', uuid: 'a1', timestamp: '2026-10-05T09:20:01.000Z', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_A', name: 'Agent', input: { description: 'Background echo test', prompt: 'p', run_in_background: true } }] } }),
+      JSON.stringify({ type: 'assistant', uuid: 'a2', timestamp: '2026-10-05T09:20:02.000Z', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_W', name: 'Workflow', input: { name: 'tiny-two-agents' } }] } }),
+      JSON.stringify({ type: 'user', uuid: 'r2', timestamp: '2026-10-05T09:20:03.000Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_W', content: 'launched' }] }, toolUseResult: { status: 'async_launched', taskId: 'wfu18ne1l', taskType: 'local_workflow', workflowName: 'tiny-two-agents', runId: 'wf_r1', summary: 's', transcriptDir: '/evil/dir' } }),
+    ].join('\n')
+    w.files[`${SESS}/subagents/agent-aa1.meta.json`] = meta('toolu_A', 'Background echo test')
+    w.files[`${SESS}/subagents/agent-aa1.jsonl`] = [sideRow('aa1', 's1', 'user', 'Run `echo sub-bg`'), sideRow('aa1', 's2', 'assistant', 'sub-bg')].join('\n') + '\n'
+    w.files[`${SESS}/subagents/workflows/wf_r1/journal.jsonl`] = [
+      JSON.stringify({ type: 'started', agentId: 'bb2', label: 'Say one', phase: 'Reply' }),
+      JSON.stringify({ type: 'result', agentId: 'bb2', result: 'one' }),
+    ].join('\n') + '\n'
+    w.files[`${SESS}/subagents/workflows/wf_r1/agent-bb2.jsonl`] = sideRow('bb2', 'w1', 'assistant', 'one') + '\n'
+    w.mtimes[`${SESS}/subagents/agent-aa1.jsonl`] = 100
+    w.mtimes[`${SESS}/subagents/workflows/wf_r1/agent-bb2.jsonl`] = 200
+  }
+  const startAt = async ($: any) => {
+    await $.classic.SessionStart({ source: 'startup', transcript_path: `${SESS}.jsonl` })
+    await start($)
+  }
+
+  test('a resync links subagents and workflow agents from the files, their controls before their threads', async ($, on) => {
+    const w = world(on)
+    sessionFiles(w)
+    await startAt($)
+    await w.clock.advance(6000)
+    expect(w.snapshots()[0]!.events.map((e: any) => e.uuid ?? e.toolUseId)).toEqual(['u1', 'a1#0', 'a2#0', 'toolu_W'])
+    const all = w.all() as any[]
+    const agents = all.filter(e => e.type === 'agent').map(e => e.agent)
+    expect(agents).toEqual([
+      { agentId: 'aa1', parentToolUseId: 'toolu_A', kind: 'subagent', label: 'Background echo test', type: 'general-purpose', status: 'done', ts: expect.any(Number) },
+      { agentId: 'bb2', parentToolUseId: 'toolu_W', kind: 'workflow', label: 'Say one', phase: 'Reply', status: 'done', ts: expect.any(Number) },
+    ])
+    const lastControl = Math.max(...agents.map(a => all.findIndex(e => e.type === 'agent' && e.agent.agentId === a.agentId)))
+    const firstThread = all.findIndex(e => e.type === 'snapshot_begin' && e.agentId)
+    expect(firstThread > lastControl).toBe(true)
+    // The journal and the paths came from the session dir, never the row's transcriptDir.
+    expect(w.reads.some(r => r.startsWith('/evil'))).toBe(false)
+    expect(w.reads).toContain(`${SESS}/subagents/workflows/wf_r1/journal.jsonl`)
+  })
+
+  test('each thread snapshot comes from the agent’s own file, its events tagged', async ($, on) => {
+    const w = world(on)
+    sessionFiles(w)
+    await startAt($)
+    await w.clock.advance(6000)
+    const ts = Date.parse('2026-10-05T09:24:37.482Z')
+    expect(w.threads()).toEqual([
+      { agentId: 'aa1', total: 2, events: [
+        { type: 'user_text', uuid: 's1', text: 'Run `echo sub-bg`', ts, agentId: 'aa1' },
+        { type: 'assistant_text', uuid: 's2#0', text: 'sub-bg', ts, agentId: 'aa1' },
+      ] },
+      { agentId: 'bb2', total: 1, events: [{ type: 'assistant_text', uuid: 'w1#0', text: 'one', ts, agentId: 'bb2' }] },
+    ])
+  })
+
+  test('agent.list sets the status; a running subagent is listed as a running task, after the threads', async ($, on) => {
+    const w = world(on)
+    sessionFiles(w)
+    w.agentList.push({ id: 'aa1', status: 'running', description: 'Background echo test', type: 'general-purpose' })
+    await startAt($)
+    await w.clock.advance(6000)
+    const all = w.all() as any[]
+    expect(all.filter(e => e.type === 'agent').map(e => [e.agent.agentId, e.agent.status])).toEqual([['aa1', 'running'], ['bb2', 'done']])
+    const tasks = all.findIndex(e => e.type === 'tasks')
+    expect(all[tasks].tasks).toMatchObject([{ id: 'aa1', kind: 'subagent', label: 'Background echo test', toolUseId: 'toolu_A', status: 'running' }])
+    expect(tasks > all.findLastIndex(e => e.type === 'snapshot_end')).toBe(true)
+  })
+
+  test('a meta file whose name is not a plain agent id is never read', async ($, on) => {
+    const w = world(on)
+    sessionFiles(w)
+    w.files[`${SESS}/subagents/agent-../../x.meta.json`] = meta('toolu_X', 'evil')
+    await startAt($)
+    await w.clock.advance(6000)
+    expect(w.reads.filter(r => r.includes('..'))).toEqual([])
+    expect((w.all() as any[]).filter(e => e.type === 'agent').map(e => e.agent.agentId)).toEqual(['aa1', 'bb2'])
+  })
+
+  test('of 25 agents, only the newest 20 threads are replayed', async ($, on) => {
+    const w = world(on)
+    w.files[`${SESS}.jsonl`] = JSON.stringify({ type: 'user', uuid: 'u1', timestamp: '2026-10-05T09:20:00.000Z', message: { role: 'user', content: 'go' } })
+    const ids = Array.from({ length: 25 }, (_, i) => `c${String(i + 1).padStart(2, '0')}`)
+    // Modified in reverse id order: c01 newest.
+    ids.forEach((id, i) => {
+      w.files[`${SESS}/subagents/agent-${id}.meta.json`] = meta(`toolu_${id}`, id)
+      w.files[`${SESS}/subagents/agent-${id}.jsonl`] = sideRow(id, `x${id}`, 'assistant', id) + '\n'
+      w.mtimes[`${SESS}/subagents/agent-${id}.jsonl`] = 1000 - i
+    })
+    await startAt($)
+    await w.clock.advance(40000)
+    expect((w.all() as any[]).filter(e => e.type === 'agent').length).toBe(25)
+    expect(w.threads().map(t => t.agentId).sort()).toEqual(ids.slice(0, 20))
+  })
+
+  test('a listing that fails still delivers the main snapshot', async ($, on) => {
+    const w = world(on)
+    sessionFiles(w)
+    w.scan.exit = 1
+    await startAt($)
+    await w.clock.advance(3000)
+    expect(w.scans.length > 0).toBe(true)
+    expect(w.snapshots()[0]!.events.map((e: any) => e.uuid ?? e.toolUseId)).toEqual(['u1', 'a1#0', 'a2#0', 'toolu_W'])
+    expect(w.threads()).toEqual([])
   })
 
   test('/clear resets the agents: a later completion of the old agent queues nothing', async ($, on) => {
