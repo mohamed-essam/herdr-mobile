@@ -2,6 +2,7 @@ package dev.herdr.mobile.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.herdr.mobile.data.ChatKey
 import dev.herdr.mobile.data.ChatRepository
 import dev.herdr.mobile.data.ChatView
 import dev.herdr.mobile.data.ImageState
@@ -71,9 +72,12 @@ class DashboardViewModel(
 
     private val chat = ChatRepository(
         sendRaw = client::send, sendChat = client::sendChat, sendAnswer = client::sendAnswer, scope = viewModelScope)
-    fun chatView(paneId: String): StateFlow<ChatView> = chat.view(paneId)
-    fun openChat(paneId: String) { _lastOpenedPaneId.value = paneId; chat.open(paneId) }
-    fun closeChat(paneId: String) = chat.close(paneId)
+    fun chatView(paneId: String, agentId: String? = null): StateFlow<ChatView> = chat.view(ChatKey(paneId, agentId))
+    fun openChat(paneId: String, agentId: String? = null) {
+        if (agentId == null) _lastOpenedPaneId.value = paneId
+        chat.open(ChatKey(paneId, agentId))
+    }
+    fun closeChat(paneId: String, agentId: String? = null) = chat.close(ChatKey(paneId, agentId))
     fun sendChat(paneId: String, text: String) { viewModelScope.launch { chat.send(paneId, text) } }
     fun retryChat(paneId: String, pendingId: String) { viewModelScope.launch { chat.retry(paneId, pendingId) } }
     fun expireChat() = chat.expirePending()
@@ -84,7 +88,7 @@ class DashboardViewModel(
                 .onFailure { _actionErrors.tryEmit(it.message ?: "interrupt failed") }
         }
     }
-    fun loadOlderChat(paneId: String) = chat.loadOlder(paneId)
+    fun loadOlderChat(paneId: String, agentId: String? = null) = chat.loadOlder(ChatKey(paneId, agentId))
     fun chatImage(paneId: String, id: String): StateFlow<ImageState> = chat.imageState(paneId, id)
     /** answers: question text -> answer (multi-select: [joinAnswerLabels]). */
     fun answerChat(paneId: String, toolUseId: String, answers: Map<String, String>) {

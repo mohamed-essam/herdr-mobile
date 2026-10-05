@@ -20,6 +20,8 @@ data class Pane(
     val activity: PaneActivity? = null,
     /** The newest pending AskUserQuestion, answerable with chat_answer. */
     val ask: PaneAsk? = null,
+    /** Background tasks (shells, agents, workflows, monitors) still running; 0 when none. */
+    val bgRunning: Int = 0,
 )
 
 /**
@@ -162,6 +164,73 @@ internal fun parseQuestionItem(el: JsonElement): QuestionItem? {
     )
 }
 
+/**
+ * A subagent or workflow of a pane's chat. [kind] is "subagent" or "workflow";
+ * [status] is "running", "done" or "failed". [parentToolUseId] links it to the
+ * tool call that launched it, [parentAgentId] to the agent that did (nested).
+ */
+data class AgentSummary(
+    val agentId: String,
+    val parentToolUseId: String,
+    val parentAgentId: String? = null,
+    val kind: String,
+    val label: String,
+    val type: String? = null,
+    val phase: String? = null,
+    val status: String,
+    val activity: PaneActivity? = null,
+    val ts: Long = 0,
+)
+
+/**
+ * A background task of a pane. [kind] is "shell", "subagent", "workflow" or
+ * "monitor"; [status] is "running", "done" or "failed". Times are epoch ms.
+ */
+data class BgTask(
+    val id: String,
+    val kind: String,
+    val label: String,
+    val toolUseId: String,
+    val status: String,
+    val startedAt: Long,
+    val endedAt: Long? = null,
+)
+
+/** Null for an element without an agentId (skipped, not an error). */
+internal fun parseAgentSummary(el: JsonElement): AgentSummary? {
+    val o = el as? JsonObject ?: return null
+    val id = o.strOrNull("agentId")?.takeIf { it.isNotEmpty() } ?: return null
+    val act = (o["activity"] as? JsonObject)?.let {
+        PaneActivity(it.str("kind"), it.strOrNull("tool"), it.str("text"), it.long("ts") ?: 0)
+    }
+    return AgentSummary(
+        agentId = id,
+        parentToolUseId = o.str("parentToolUseId"),
+        parentAgentId = o.strOrNull("parentAgentId"),
+        kind = o.str("kind"),
+        label = o.str("label"),
+        type = o.strOrNull("type"),
+        phase = o.strOrNull("phase"),
+        status = o.str("status"),
+        activity = act,
+        ts = o.long("ts") ?: 0,
+    )
+}
+
+/** Null for an element without an id (skipped, not an error). */
+internal fun parseBgTask(el: JsonElement): BgTask? {
+    val o = el as? JsonObject ?: return null
+    val id = o.strOrNull("id")?.takeIf { it.isNotEmpty() } ?: return null
+    return BgTask(id, o.str("kind"), o.str("label"), o.str("toolUseId"), o.str("status"), o.long("startedAt") ?: 0, o.long("endedAt"))
+}
+
+/** Null when [k] isn't an array, so "not sent" stays distinct from empty. */
+private fun JsonObject.agentsOrNull(k: String): List<AgentSummary>? =
+    (this[k] as? JsonArray)?.mapNotNull(::parseAgentSummary)
+
+private fun JsonObject.tasksOrNull(k: String): List<BgTask>? =
+    (this[k] as? JsonArray)?.mapNotNull(::parseBgTask)
+
 /** Null for an event type this app version doesn't know (skipped, not an error). */
 fun parseChatEvent(o: JsonObject): ChatEvent? {
     fun s(k: String) = o.str(k)
@@ -190,15 +259,28 @@ private fun maxSeq(events: JsonArray?): Int =
     events?.maxOfOrNull { ((it as? JsonObject)?.get("seq") as? JsonPrimitive)?.intOrNull ?: 0 } ?: 0
 
 sealed interface ServerFrame {
-    /** [maxSeq]: the highest seq among all its events, including ones of an unknown type (left out of [entries]). */
-    data class ChatSnapshot(val paneId: String, val epoch: Int, val state: String, val entries: List<ChatEntry>, val hasMore: Boolean = false, val maxSeq: Int = 0) : ServerFrame
+    /**
+     * [maxSeq]: the highest seq among all its events, including ones of an unknown type (left out of [entries]).
+     * [agentId] is set for a thread's snapshot; [missing] says the companion doesn't know that thread.
+     * [agents] and [tasks] come with the main stream's snapshot; null means not sent (distinct from empty).
+     */
+    data class ChatSnapshot(
+        val paneId: String, val epoch: Int, val state: String, val entries: List<ChatEntry>,
+        val hasMore: Boolean = false, val maxSeq: Int = 0,
+        val agentId: String? = null, val missing: Boolean = false,
+        val agents: List<AgentSummary>? = null, val tasks: List<BgTask>? = null,
+    ) : ServerFrame
     /** A [stale] page (the epoch moved on) carries no entries and hasMore false. */
-    data class ChatHistoryPage(val reqId: String, val paneId: String, val epoch: Int, val entries: List<ChatEntry>, val hasMore: Boolean, val stale: Boolean = false) : ServerFrame
+    data class ChatHistoryPage(val reqId: String, val paneId: String, val epoch: Int, val entries: List<ChatEntry>, val hasMore: Boolean, val stale: Boolean = false, val agentId: String? = null) : ServerFrame
     /** [data] is base64; null with [missing] when the companion doesn't have the image. */
     data class ChatImageData(val paneId: String, val id: String, val mediaType: String?, val data: String?, val missing: Boolean) : ServerFrame
     data class ChatAnswerResult(val reqId: String, val ok: Boolean, val error: String?) : ServerFrame
     /** [entry] is null for an event of an unknown type; [seq] is the frame's seq either way. */
-    data class ChatEventFrame(val paneId: String, val epoch: Int, val entry: ChatEntry?, val seq: Int = entry?.seq ?: 0) : ServerFrame
+    data class ChatEventFrame(val paneId: String, val epoch: Int, val entry: ChatEntry?, val seq: Int = entry?.seq ?: 0, val agentId: String? = null) : ServerFrame
+    /** An agent of the main stream was added or changed ([agent]), or dropped ([removedId]). */
+    data class ChatAgent(val paneId: String, val agent: AgentSummary?, val removedId: String?) : ServerFrame
+    /** The pane's background tasks, replacing the previous list. */
+    data class ChatTasks(val paneId: String, val tasks: List<BgTask>) : ServerFrame
     data class ChatState(val paneId: String, val state: String) : ServerFrame
     data class ChatSendResult(val reqId: String, val ok: Boolean, val error: String?) : ServerFrame
     data object Welcome : ServerFrame
@@ -272,12 +354,14 @@ fun parseServerFrame(text: String): ServerFrame {
             obj["state"]?.jsonPrimitive?.contentOrNull ?: "idle",
             (obj["events"] as? JsonArray)?.mapNotNull(::parseChatEntry) ?: emptyList(),
             obj.bool("hasMore"),
-            maxSeq(obj["events"] as? JsonArray))
+            maxSeq(obj["events"] as? JsonArray),
+            obj.strOrNull("agentId"), obj.bool("missing"),
+            obj.agentsOrNull("agents"), obj.tasksOrNull("tasks"))
         "chat_history_page" -> ServerFrame.ChatHistoryPage(
             obj.str("reqId"), obj.str("paneId"),
             obj["epoch"]?.jsonPrimitive?.intOrNull ?: 0,
             (obj["events"] as? JsonArray)?.mapNotNull(::parseChatEntry) ?: emptyList(),
-            obj.bool("hasMore"), obj.bool("stale"))
+            obj.bool("hasMore"), obj.bool("stale"), obj.strOrNull("agentId"))
         "chat_image_data" -> ServerFrame.ChatImageData(
             obj.str("paneId"), obj.str("id"), obj.strOrNull("mediaType"), obj.strOrNull("data"), obj.bool("missing"))
         "chat_answer_result" -> ServerFrame.ChatAnswerResult(obj.str("reqId"), obj.bool("ok"), obj.strOrNull("error"))
@@ -285,7 +369,13 @@ fun parseServerFrame(text: String): ServerFrame {
             obj["paneId"]?.jsonPrimitive?.content ?: "",
             obj["epoch"]?.jsonPrimitive?.intOrNull ?: 0,
             parseChatEntry(obj),
-            (obj["seq"] as? JsonPrimitive)?.intOrNull ?: 0)
+            (obj["seq"] as? JsonPrimitive)?.intOrNull ?: 0,
+            obj.strOrNull("agentId"))
+        "chat_agent" -> ServerFrame.ChatAgent(
+            obj.str("paneId"),
+            obj["agent"]?.let(::parseAgentSummary),
+            if (obj.bool("removed")) obj.strOrNull("agentId") else null)
+        "chat_tasks" -> ServerFrame.ChatTasks(obj.str("paneId"), obj.tasksOrNull("tasks") ?: emptyList())
         "chat_state" -> ServerFrame.ChatState(
             obj["paneId"]?.jsonPrimitive?.content ?: "",
             obj["state"]?.jsonPrimitive?.contentOrNull ?: "idle")
@@ -301,12 +391,18 @@ object ClientMsg {
     private fun obj(vararg pairs: Pair<String, JsonElement>) =
         JsonObject(pairs.toMap()).toString()
 
-    fun chatOpen(paneId: String) = obj("t" to JsonPrimitive("chat_open"), "paneId" to JsonPrimitive(paneId))
-    fun chatClose(paneId: String) = obj("t" to JsonPrimitive("chat_close"), "paneId" to JsonPrimitive(paneId))
+    /** [agentId] picks a thread of the pane; omitted for the main stream. */
+    private fun withAgent(agentId: String?, vararg pairs: Pair<String, JsonElement>) =
+        obj(*pairs, *(if (agentId != null) arrayOf("agentId" to JsonPrimitive(agentId)) else emptyArray()))
+
+    fun chatOpen(paneId: String, agentId: String? = null) =
+        withAgent(agentId, "t" to JsonPrimitive("chat_open"), "paneId" to JsonPrimitive(paneId))
+    fun chatClose(paneId: String, agentId: String? = null) =
+        withAgent(agentId, "t" to JsonPrimitive("chat_close"), "paneId" to JsonPrimitive(paneId))
     fun chatSend(reqId: String, paneId: String, text: String) =
         obj("t" to JsonPrimitive("chat_send"), "reqId" to JsonPrimitive(reqId), "paneId" to JsonPrimitive(paneId), "text" to JsonPrimitive(text))
-    fun chatHistory(reqId: String, paneId: String, epoch: Int, beforeSeq: Int, limit: Int) =
-        obj("t" to JsonPrimitive("chat_history"), "reqId" to JsonPrimitive(reqId), "paneId" to JsonPrimitive(paneId),
+    fun chatHistory(reqId: String, paneId: String, epoch: Int, beforeSeq: Int, limit: Int, agentId: String? = null) =
+        withAgent(agentId, "t" to JsonPrimitive("chat_history"), "reqId" to JsonPrimitive(reqId), "paneId" to JsonPrimitive(paneId),
             "epoch" to JsonPrimitive(epoch), "beforeSeq" to JsonPrimitive(beforeSeq), "limit" to JsonPrimitive(limit))
     fun chatImage(paneId: String, id: String) =
         obj("t" to JsonPrimitive("chat_image"), "paneId" to JsonPrimitive(paneId), "id" to JsonPrimitive(id))

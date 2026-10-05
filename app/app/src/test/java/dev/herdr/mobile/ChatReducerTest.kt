@@ -482,4 +482,50 @@ class ChatReducerTest {
         assertEquals("Oct 4 23:10", formatTs(at("2026-10-04T23:10:00"), afterMidnight, zone, loc))
         assertEquals("00:05", formatTs(at("2026-10-05T00:05:00"), afterMidnight, zone, loc))
     }
+
+    // ---- protocol 10: agents and tasks ----
+
+    private fun agent(id: String, status: String = "running") =
+        AgentSummary(id, "tu-$id", kind = "subagent", label = "L$id", status = status)
+    private fun task(id: String, status: String = "running") = BgTask(id, "shell", "t$id", "tu-$id", status, 1)
+
+    @Test fun snapshotSetsAgentsAndTasks() {
+        val f = ServerFrame.ChatSnapshot("p", 1, "idle", emptyList(), agents = listOf(agent("a"), agent("b")), tasks = listOf(task("t")), missing = true)
+        val v = onFrame(ChatView(), f)
+        assertEquals(setOf("a", "b"), v.agents.keys)
+        assertEquals(listOf("t"), v.tasks.map { it.id })
+        assertTrue(v.missing)
+    }
+
+    @Test fun snapshotWithNullAgentsAndTasksKeepsExisting() {
+        var v = onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", emptyList(), agents = listOf(agent("a")), tasks = listOf(task("t"))))
+        v = onFrame(v, snap(1, user(1, "x")))
+        assertEquals(setOf("a"), v.agents.keys)
+        assertEquals(1, v.tasks.size)
+        assertFalse(v.missing)
+    }
+
+    @Test fun snapshotWithEmptyAgentsClears() {
+        var v = onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", emptyList(), agents = listOf(agent("a")), tasks = listOf(task("t"))))
+        v = onFrame(v, ServerFrame.ChatSnapshot("p", 1, "idle", emptyList(), agents = emptyList(), tasks = emptyList()))
+        assertTrue(v.agents.isEmpty())
+        assertTrue(v.tasks.isEmpty())
+    }
+
+    @Test fun chatAgentUpsertsAndRemoves() {
+        var v = onFrame(ChatView(), ServerFrame.ChatAgent("p", agent("a"), null))
+        assertEquals("running", v.agents["a"]!!.status)
+        v = onFrame(v, ServerFrame.ChatAgent("p", agent("a", "done"), null))
+        assertEquals("done", v.agents["a"]!!.status)
+        assertEquals(1, v.agents.size)
+        v = onFrame(v, ServerFrame.ChatAgent("p", null, "a"))
+        assertTrue(v.agents.isEmpty())
+    }
+
+    @Test fun chatTasksReplaces() {
+        var v = onFrame(ChatView(), ServerFrame.ChatTasks("p", listOf(task("a"), task("b"))))
+        assertEquals(2, v.tasks.size)
+        v = onFrame(v, ServerFrame.ChatTasks("p", listOf(task("c"))))
+        assertEquals(listOf("c"), v.tasks.map { it.id })
+    }
 }

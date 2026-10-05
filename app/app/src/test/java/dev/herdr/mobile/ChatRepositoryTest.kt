@@ -469,4 +469,66 @@ class ChatRepositoryTest {
         repo.answer("p", "tq", mapOf("Q" to "B"))
         assertEquals(1, calls)
     }
+
+    // ---- protocol 10: thread keys ----
+
+    private fun threadReply(seq: Int) = ServerFrame.ChatEventFrame("p", 1, ChatEntry(seq, ChatEvent.AssistantText("a$seq", "r")), agentId = "aa1")
+
+    @Test fun threadFramesUpdateOnlyTheirKey() {
+        val repo = ChatRepository(sendRaw = {}, sendChat = { _, _ -> })
+        repo.onFrame(ServerFrame.ChatSnapshot("p", 1, "idle", emptyList()))
+        repo.onFrame(ServerFrame.ChatSnapshot("p", 1, "working", emptyList(), agentId = "aa1"))
+        assertEquals("idle", repo.view(ChatKey("p")).value.state)
+        assertEquals("working", repo.view(ChatKey("p", "aa1")).value.state)
+        repo.onFrame(ServerFrame.ChatState("p", "working"))
+        assertEquals("working", repo.view(ChatKey("p")).value.state)
+        repo.onFrame(threadReply(1))
+        assertEquals(1, repo.view(ChatKey("p", "aa1")).value.entries.size)
+        assertEquals(0, repo.view(ChatKey("p")).value.entries.size)
+    }
+
+    @Test fun threadGapReopensWithAgentId() {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> })
+        repo.open(ChatKey("p", "aa1"))
+        repo.onFrame(ServerFrame.ChatSnapshot("p", 1, "idle", emptyList(), agentId = "aa1"))
+        sent.clear()
+        repo.onFrame(threadReply(3))
+        assertEquals(listOf(ClientMsg.chatOpen("p", "aa1")), sent)
+    }
+
+    @Test fun reconnectReopensEveryOpenedKey() {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> })
+        repo.open(ChatKey("p"))
+        repo.open(ChatKey("p", "aa1"))
+        sent.clear()
+        repo.onReconnected()
+        assertEquals(setOf(ClientMsg.chatOpen("p"), ClientMsg.chatOpen("p", "aa1")), sent.toSet())
+        assertEquals(2, sent.size)
+        repo.close(ChatKey("p", "aa1"))
+        assertTrue(sent.last().contains("chat_close") && sent.last().contains("aa1"))
+        sent.clear()
+        repo.onReconnected()
+        assertEquals(listOf(ClientMsg.chatOpen("p")), sent)
+    }
+
+    @Test fun chatAgentAndTasksLandOnTheMainView() {
+        val repo = ChatRepository(sendRaw = {}, sendChat = { _, _ -> })
+        val a = AgentSummary("aa1", "tu", kind = "subagent", label = "L", status = "running")
+        repo.onFrame(ServerFrame.ChatAgent("p", a, null))
+        repo.onFrame(ServerFrame.ChatTasks("p", listOf(BgTask("t", "shell", "l", "tu", "running", 1))))
+        assertEquals(setOf("aa1"), repo.view(ChatKey("p")).value.agents.keys)
+        assertEquals(1, repo.view(ChatKey("p")).value.tasks.size)
+        assertTrue(repo.view(ChatKey("p", "aa1")).value.agents.isEmpty())
+    }
+
+    @Test fun threadLoadOlderSendsAgentId() {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> })
+        repo.onFrame(ServerFrame.ChatSnapshot("p", 1, "idle", listOf(ChatEntry(5, ChatEvent.AssistantText("a", "r"))), hasMore = true, agentId = "aa1"))
+        repo.loadOlder(ChatKey("p", "aa1"))
+        assertEquals(1, historyMsgs(sent).size)
+        assertTrue(historyMsgs(sent).single().contains(""""agentId":"aa1""""))
+    }
 }

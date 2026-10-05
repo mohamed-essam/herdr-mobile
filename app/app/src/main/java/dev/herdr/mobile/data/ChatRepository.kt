@@ -25,8 +25,11 @@ const val IMAGE_RETRY_MS = 3_000L
 /** A chat_image / chat_history reply not seen by then is treated as lost. */
 const val REPLY_TIMEOUT_MS = 15_000L
 
+/** A chat stream: a pane's main one ([agentId] null) or one of its agent threads. */
+data class ChatKey(val paneId: String, val agentId: String? = null)
+
 /**
- * Per-pane chat state. Opened panes are re-subscribed after a reconnect; the
+ * Per-pane (and per-thread) chat state. Opened panes are re-subscribed after a reconnect; the
  * companion answers every chat_open with a fresh snapshot.
  */
 class ChatRepository(
@@ -37,51 +40,56 @@ class ChatRepository(
     /** Runs the delayed image retries. */
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
-    private val views = ConcurrentHashMap<String, MutableStateFlow<ChatView>>()
-    private val opened: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    private val views = ConcurrentHashMap<ChatKey, MutableStateFlow<ChatView>>()
+    private val opened: MutableSet<ChatKey> = ConcurrentHashMap.newKeySet()
     private val ids = AtomicInteger(0)
 
-    private fun flow(paneId: String) = views.computeIfAbsent(paneId) { MutableStateFlow(ChatView()) }
+    private fun flow(key: ChatKey) = views.computeIfAbsent(key) { MutableStateFlow(ChatView()) }
 
-    fun view(paneId: String): StateFlow<ChatView> = flow(paneId)
+    fun view(key: ChatKey): StateFlow<ChatView> = flow(key)
+    fun view(paneId: String): StateFlow<ChatView> = view(ChatKey(paneId))
 
     fun onFrame(f: ServerFrame) {
-        val paneId = when (f) {
-            is ServerFrame.ChatSnapshot -> f.paneId
-            is ServerFrame.ChatEventFrame -> f.paneId
-            is ServerFrame.ChatState -> f.paneId
-            is ServerFrame.ChatHistoryPage -> f.paneId
+        val key = when (f) {
+            is ServerFrame.ChatSnapshot -> ChatKey(f.paneId, f.agentId)
+            is ServerFrame.ChatEventFrame -> ChatKey(f.paneId, f.agentId)
+            is ServerFrame.ChatState -> ChatKey(f.paneId)
+            is ServerFrame.ChatHistoryPage -> ChatKey(f.paneId, f.agentId)
+            is ServerFrame.ChatAgent -> ChatKey(f.paneId)
+            is ServerFrame.ChatTasks -> ChatKey(f.paneId)
             is ServerFrame.ChatImageData -> return onImage(f)
             else -> return
         }
         val t = now()
         var gapped = false
-        flow(paneId).update { v -> ChatReducer.onFrame(v, f, t).also { gapped = !v.gap && it.gap } }
+        flow(key).update { v -> ChatReducer.onFrame(v, f, t).also { gapped = !v.gap && it.gap } }
         // A seq gap: re-open once; the companion answers with a fresh snapshot.
-        if (gapped && paneId in opened) sendRaw(ClientMsg.chatOpen(paneId))
+        if (gapped && key in opened) sendRaw(ClientMsg.chatOpen(key.paneId, key.agentId))
         // The companion may hold images now that it lacked before (a resync
         // re-sends the history's newest): give this pane's missing ones another go.
         if (f is ServerFrame.ChatSnapshot) {
             val toSend = synchronized(imgLock) {
-                resetMissingLocked(paneId).forEach { if (it !in imgQueue && it !in imgInFlight) imgQueue.addLast(it) }
+                resetMissingLocked(key.paneId).forEach { if (it !in imgQueue && it !in imgInFlight) imgQueue.addLast(it) }
                 pumpLocked()
             }
             sendImages(toSend)
         }
     }
 
-    fun open(paneId: String) {
-        opened += paneId
-        sendRaw(ClientMsg.chatOpen(paneId))
+    fun open(key: ChatKey) {
+        opened += key
+        sendRaw(ClientMsg.chatOpen(key.paneId, key.agentId))
     }
+    fun open(paneId: String) = open(ChatKey(paneId))
 
-    fun close(paneId: String) {
-        opened -= paneId
-        sendRaw(ClientMsg.chatClose(paneId))
+    fun close(key: ChatKey) {
+        opened -= key
+        sendRaw(ClientMsg.chatClose(key.paneId, key.agentId))
     }
+    fun close(paneId: String) = close(ChatKey(paneId))
 
     fun onReconnected() {
-        opened.forEach { sendRaw(ClientMsg.chatOpen(it)) }
+        opened.forEach { sendRaw(ClientMsg.chatOpen(it.paneId, it.agentId)) }
         // Replies to requests sent on the old socket will never come.
         val toSend = synchronized(imgLock) {
             imgInFlight.clear()
@@ -99,16 +107,18 @@ class ChatRepository(
      * reply that doesn't come within [REPLY_TIMEOUT_MS] (or a snapshot) clears
      * the request so paging can resume.
      */
-    fun loadOlder(paneId: String) {
+    fun loadOlder(paneId: String) = loadOlder(ChatKey(paneId))
+
+    fun loadOlder(key: ChatKey) {
         val reqId = "h${ids.incrementAndGet()}"
         var msg: String? = null
-        flow(paneId).update { v ->
+        flow(key).update { v ->
             if (!v.loaded || !v.hasMore || v.loadingOlder || v.gap) {
                 msg = null
                 v
             } else {
                 val before = v.entries.firstOrNull()?.seq ?: (v.lastSeq + 1)
-                msg = ClientMsg.chatHistory(reqId, paneId, v.epoch, before, HISTORY_PAGE_LIMIT)
+                msg = ClientMsg.chatHistory(reqId, key.paneId, v.epoch, before, HISTORY_PAGE_LIMIT, key.agentId)
                 ChatReducer.startLoadingOlder(v, reqId)
             }
         }
@@ -116,7 +126,7 @@ class ChatRepository(
         sendRaw(m)
         scope.launch {
             delay(REPLY_TIMEOUT_MS)
-            flow(paneId).update { ChatReducer.olderTimedOut(it, reqId) }
+            flow(key).update { ChatReducer.olderTimedOut(it, reqId) }
         }
     }
 
@@ -124,7 +134,7 @@ class ChatRepository(
         val t = text.trim()
         if (t.isEmpty()) return
         val id = "p${ids.incrementAndGet()}"
-        flow(paneId).update { ChatReducer.addPending(it, id, t, now()) }
+        flow(ChatKey(paneId)).update { ChatReducer.addPending(it, id, t, now()) }
         try {
             sendChat(paneId, t)
         } catch (e: TimeoutCancellationException) {
@@ -133,13 +143,13 @@ class ChatRepository(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            flow(paneId).update { ChatReducer.failPending(it, id, e.message ?: "send failed") }
+            flow(ChatKey(paneId)).update { ChatReducer.failPending(it, id, e.message ?: "send failed") }
         }
     }
 
     suspend fun retry(paneId: String, pendingId: String) {
         var text: String? = null
-        flow(paneId).update { v ->
+        flow(ChatKey(paneId)).update { v ->
             val p = v.pending.firstOrNull { it.id == pendingId && it.status != PendingStatus.Queued }
             text = p?.text
             if (p == null) v else ChatReducer.removePending(v, pendingId)
@@ -160,7 +170,7 @@ class ChatRepository(
      */
     suspend fun answer(paneId: String, toolUseId: String, answers: Map<String, String>) {
         var go = false
-        flow(paneId).update { v ->
+        flow(ChatKey(paneId)).update { v ->
             go = toolUseId !in v.answering && toolUseId !in v.answered
             if (go) ChatReducer.markAnswering(v, toolUseId) else v
         }
@@ -168,7 +178,7 @@ class ChatRepository(
         try {
             sendAnswer(paneId, toolUseId, answers)
         } catch (e: Throwable) {
-            flow(paneId).update { ChatReducer.clearAnswering(it, toolUseId) }
+            flow(ChatKey(paneId)).update { ChatReducer.clearAnswering(it, toolUseId) }
             if (e is TimeoutCancellationException) throw RuntimeException("timed out", e)
             throw e
         }

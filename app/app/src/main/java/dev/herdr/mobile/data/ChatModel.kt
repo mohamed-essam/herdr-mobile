@@ -1,5 +1,7 @@
 package dev.herdr.mobile.data
 
+import dev.herdr.mobile.net.AgentSummary
+import dev.herdr.mobile.net.BgTask
 import dev.herdr.mobile.net.ChatEntry
 import dev.herdr.mobile.net.ChatEvent
 import dev.herdr.mobile.net.ServerFrame
@@ -45,6 +47,12 @@ data class ChatView(
      * so rows already on screen keep their keys and heights.
      */
     val pageStarts: Set<Int> = emptySet(),
+    /** The pane's subagents and workflows by agentId; kept up to date on the main view only. */
+    val agents: Map<String, AgentSummary> = emptyMap(),
+    /** The pane's background tasks (main view only). */
+    val tasks: List<BgTask> = emptyList(),
+    /** A thread's snapshot said the companion doesn't know that agent. */
+    val missing: Boolean = false,
 )
 
 const val PENDING_TIMEOUT_MS = 120_000L
@@ -83,6 +91,10 @@ object ChatReducer {
                 olderReqId = null,
                 answered = answered,
                 pageStarts = emptySet(),
+                // A thread's snapshot sends neither: keep what the view has.
+                agents = f.agents?.associateBy { it.agentId } ?: v.agents,
+                tasks = f.tasks ?: v.tasks,
+                missing = f.missing,
                 // A new epoch (companion restart / new session) dropped any held answer.
                 answering = if (v.loaded && f.epoch == v.epoch) v.answering - answeredResults(entries) else emptySet(),
             )
@@ -126,6 +138,12 @@ object ChatReducer {
             }
         }
         is ServerFrame.ChatState -> withState(v, f.state, now)
+        is ServerFrame.ChatAgent -> when {
+            f.agent != null -> v.copy(agents = v.agents + (f.agent.agentId to f.agent))
+            f.removedId != null -> v.copy(agents = v.agents - f.removedId)
+            else -> v
+        }
+        is ServerFrame.ChatTasks -> v.copy(tasks = f.tasks)
         else -> v
     }
 

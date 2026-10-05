@@ -363,4 +363,94 @@ class ProtocolTest {
         assertNull(p.activity?.tool)
         assertNull(p.ask)
     }
+
+    // ---- protocol 10: threads, agents, tasks ----
+
+    @Test fun parsesMainSnapshotWithAgentsAndTasks() {
+        val f = parseServerFrame("""{"t":"chat_snapshot","paneId":"p","epoch":2,"state":"working","events":[],"hasMore":false,
+            "agents":[{"agentId":"aa1","parentToolUseId":"tu1","kind":"subagent","label":"Explore","type":"Explore","status":"running","activity":{"kind":"tool","tool":"Read","text":"x.kt","ts":9},"ts":5},
+                      {"agentId":"bb2","parentToolUseId":"tu2","parentAgentId":"aa1","kind":"workflow","label":"wf","phase":"build","status":"done","ts":6}],
+            "tasks":[{"id":"t1","kind":"shell","label":"sleep","toolUseId":"tu3","status":"running","startedAt":100},
+                     {"id":"t2","kind":"monitor","label":"m","toolUseId":"tu4","status":"failed","startedAt":1,"endedAt":2}]}""") as ServerFrame.ChatSnapshot
+        assertNull(f.agentId)
+        assertFalse(f.missing)
+        val a = f.agents!!
+        assertEquals(2, a.size)
+        assertEquals("aa1", a[0].agentId)
+        assertEquals("Read", a[0].activity!!.tool)
+        assertEquals("Explore", a[0].type)
+        assertNull(a[0].parentAgentId)
+        assertEquals("aa1", a[1].parentAgentId)
+        assertEquals("build", a[1].phase)
+        assertNull(a[1].activity)
+        val t = f.tasks!!
+        assertEquals(listOf("t1", "t2"), t.map { it.id })
+        assertEquals(100L, t[0].startedAt)
+        assertNull(t[0].endedAt)
+        assertEquals(2L, t[1].endedAt)
+    }
+
+    @Test fun parsesThreadSnapshotWithoutAgentsAsNull() {
+        val f = parseServerFrame("""{"t":"chat_snapshot","paneId":"p","agentId":"aa1","epoch":1,"state":"idle","events":[],"hasMore":false}""") as ServerFrame.ChatSnapshot
+        assertEquals("aa1", f.agentId)
+        assertNull(f.agents)
+        assertNull(f.tasks)
+        val main = parseServerFrame("""{"t":"chat_snapshot","paneId":"p","epoch":1,"state":"idle","events":[],"agents":[]}""") as ServerFrame.ChatSnapshot
+        assertEquals(emptyList<AgentSummary>(), main.agents)
+        assertNull(main.tasks)
+    }
+
+    @Test fun parsesMissingThreadSnapshot() {
+        val f = parseServerFrame("""{"t":"chat_snapshot","paneId":"p","agentId":"zz","epoch":1,"state":"idle","events":[],"hasMore":false,"missing":true}""") as ServerFrame.ChatSnapshot
+        assertTrue(f.missing)
+    }
+
+    @Test fun parsesChatAgentUpsertAndRemoval() {
+        val up = parseServerFrame("""{"t":"chat_agent","paneId":"p","agent":{"agentId":"aa1","parentToolUseId":"tu1","kind":"subagent","label":"L","status":"done","ts":3}}""") as ServerFrame.ChatAgent
+        assertEquals("p", up.paneId)
+        assertEquals("aa1", up.agent!!.agentId)
+        assertNull(up.removedId)
+        val rm = parseServerFrame("""{"t":"chat_agent","paneId":"p","agentId":"aa1","removed":true}""") as ServerFrame.ChatAgent
+        assertNull(rm.agent)
+        assertEquals("aa1", rm.removedId)
+    }
+
+    @Test fun parsesChatTasks() {
+        val f = parseServerFrame("""{"t":"chat_tasks","paneId":"p","tasks":[{"id":"t1","kind":"subagent","label":"x","toolUseId":"tu","status":"done","startedAt":1,"endedAt":4}]}""") as ServerFrame.ChatTasks
+        assertEquals("p", f.paneId)
+        assertEquals("t1", f.tasks.single().id)
+        assertEquals(emptyList<BgTask>(), (parseServerFrame("""{"t":"chat_tasks","paneId":"p","tasks":[]}""") as ServerFrame.ChatTasks).tasks)
+    }
+
+    @Test fun parsesAgentIdOnEventsAndHistoryPages() {
+        val e = parseServerFrame("""{"t":"chat_event","paneId":"p","agentId":"aa1","epoch":1,"seq":3,"event":{"type":"assistant_text","uuid":"u","text":"hi"}}""") as ServerFrame.ChatEventFrame
+        assertEquals("aa1", e.agentId)
+        assertEquals(3, e.seq)
+        assertNull((parseServerFrame("""{"t":"chat_event","paneId":"p","epoch":1,"seq":3,"event":{"type":"assistant_text","uuid":"u","text":"hi"}}""") as ServerFrame.ChatEventFrame).agentId)
+        val h = parseServerFrame("""{"t":"chat_history_page","reqId":"h1","paneId":"p","agentId":"aa1","epoch":1,"events":[],"hasMore":false}""") as ServerFrame.ChatHistoryPage
+        assertEquals("aa1", h.agentId)
+    }
+
+    @Test fun parsesBgRunningOnPane() {
+        val p = (parseServerFrame("""{"t":"pane_update","pane":{"paneId":"w1:p1","bgRunning":3}}""") as ServerFrame.PaneUpdate).pane
+        assertEquals(3, p.bgRunning)
+        assertEquals(0, (parseServerFrame("""{"t":"pane_update","pane":{"paneId":"w1:p1"}}""") as ServerFrame.PaneUpdate).pane.bgRunning)
+    }
+
+    @Test fun skipsMalformedAgentAndTaskElements() {
+        val f = parseServerFrame("""{"t":"chat_snapshot","paneId":"p","epoch":1,"state":"idle","events":[],
+            "agents":[{"label":"no id"},"junk",{"agentId":"ok","parentToolUseId":"tu","kind":"subagent","label":"L","status":"running","ts":1}],
+            "tasks":[{"kind":"shell"},7,{"id":"t","kind":"shell","label":"l","toolUseId":"tu","status":"running","startedAt":1}]}""") as ServerFrame.ChatSnapshot
+        assertEquals(listOf("ok"), f.agents!!.map { it.agentId })
+        assertEquals(listOf("t"), f.tasks!!.map { it.id })
+    }
+
+    @Test fun threadAwareClientMessagesAddAgentIdOnlyWhenSet() {
+        assertFalse(ClientMsg.chatOpen("p").contains("agentId"))
+        assertTrue(ClientMsg.chatOpen("p", "aa1").contains(""""agentId":"aa1""""))
+        assertFalse(ClientMsg.chatClose("p").contains("agentId"))
+        assertTrue(ClientMsg.chatClose("p", "aa1").contains(""""agentId":"aa1""""))
+        assertFalse(ClientMsg.chatHistory("r", "p", 1, 5, 300).contains("agentId"))
+        assertTrue(ClientMsg.chatHistory("r", "p", 1, 5, 300, "aa1").contains(""""agentId":"aa1""""))
+    }
 }
