@@ -116,7 +116,30 @@ fun workspaceStatus(node: WorkspaceNode): String {
     return listOf("blocked", "working", "done").firstOrNull { it in statuses } ?: "idle"
 }
 
-/** Where tapping a workspace tile goes: a blocked pane, else a working one, else the first. */
+/** Whether a pane has anything to show when opened: a terminal or a chat. */
+fun canOpen(p: Pane): Boolean = p.terminalId.isNotBlank() || p.chat
+
+/** What to do with a request to open a pane (a tapped notification). */
+sealed interface OpenRequest {
+    /** No pane snapshot yet; try again when one arrives. */
+    data object Wait : OpenRequest
+    data class Open(val pane: Pane) : OpenRequest
+    /** The pane is gone or has nothing to show. */
+    data object Drop : OpenRequest
+}
+
+/**
+ * Resolves a request to open [paneId] against the first pane snapshot. It is
+ * one-shot: anything but [OpenRequest.Wait] consumes it, so it can't reopen the
+ * pane on a later update after the user has gone back.
+ */
+fun resolveOpenRequest(paneId: String, panes: List<Pane>): OpenRequest {
+    if (panes.isEmpty()) return OpenRequest.Wait
+    val p = panes.firstOrNull { it.paneId == paneId }
+    return if (p != null && canOpen(p)) OpenRequest.Open(p) else OpenRequest.Drop
+}
+
+/** Where tapping a workspace tile goes:a blocked pane, else a working one, else the first. */
 fun mostRelevantPane(node: WorkspaceNode): Pane? {
     val panes = workspacePanes(node)
     return panes.firstOrNull { it.agent != null && it.agentStatus == "blocked" }

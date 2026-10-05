@@ -58,11 +58,17 @@ private data class AnswerToast(val paneId: String, val label: String)
 /**
  * The attention-first dashboard: what needs you (answerable in place), what's
  * working, then everything else, with the workspace switcher and "+" at the
- * bottom. Opening a pane replaces it with [PaneScreen]. [companionUrl] is shown
- * on the empty state.
+ * bottom. Opening a pane replaces it with [PaneScreen]. [openRequest] is a pane
+ * to open (from a notification), acknowledged with [onOpenRequestHandled].
+ * [companionUrl] is shown on the empty state.
  */
 @Composable
-fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?, companionUrl: String? = null) {
+fun DashboardScreen(
+    vm: DashboardViewModel,
+    openRequest: String?,
+    onOpenRequestHandled: () -> Unit,
+    companionUrl: String? = null,
+) {
     val panes by vm.panes.collectAsState()
     val connected by vm.connected.collectAsState()
     var selected by remember { mutableStateOf<Pane?>(null) }
@@ -72,10 +78,16 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?, companionUrl
     var answers by remember { mutableStateOf<InlineAnswers>(emptyMap()) }
     var toast by remember { mutableStateOf<AnswerToast?>(null) }
 
-    LaunchedEffect(initialPaneId, panes) {
-        if (initialPaneId != null && selected == null) {
-            panes.firstOrNull { it.paneId == initialPaneId && it.agent != null }?.let { selected = it }
+    // A tapped notification opens its pane once, over whatever is showing; it
+    // must not reopen it on later updates after the user has gone back.
+    LaunchedEffect(openRequest, panes) {
+        val id = openRequest ?: return@LaunchedEffect
+        when (val r = resolveOpenRequest(id, panes)) {
+            OpenRequest.Wait -> return@LaunchedEffect
+            is OpenRequest.Open -> selected = r.pane
+            OpenRequest.Drop -> {}
         }
+        onOpenRequestHandled()
     }
 
     // Pop back to the dashboard when the pane we're viewing disappears (closed
@@ -142,7 +154,7 @@ fun DashboardScreen(vm: DashboardViewModel, initialPaneId: String?, companionUrl
         actionTarget = a
     }
     fun dismissSheet() { actionTarget = null; confirmSummary = null; alsoCloses = emptyList() }
-    fun open(p: Pane) { if (p.terminalId.isNotBlank() || p.chat) selected = p }
+    fun open(p: Pane) { if (canOpen(p)) selected = p }
     fun answer(pane: Pane, ask: PaneAsk, item: QuestionItem, label: String, wsLabel: String) {
         answers = startAnswer(answers, pane.paneId, ask.toolUseId, label, System.currentTimeMillis()) ?: return
         scope.launch {

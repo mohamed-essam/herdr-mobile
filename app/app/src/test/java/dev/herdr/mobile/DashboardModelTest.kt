@@ -24,6 +24,8 @@ import dev.herdr.mobile.ui.inlineAnswerMap
 import dev.herdr.mobile.ui.inlineChoice
 import dev.herdr.mobile.ui.mostRelevantPane
 import dev.herdr.mobile.ui.nextAnswerExpiry
+import dev.herdr.mobile.ui.OpenRequest
+import dev.herdr.mobile.ui.resolveOpenRequest
 import dev.herdr.mobile.ui.staleLabel
 import dev.herdr.mobile.ui.startAnswer
 import dev.herdr.mobile.ui.statusCounts
@@ -205,5 +207,17 @@ class DashboardModelTest {
         assertEquals("host", hostPort("host"))
         val c = statusCounts(listOf(agent("a", "blocked"), agent("b", "working"), agent("c", "working"), shell("s")))
         assertEquals(1, c.blocked); assertEquals(2, c.working); assertEquals(0, c.done)
+    }
+
+    @Test fun openRequestIsResolvedOnce() {
+        val p = agent("p1", "blocked").copy(terminalId = "t-1")
+        // No snapshot yet: keep waiting.
+        assertEquals(OpenRequest.Wait, resolveOpenRequest("p1", emptyList()))
+        assertEquals(OpenRequest.Open(p), resolveOpenRequest("p1", listOf(p, shell("s"))))
+        // Gone, or nothing to show: drop it rather than open it on some later update.
+        assertEquals(OpenRequest.Drop, resolveOpenRequest("gone", listOf(p)))
+        assertEquals(OpenRequest.Drop, resolveOpenRequest("p1", listOf(agent("p1", "blocked"))))
+        assertEquals(OpenRequest.Open(p.copy(terminalId = "", chat = true)),
+            resolveOpenRequest("p1", listOf(p.copy(terminalId = "", chat = true))))
     }
 }

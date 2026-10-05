@@ -1,6 +1,7 @@
 package dev.herdr.mobile
 
 import android.Manifest
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -57,6 +58,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** A pane to open, from a tapped notification; cleared once the dashboard handles it. */
+    private var openRequest by mutableStateOf<String?>(null)
+
+    // singleTop: a notification tapped while the app is open lands here instead
+    // of recreating the activity (and its companion session).
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        intent.getStringExtra("paneId")?.let { openRequest = it }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -76,7 +87,9 @@ class MainActivity : ComponentActivity() {
                 ),
             )
         }
-        val initialPane = intent.getStringExtra("paneId")
+        // Only a fresh launch honours the extra: a recreated activity still carries
+        // the launch intent, and must not reopen a pane the user has since left.
+        if (savedInstanceState == null) openRequest = intent.getStringExtra("paneId")
 
         setContent {
             var session by remember { mutableStateOf(newSession()) }
@@ -146,7 +159,7 @@ class MainActivity : ComponentActivity() {
                             onBack = ::back,
                         )
                     }
-                    Route.Dashboard -> DashboardScreen(session.vm, initialPane, companionUrl)
+                    Route.Dashboard -> DashboardScreen(session.vm, openRequest, { openRequest = null }, companionUrl)
                 }
             }
         }
