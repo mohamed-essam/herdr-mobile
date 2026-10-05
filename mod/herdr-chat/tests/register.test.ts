@@ -3,8 +3,9 @@ import type { On } from 'claude-code'
 import { BODY_BYTES, HISTORY_IMAGE_BYTES, IMAGE_BYTES, linkWorkflowAgents, queueAppended, type State } from '../hooks/register'
 import { eventsFromTranscript } from '../hooks/transcript'
 import { linkSpawn, newAgentsState, recordWorkflow } from '../hooks/agents'
+import { taskFromLaunch } from '../hooks/tasks'
 
-const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], imageQueue: [], offline: false, inFlight: false, building: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined, historyLacksPath: false, openQuestions: new Map(), agents: newAgentsState() })
+const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], imageQueue: [], offline: false, inFlight: false, building: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined, historyLacksPath: false, openQuestions: new Map(), agents: newAgentsState(), tasks: new Map(), tasksQueued: false })
 
 const MB = 1024 * 1024
 const FETCH_BODY_LIMIT = 4 * MB
@@ -335,6 +336,94 @@ describe('herdr-chat', () => {
     expect(w.all().filter(e => e.type === 'agent')).toEqual([])
   })
 
+  // Background tasks. The Bash launch is driven end to end (a mock tool.call
+  // beneath answers the spike's result); notice rows reach the plugin through
+  // session.append, which the kit can't answer, so those go through queueAppended.
+  const noticeRow = (uuid: string, taskId: string, status = 'completed') => ({
+    door: 'delivery', uuid,
+    message: { role: 'user', content: [{ type: 'text', text: `<task-notification>\n<task-id>${taskId}</task-id>\n<status>${status}</status>\n<summary>Background command "x" ${status}</summary>\n</task-notification>` }] },
+  })
+  const tasksOf = (events: { type: string }[]) => events.filter(e => e.type === 'tasks') as unknown as { tasks: { id: string; kind: string; label: string; status: string }[] }[]
+
+  test('a background Bash call puts a tasks control with one running shell in the next sync', async ($, on) => {
+    const w = world(on)
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { backgroundTaskId: 'b4prbe90d', stdout: '', stderr: '' }, text: '' }) as never)
+    await start($)
+    await w.clock.advance(2000)
+    await $.tool.call({ tool: 'Bash', command: 'sleep 25', run_in_background: true } as never)
+    await w.clock.advance(1000)
+    const sent = tasksOf(w.all() as never)
+    expect(sent.length).toBe(1)
+    expect(sent[0]!.tasks).toMatchObject([{ id: 'b4prbe90d', kind: 'shell', label: 'sleep 25', status: 'running' }])
+  })
+
+  test('a foreground Bash call sends no tasks control', async ($, on) => {
+    const w = world(on)
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'hi', stderr: '' }, text: '' }) as never)
+    await start($)
+    await w.clock.advance(2000)
+    await $.tool.call({ tool: 'Bash', command: 'echo hi' } as never)
+    await w.clock.advance(1000)
+    expect(tasksOf(w.all() as never)).toEqual([])
+  })
+
+  test('a notice row marks the task done, in a fresh tasks control', () => {
+    const s = state('w1:p1')
+    taskFromLaunch(s.tasks, 'Bash', 'toolu_b', { command: 'sleep 25' }, { backgroundTaskId: 'b4prbe90d' }, 1)
+    queueAppended(s, noticeRow('d1', 'b4prbe90d'), undefined)
+    const sent = tasksOf(s.pending as never)
+    expect(sent.length).toBe(1)
+    expect(sent[0]!.tasks).toMatchObject([{ id: 'b4prbe90d', status: 'done' }])
+    expect(s.pending.map(e => e.type)).toEqual(['task_notice', 'tasks'])
+  })
+
+  test('two changes within one tick leave a single, newest tasks control', () => {
+    const s = state('w1:p1')
+    taskFromLaunch(s.tasks, 'Bash', 'toolu_b', { command: 'a' }, { backgroundTaskId: 'b1' }, 1)
+    taskFromLaunch(s.tasks, 'Bash', 'toolu_c', { command: 'b' }, { backgroundTaskId: 'b2' }, 2)
+    queueAppended(s, noticeRow('d1', 'b1'), undefined)
+    queueAppended(s, noticeRow('d2', 'b2', 'failed'), undefined)
+    const sent = tasksOf(s.pending as never)
+    expect(sent.length).toBe(1)
+    expect(Object.fromEntries(sent[0]!.tasks.map(t => [t.id, t.status]))).toEqual({ b1: 'done', b2: 'failed' })
+  })
+
+  test('a subagent notice ends the linked agent too', () => {
+    const s = state('w1:p1')
+    linkSpawn(s.agents, { tool_use_id: 'toolu_a', description: 'd', subagentType: 'general-purpose' }, 'a0ab069d9186e35de', 1)
+    queueAppended(s, noticeRow('d1', 'a0ab069d9186e35de'), undefined)
+    expect(s.pending.map(e => e.type)).toEqual(['task_notice', 'agent', 'tasks'])
+    expect((s.pending[1] as any).agent).toMatchObject({ agentId: 'a0ab069d9186e35de', status: 'done' })
+  })
+
+  test('a subagent row does not feed the tasks list', () => {
+    const s = state('w1:p1')
+    linkSpawn(s.agents, { tool_use_id: 'toolu_a', description: 'd', subagentType: 'general-purpose' }, 'aa1', 1)
+    queueAppended(s, { ...noticeRow('d1', 'zz9'), agentId: 'aa1' }, undefined)
+    expect(s.tasks.size).toBe(0)
+  })
+
+  test('/clear sends an empty tasks control; an outage resync keeps the list', async ($, on) => {
+    let down = false
+    const w = world(on, { down: () => down })
+    on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { backgroundTaskId: 'b4prbe90d' }, text: '' }) as never)
+    await start($)
+    await w.clock.advance(2000)
+    await $.tool.call({ tool: 'Bash', command: 'sleep 25', run_in_background: true } as never)
+    await w.clock.advance(1000)
+    down = true
+    await w.clock.advance(1000)
+    down = false
+    await w.clock.advance(3000)
+    // The resync did not clear it: a later clear sends the empty list.
+    await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+    await w.clock.advance(3000)
+    const sent = tasksOf(w.all() as never)
+    expect(sent[sent.length - 1]).toEqual({ type: 'tasks', tasks: [] })
+    expect(sent.slice(0, -1).every(c => c.tasks.length === 1)).toBe(true)
+  })
+
   test('outbox messages are submitted as the user, in order', async ($, on) => {
     const w = world(on)
     await start($)
@@ -385,7 +474,7 @@ describe('herdr-chat', () => {
       await w.clock.advance(2000)
       const sync = w.syncs[3]!
       expect(sync.sessionId).toBe('sess-2')
-      expect(w.kinds(3)).toEqual(RESYNC)
+      expect(w.kinds(3)).toEqual([...RESYNC, 'tasks'])
       expect(sync.events[0]).toEqual({ type: 'hello', sessionId: 'sess-2', cwd: '/repo' })
       expect(w.snapshots()[1]!.events).toEqual([{ type: 'user_text', uuid: 'snap-0', text: 'fresh question' }])
     })

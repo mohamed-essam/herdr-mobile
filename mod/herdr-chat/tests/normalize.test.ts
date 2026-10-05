@@ -97,22 +97,30 @@ describe('normalizeBlocks: task notifications (L2)', () => {
   test('a notification-only user message yields one task_notice and no user_text', () => {
     const s = 'Background command "Sleep for 25 seconds" completed (exit code 0)'
     expect(normalizeBlocks('user', [{ type: 'text', text: notice('completed', s) }], 'd1')).toEqual([
-      { type: 'task_notice', uuid: 'd1#0', status: 'completed', summary: s },
+      { type: 'task_notice', uuid: 'd1#0', taskId: 'bf3npqvu3', toolUseId: 'toolu_1', status: 'completed', summary: s },
     ])
   })
   test('missing status/summary become empty strings', () => {
-    expect(normalizeBlocks('user', notice(''), 'd2')).toEqual([{ type: 'task_notice', uuid: 'd2#0', status: '', summary: '' }])
+    expect(normalizeBlocks('user', notice(''), 'd2')).toEqual([{ type: 'task_notice', uuid: 'd2#0', taskId: 'bf3npqvu3', toolUseId: 'toolu_1', status: '', summary: '' }])
   })
   test('text outside the notification still becomes user_text', () => {
     const out = normalizeBlocks('user', [{ type: 'text', text: notice('failed', 'boom') + '\n\nnow fix it' }], 'd3')
     expect(out).toEqual([
       { type: 'user_text', uuid: 'd3', text: 'now fix it' },
-      { type: 'task_notice', uuid: 'd3#0', status: 'failed', summary: 'boom' },
+      { type: 'task_notice', uuid: 'd3#0', taskId: 'bf3npqvu3', toolUseId: 'toolu_1', status: 'failed', summary: 'boom' },
     ])
   })
   test('reminders around a notification are stripped first', () => {
     const out = normalizeBlocks('user', '<system-reminder>r</system-reminder>\n' + notice('killed', 'k'), 'd4')
-    expect(out).toEqual([{ type: 'task_notice', uuid: 'd4#0', status: 'killed', summary: 'k' }])
+    expect(out).toEqual([{ type: 'task_notice', uuid: 'd4#0', taskId: 'bf3npqvu3', toolUseId: 'toolu_1', status: 'killed', summary: 'k' }])
+  })
+  test('the spike notice carries its task id and tool-use id; empty ones are omitted', () => {
+    const text = '<task-notification>\n<task-id>a0ab069d9186e35de</task-id>\n<tool-use-id>toolu_01AHLnnYchSVz4oxU8iSiip3</tool-use-id>\n<output-file>/x/tasks/a0ab069d9186e35de.output</output-file>\n<status>completed</status>\n<summary>Agent "Background echo test" finished</summary>\n<note>n</note>\n<result>r</result>\n</task-notification>'
+    expect(normalizeBlocks('user', text, 's1')).toEqual([
+      { type: 'task_notice', uuid: 's1#0', taskId: 'a0ab069d9186e35de', toolUseId: 'toolu_01AHLnnYchSVz4oxU8iSiip3', status: 'completed', summary: 'Agent "Background echo test" finished' },
+    ])
+    const bare = normalizeBlocks('user', '<task-notification><task-id></task-id><status>completed</status><summary>s</summary></task-notification>', 's2')
+    expect(bare).toEqual([{ type: 'task_notice', uuid: 's2#0', status: 'completed', summary: 's' }])
   })
   test('two notifications in one block get distinct uuids', () => {
     const out = normalizeBlocks('user', notice('completed', 'a') + '\n' + notice('completed', 'b'), 'd5')

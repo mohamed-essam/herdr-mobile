@@ -1,5 +1,6 @@
 import type { EngineInterface, Register } from 'claude-code'
 import { linkJournal, linkSpawn, newAgentsState, recordWorkflow, releaseHeld, resetAgents, routeAgentEvents, setStatus, type AgentControl, type AgentsState, type Workflow } from './agents'
+import { expireTasks, noticeStatus, taskFromLaunch, taskFromNotice, tasksControl, type TasksControl, type TasksState } from './tasks'
 import { normalizeBlocks, normalizeSnapshot, shouldForward, utf8Bytes, type ChatEvent, type ChatImage, type Normalized } from './normalize'
 import { addTranscriptLine, finishTranscriptHistory, HISTORY_IMAGES, newTranscriptHistory, splitPiece } from './transcript'
 
@@ -14,6 +15,8 @@ type Control =
   | { type: 'question'; uuid: string; toolUseId: string; questions: unknown[]; ts: number }
   // A subagent or workflow agent linked to its parent call, or its new status.
   | AgentControl
+  // The background tasks as they stand (the newest replaces any earlier one).
+  | TasksControl
 type Outgoing = ChatEvent | Control
 
 // A chunk's events serialize to at most CHUNK_BYTES; a /sync body, images
@@ -69,6 +72,10 @@ export type State = {
   // resync re-sends them (the history has no question events).
   openQuestions: Map<string, Outgoing>
   agents: AgentsState
+  // Cleared only by /clear and /resume, never by a resync.
+  tasks: TasksState
+  // A tasks control has been queued at some point (even an empty one).
+  tasksQueued: boolean
 }
 
 export type QueuedImage = { id: string; img: ChatImage; bytes: number }
@@ -78,6 +85,13 @@ function queued(id: string, img: ChatImage): QueuedImage {
 }
 
 const SYNC_MS = 1000
+
+// Queues the tasks as they stand; one still queued from earlier is dropped.
+function queueTasks(s: State) {
+  s.pending = s.pending.filter(ev => ev.type !== 'tasks')
+  s.pending.push(tasksControl(s.tasks))
+  s.tasksQueued = true
+}
 
 async function resolveSocket($: EngineInterface): Promise<string> {
   const explicit = await $.env.get('HERDR_MOBILE_CHAT_SOCK')
@@ -222,8 +236,12 @@ async function buildHistory($: EngineInterface, s: State) {
     head.push({ type: 'snapshot_end' })
     if (s.lastState) head.push({ type: 'state', state: s.lastState })
     head.push(...s.openQuestions.values())
-    // A question queued during the build is in both: send it once, here.
-    const queued = s.pending.filter(ev => !(ev.type === 'question' && s.openQuestions.has(ev.toolUseId)))
+    // The tasks as they stand (the history has none; a resync never clears
+    // them), once any have been queued: the companion may hold a list.
+    if (s.tasksQueued) head.push(tasksControl(s.tasks))
+    // A question queued during the build is in both: send it once, here; the
+    // same for a tasks control.
+    const queued = s.pending.filter(ev => !(ev.type === 'tasks' && s.tasksQueued) && !(ev.type === 'question' && s.openQuestions.has(ev.toolUseId)))
     s.pending = [...head, ...queued]
     s.imageQueue = [...historyImages(events, history.images), ...s.imageQueue]
   } catch {
@@ -327,6 +345,7 @@ async function tick($: EngineInterface, s: State) {
     // the history to go first.
     const held = s.offline || s.building
     if (!held && s.agents.held.size) await linkWorkflowAgents($, s)
+    if (expireTasks(s.tasks, Date.now())) queueTasks(s)
     const { events, images } = held ? { events: [], images: {} } : takeBody(s)
     const res = await $.http.fetch('http://chat/sync', {
       method: 'POST',
@@ -457,7 +476,19 @@ export function queueAppended(s: State, e: Appended, stored: { content?: unknown
     const revived = n.events.length && s.agents.links.get(e.agentId)?.status !== 'running' ? setStatus(s.agents, e.agentId, 'running', Date.now()) : null
     if (revived) s.pending.push(revived)
     s.pending.push(...routeAgentEvents(s.agents, e.agentId, n.events))
-  } else s.pending.push(...n.events)
+  } else {
+    s.pending.push(...n.events)
+    let changed = false
+    for (const ev of n.events) {
+      if (ev.type !== 'task_notice') continue
+      const now = Date.now()
+      changed = taskFromNotice(s.tasks, ev, now) || changed
+      // A subagent's notice ends that agent too, when its task id is a linked one.
+      const ended = ev.taskId ? setStatus(s.agents, ev.taskId, noticeStatus(ev.status), now) : null
+      if (ended) s.pending.push(ended)
+    }
+    if (changed) queueTasks(s)
+  }
   for (const [id, img] of Object.entries(n.images)) if (img.data) s.imageQueue.push(queued(id, img))
 }
 
@@ -480,6 +511,8 @@ export const register: Register = on => {
     historyLacksPath: false,
     openQuestions: new Map(),
     agents: newAgentsState(),
+    tasks: new Map(),
+    tasksQueued: false,
   }
 
   // Only remembers the path; the read happens at the next resync.
@@ -537,6 +570,8 @@ export const register: Register = on => {
       // stand-in).
       s.transcriptPath = undefined
       resetAgents(s.agents)
+      s.tasks.clear()
+      queueTasks(s)
     }
     return r
   })
@@ -580,7 +615,27 @@ export const register: Register = on => {
   // A workflow's agents are linked later, from its journal (see tick).
   on('tool.call', { tool: 'Workflow' }, async ($, e, next) => {
     const r = await next(e)
-    if (s.paneId && 'result' in r) recordWorkflow(s.agents, e.tool_use_id, r.result)
+    if (s.paneId && 'result' in r) {
+      recordWorkflow(s.agents, e.tool_use_id, r.result)
+      if (taskFromLaunch(s.tasks, 'Workflow', e.tool_use_id, e, r.result, Date.now())) queueTasks(s)
+    }
+    return r
+  })
+
+  // Background launches become tasks; the hooks only record.
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    const r = await next(e)
+    if (s.paneId && 'result' in r && taskFromLaunch(s.tasks, 'Bash', e.tool_use_id, e, r.result, Date.now())) queueTasks(s)
+    return r
+  })
+  on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
+    const r = await next(e)
+    if (s.paneId && 'result' in r && taskFromLaunch(s.tasks, 'Agent', e.tool_use_id, e, r.result, Date.now())) queueTasks(s)
+    return r
+  })
+  on('tool.call', { tool: 'Monitor' }, async ($, e, next) => {
+    const r = await next(e)
+    if (s.paneId && 'result' in r && taskFromLaunch(s.tasks, 'Monitor', e.tool_use_id, e, r.result, Date.now())) queueTasks(s)
     return r
   })
 

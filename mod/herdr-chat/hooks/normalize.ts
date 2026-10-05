@@ -11,7 +11,7 @@ export type ChatEvent =
   | { type: 'assistant_text'; uuid: string; text: string; ts?: number; agentId?: string }
   | { type: 'tool_use'; uuid: string; toolUseId: string; tool: string; summary: string; ts?: number; agentId?: string }
   | { type: 'tool_result'; toolUseId: string; isError: boolean; preview: string; images?: string[]; imageSizes?: ImageSizes; ts?: number; agentId?: string }
-  | { type: 'task_notice'; uuid: string; status: string; summary: string; ts?: number; agentId?: string }
+  | { type: 'task_notice'; uuid: string; taskId?: string; toolUseId?: string; status: string; summary: string; ts?: number; agentId?: string }
 
 export type ChatImage = { mediaType: string; data: string }
 // Events plus the images they reference, by id.
@@ -123,6 +123,8 @@ export function normalizeBlocks(role: 'user' | 'assistant', content: unknown, uu
           out.push({
             type: 'task_notice',
             uuid: k === 0 ? `${uuid}#${i}` : `${uuid}#${i}.${k}`,
+            ...(tag(doc, 'task-id') ? { taskId: tag(doc, 'task-id') } : {}),
+            ...(tag(doc, 'tool-use-id') ? { toolUseId: tag(doc, 'tool-use-id') } : {}),
             status: tag(doc, 'status'),
             summary: cap(tag(doc, 'summary')),
           })

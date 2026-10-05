@@ -66,7 +66,7 @@ function world(on: On, opts: { pane?: boolean } = {}) {
   }
 }
 
-const state = (): State => ({ paneId: 'w1:p1', sessionId: '', cwd: '', socketPath: '/s/chat.sock', pending: [], imageQueue: [], offline: false, inFlight: false, building: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined, historyLacksPath: false, openQuestions: new Map(), agents: newAgentsState() })
+const state = (): State => ({ paneId: 'w1:p1', sessionId: '', cwd: '', socketPath: '/s/chat.sock', pending: [], imageQueue: [], offline: false, inFlight: false, building: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined, historyLacksPath: false, openQuestions: new Map(), agents: newAgentsState(), tasks: new Map(), tasksQueued: false })
 
 const start = ($: any) => $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
 const ask = ($: any) => $.tool.call({ tool: 'AskUserQuestion', questions: QUESTIONS })
