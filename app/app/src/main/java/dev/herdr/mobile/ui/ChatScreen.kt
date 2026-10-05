@@ -277,7 +277,7 @@ private fun EventRow(
     when (val ev = item.entry.event) {
         is ChatEvent.UserText -> GutterRow(time(ev.ts), top, spacing = 4.dp) {
             if (item.head) SpeakerLabel("you", c.mauve)
-            for (id in ev.images) ChatImage(vm, pane.paneId, id)
+            for (id in ev.images) ChatImage(vm, pane.paneId, id, ev.imageSizes[id])
             // A message that is only an image has no text.
             if (ev.text.isNotEmpty()) SelectionContainer { Text(ev.text, style = HerdrType.body, color = c.text) }
         }
@@ -397,7 +397,7 @@ private fun ToolRail(
                     )
                 }
             }
-            result?.images?.forEach { ChatImage(vm, paneId, it) }
+            result?.let { r -> r.images.forEach { ChatImage(vm, paneId, it, r.imageSizes[it]) } }
         }
     }
 }

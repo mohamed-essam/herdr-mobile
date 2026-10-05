@@ -1,6 +1,8 @@
 package dev.herdr.mobile
 
+import dev.herdr.mobile.net.PixelSize
 import dev.herdr.mobile.ui.INLINE_MAX_PIXELS
+import dev.herdr.mobile.ui.inlineImageSize
 import dev.herdr.mobile.ui.VIEWER_MAX_PIXELS
 import dev.herdr.mobile.ui.maxPan
 import dev.herdr.mobile.ui.sampleSizeFor
@@ -12,6 +14,15 @@ import org.junit.Test
 class ImageSampleTest {
     // Inline box: a 1080 px wide item, 240dp tall at density 2.75.
     private fun inline(w: Int, h: Int) = sampleSizeFor(w, h, 1080, 660, INLINE_MAX_PIXELS)
+
+    // The inline size comes from the original pixels alone, so the placeholder
+    // (from the event's imageSizes) and the decoded image take the same space.
+    @Test fun inlineSizeFitsTheBoxWithoutUpscaling() {
+        assertEquals(PixelSize(400, 300), inlineImageSize(PixelSize(400, 300), 1000, 660))      // fits: 1:1
+        assertEquals(PixelSize(1000, 500), inlineImageSize(PixelSize(2000, 1000), 1000, 660))  // width-bound
+        assertEquals(PixelSize(305, 660), inlineImageSize(PixelSize(1170, 2532), 1000, 660))   // height-bound
+        assertEquals(PixelSize(1, 660), inlineImageSize(PixelSize(1, 100_000), 1000, 660))     // never 0
+    }
 
     @Test fun smallImagesAreNotDownsampled() {
         assertEquals(1, inline(800, 600))

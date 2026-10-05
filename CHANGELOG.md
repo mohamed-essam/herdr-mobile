@@ -17,6 +17,9 @@ All notable changes to this project are documented here. The format is based on
   `tool`/`text`/`user`/`question`/`notice`, text a one-line summary of at most 120 characters, ts epoch ms) and
   `ask` (`{toolUseId, questions}`, the newest pending `AskUserQuestion`, answerable with `chat_answer`). Both are
   omitted while no herdr-chat mod is live, so older apps are unaffected.
+- Chat events with images carry `imageSizes` (`{id: [width, height]}` in pixels, read from the PNG, JPEG, GIF or
+  WebP header by the herdr-chat plugin), so the app reserves each image's space before it loads and the list doesn't
+  jump. Optional: events without it fall back to a placeholder.
 
 ## [1.0.0] - 2026-07-12
 

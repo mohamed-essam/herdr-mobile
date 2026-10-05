@@ -30,10 +30,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import dev.herdr.mobile.data.ImageState
+import dev.herdr.mobile.net.PixelSize
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 /** Decoded-pixel caps: an inline image, and the full-screen viewer. */
 const val INLINE_MAX_PIXELS = 4_000_000L
@@ -57,21 +59,34 @@ fun sampleSizeFor(width: Int, height: Int, boxWidth: Int, boxHeight: Int, maxPix
     return n
 }
 
+/**
+ * An inline image's shown size for an original of [size] px in a [maxWidth]×[maxHeight]
+ * px box: fitted, never upscaled. It depends on the original pixels only (not on
+ * how far the decode was sampled down), so a placeholder sized from the event's
+ * imageSizes takes exactly the space the decoded image will.
+ */
+fun inlineImageSize(size: PixelSize, maxWidth: Int, maxHeight: Int): PixelSize {
+    val fit = min(1.0, min(maxWidth.toDouble() / size.width, maxHeight.toDouble() / size.height))
+    return PixelSize((size.width * fit).roundToInt().coerceAtLeast(1), (size.height * fit).roundToInt().coerceAtLeast(1))
+}
+
 /** How far an image of [content] px, zoomed by [scale], may pan either way inside [box] px. */
 fun maxPan(content: Float, box: Float, scale: Float): Float = max(0f, (content * scale - box) / 2)
 
-private fun decodeSampled(bytes: ByteArray, boxWidth: Int, boxHeight: Int, maxPixels: Long): ImageBitmap? {
+private fun decodeSampled(bytes: ByteArray, boxWidth: Int, boxHeight: Int, maxPixels: Long): Decoded.Done? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
     val n = sampleSizeFor(bounds.outWidth, bounds.outHeight, boxWidth, boxHeight, maxPixels) ?: return null
     val opts = BitmapFactory.Options().apply { inSampleSize = n }
-    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.asImageBitmap()
+    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.asImageBitmap() ?: return null
+    return Decoded.Done(bitmap, PixelSize(bounds.outWidth, bounds.outHeight))
 }
 
 private sealed interface Decoded {
     data object Pending : Decoded
     data object Failed : Decoded
-    class Done(val bitmap: ImageBitmap) : Decoded
+    /** [original]: the undecoded image's size, which the shown size is computed from. */
+    class Done(val bitmap: ImageBitmap, val original: PixelSize) : Decoded
 }
 
 /**
@@ -82,53 +97,65 @@ private sealed interface Decoded {
 private fun rememberDecoded(bytes: ByteArray, boxWidth: Int, boxHeight: Int, maxPixels: Long): State<Decoded> =
     produceState<Decoded>(Decoded.Pending, bytes, boxWidth, boxHeight, maxPixels) {
         value = withContext(Dispatchers.Default) {
-            runCatching { decodeSampled(bytes, boxWidth, boxHeight, maxPixels) }.getOrNull()
-                ?.let { Decoded.Done(it) } ?: Decoded.Failed
+            runCatching { decodeSampled(bytes, boxWidth, boxHeight, maxPixels) }.getOrNull() ?: Decoded.Failed
         }
     }
 
-/** An image of a chat event: fetched on first show, tap opens [ImageViewer]. */
+/**
+ * An image of a chat event: fetched on first show, tap opens [ImageViewer].
+ * With its [size] (the event's imageSizes) the placeholder already takes the
+ * image's final space, so the list doesn't jump when it loads.
+ */
 @Composable
-fun ChatImage(vm: DashboardViewModel, paneId: String, id: String, modifier: Modifier = Modifier) {
+fun ChatImage(vm: DashboardViewModel, paneId: String, id: String, size: PixelSize? = null, modifier: Modifier = Modifier) {
     val state by remember(paneId, id) { vm.chatImage(paneId, id) }.collectAsState()
-    // The window width bounds the list item; the height is the inline cap.
-    val boxWidth = LocalWindowInfo.current.containerSize.width
-    val boxHeight = with(LocalDensity.current) { INLINE_MAX_HEIGHT.roundToPx() }
+    val density = LocalDensity.current
+    // The window width bounds the decode; the height is the inline cap.
+    val windowWidth = LocalWindowInfo.current.containerSize.width
+    val boxHeight = with(density) { INLINE_MAX_HEIGHT.roundToPx() }
     var viewing by remember(id) { mutableStateOf(false) }
-    when (val s = state) {
-        ImageState.Loading -> Placeholder(modifier)
-        ImageState.Missing -> Unavailable(modifier)
-        is ImageState.Ready -> {
-            val decoded by rememberDecoded(s.bytes, boxWidth, boxHeight, INLINE_MAX_PIXELS)
-            when (val d = decoded) {
-                Decoded.Pending -> Placeholder(modifier)
-                Decoded.Failed -> Unavailable(modifier)
-                is Decoded.Done -> Image(
-                    d.bitmap, contentDescription = "image",
-                    contentScale = ContentScale.Fit,
-                    // The outline shows a dark screenshot's bounds on the dark background.
-                    modifier = modifier.heightIn(max = INLINE_MAX_HEIGHT).clip(RoundedCornerShape(8.dp))
-                        .border(1.dp, Herdr.colors.surface0, RoundedCornerShape(8.dp))
-                        .clickable { viewing = true },
-                )
+    BoxWithConstraints(modifier) {
+        val boxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth else windowWidth
+        val shown = { px: PixelSize ->
+            val s = inlineImageSize(px, boxWidth, boxHeight)
+            with(density) { Modifier.size(s.width.toDp(), s.height.toDp()) }
+        }
+        when (val s = state) {
+            ImageState.Loading -> Placeholder(size?.let(shown))
+            ImageState.Missing -> Unavailable()
+            is ImageState.Ready -> {
+                val decoded by rememberDecoded(s.bytes, windowWidth, boxHeight, INLINE_MAX_PIXELS)
+                when (val d = decoded) {
+                    Decoded.Pending -> Placeholder(size?.let(shown))
+                    Decoded.Failed -> Unavailable()
+                    is Decoded.Done -> Image(
+                        d.bitmap, contentDescription = "image",
+                        contentScale = ContentScale.Fit,
+                        // The outline shows a dark screenshot's bounds on the dark background.
+                        modifier = shown(d.original).clip(RoundedCornerShape(8.dp))
+                            .border(1.dp, Herdr.colors.surface0, RoundedCornerShape(8.dp))
+                            .clickable { viewing = true },
+                    )
+                }
+                if (viewing) ImageViewer(s.bytes) { viewing = false }
             }
-            if (viewing) ImageViewer(s.bytes) { viewing = false }
         }
     }
 }
 
+/** The image's final space when its size is known, else a generic box. */
 @Composable
-private fun Placeholder(modifier: Modifier) {
+private fun Placeholder(sized: Modifier?) {
     Box(
-        modifier.size(width = 160.dp, height = 120.dp).clip(RoundedCornerShape(8.dp))
+        (sized ?: Modifier.size(width = 160.dp, height = 120.dp)).clip(RoundedCornerShape(8.dp))
             .background(Herdr.colors.base),
     )
 }
 
 @Composable
-private fun Unavailable(modifier: Modifier) {
+private fun Unavailable() {
     Text(
-        "image unavailable", modifier,
+        "image unavailable",
         style = HerdrType.meta, color = Herdr.colors.overlay2,
     )
 }

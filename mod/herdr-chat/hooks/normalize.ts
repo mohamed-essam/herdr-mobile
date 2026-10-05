@@ -1,10 +1,15 @@
+import { imageSize } from './imagesize'
+
 // `ts`: epoch milliseconds, when known (optional on the wire). `images`: ids
-// of images carried beside the events (the /sync body's `images` map).
+// of images carried beside the events (the /sync body's `images` map);
+// `imageSizes`: [width, height] in pixels of those whose header parsed, so the
+// phone can reserve their space before the bytes arrive.
+export type ImageSizes = Record<string, [number, number]>
 export type ChatEvent =
-  | { type: 'user_text'; uuid: string; text: string; images?: string[]; ts?: number }
+  | { type: 'user_text'; uuid: string; text: string; images?: string[]; imageSizes?: ImageSizes; ts?: number }
   | { type: 'assistant_text'; uuid: string; text: string; ts?: number }
   | { type: 'tool_use'; uuid: string; toolUseId: string; tool: string; summary: string; ts?: number }
-  | { type: 'tool_result'; toolUseId: string; isError: boolean; preview: string; images?: string[]; ts?: number }
+  | { type: 'tool_result'; toolUseId: string; isError: boolean; preview: string; images?: string[]; imageSizes?: ImageSizes; ts?: number }
   | { type: 'task_notice'; uuid: string; status: string; summary: string; ts?: number }
 
 export type ChatImage = { mediaType: string; data: string }
@@ -83,6 +88,17 @@ function imageOf(b: Block): ChatImage | undefined {
   return { mediaType: src.media_type, data: src.data }
 }
 
+// The `images` (and `imageSizes`, when any parsed) fields for an event.
+function imageFields(ids: string[], images: Record<string, ChatImage>): { images?: string[]; imageSizes?: ImageSizes } {
+  if (!ids.length) return {}
+  const sizes: ImageSizes = {}
+  for (const id of ids) {
+    const size = imageSize(images[id]!.data)
+    if (size) sizes[id] = size
+  }
+  return Object.keys(sizes).length ? { images: ids, imageSizes: sizes } : { images: ids }
+}
+
 // A message's blocks as chat events. Image blocks (a user's own, or inside a
 // tool_result) move to `images`, keyed `<uuid>#<block>` (`#<block>.<n>` for
 // the n-th image of a tool_result), and the events list their ids.
@@ -137,13 +153,13 @@ export function normalizeBlocks(role: 'user' | 'assistant', content: unknown, uu
         toolUseId: String(b.tool_use_id),
         isError: b.is_error === true,
         preview: clip(resultText(b.content), PREVIEW),
-        ...(ids.length ? { images: ids } : {}),
+        ...imageFields(ids, images),
       })
     }
   })
   const text = userTexts.join('\n').trim()
   if (text || userImages.length) {
-    out.unshift({ type: 'user_text', uuid, text: cap(text), ...(userImages.length ? { images: userImages } : {}) })
+    out.unshift({ type: 'user_text', uuid, text: cap(text), ...imageFields(userImages, images) })
   }
   if (ts !== undefined) for (const ev of out) ev.ts = ts
   return { events: out, images }

@@ -256,6 +256,14 @@ class ProtocolTest {
         assertEquals(7L, (f.entries[4].event as ChatEvent.TaskNotice).ts)
     }
 
+    @Test fun parsesImageSizesAndDropsBadOnes() {
+        val f = parseServerFrame("""{"t":"chat_snapshot","paneId":"p","epoch":1,"state":"idle","events":[
+            {"seq":1,"event":{"type":"user_text","uuid":"u1","text":"","images":["u1#0","u1#1"],"imageSizes":{"u1#0":[1170,2532],"u1#1":[0,5]}}},
+            {"seq":2,"event":{"type":"tool_result","toolUseId":"t1","isError":false,"preview":"","images":["r#0.0"],"imageSizes":{"r#0.0":[640,480],"x":"bad"}}}]}""") as ServerFrame.ChatSnapshot
+        assertEquals(mapOf("u1#0" to PixelSize(1170, 2532)), (f.entries[0].event as ChatEvent.UserText).imageSizes)
+        assertEquals(mapOf("r#0.0" to PixelSize(640, 480)), (f.entries[1].event as ChatEvent.ToolResult).imageSizes)
+    }
+
     @Test fun parsesQuestionEventKinds() {
         val e = parseServerFrame("""{"t":"chat_event","paneId":"p","epoch":1,"seq":4,"event":{"type":"question","uuid":"a#2","toolUseId":"tq","ts":9,"questions":[
             {"question":"Color?","header":"Color","options":[{"label":"Red","description":"warm"},{"label":"Blue"}],"multiSelect":true},

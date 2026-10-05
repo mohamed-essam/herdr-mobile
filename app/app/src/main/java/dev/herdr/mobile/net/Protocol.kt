@@ -80,13 +80,23 @@ data class AlsoClose(
     val label: String = "",
 )
 
+/** An image's size in pixels. */
+data class PixelSize(val width: Int, val height: Int)
+
 sealed interface ChatEvent {
     // [ts] is epoch ms, null when the companion didn't send one. Image fields
-    // hold ids to fetch with chat_image.
-    data class UserText(val uuid: String, val text: String, val ts: Long? = null, val images: List<String> = emptyList()) : ChatEvent
+    // hold ids to fetch with chat_image; imageSizes has the pixel size of those
+    // whose header the mod could read, so their space is reserved up front.
+    data class UserText(
+        val uuid: String, val text: String, val ts: Long? = null, val images: List<String> = emptyList(),
+        val imageSizes: Map<String, PixelSize> = emptyMap(),
+    ) : ChatEvent
     data class AssistantText(val uuid: String, val text: String, val ts: Long? = null) : ChatEvent
     data class ToolUse(val uuid: String, val toolUseId: String, val tool: String, val summary: String, val ts: Long? = null) : ChatEvent
-    data class ToolResult(val toolUseId: String, val isError: Boolean, val preview: String, val images: List<String> = emptyList(), val ts: Long? = null) : ChatEvent
+    data class ToolResult(
+        val toolUseId: String, val isError: Boolean, val preview: String, val images: List<String> = emptyList(), val ts: Long? = null,
+        val imageSizes: Map<String, PixelSize> = emptyMap(),
+    ) : ChatEvent
     /** A background task finished (Claude Code's task-notification). */
     data class TaskNotice(val uuid: String, val status: String, val summary: String, val ts: Long? = null) : ChatEvent
     /** An AskUserQuestion call; may repeat (e.g. after a resync), so key it by [toolUseId]. */
@@ -122,6 +132,13 @@ private fun JsonObject.double(k: String) = (this[k] as? JsonPrimitive)?.doubleOr
 private fun JsonObject.strings(k: String) =
     (this[k] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()
 
+/** The event's imageSizes: {id: [width, height]}, skipping malformed or empty sizes. */
+private fun JsonObject.imageSizes(): Map<String, PixelSize> =
+    (this["imageSizes"] as? JsonObject)?.mapNotNull { (id, v) ->
+        val wh = (v as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.intOrNull }
+        if (wh != null && wh.size == 2 && wh[0] > 0 && wh[1] > 0) id to PixelSize(wh[0], wh[1]) else null
+    }?.toMap() ?: emptyMap()
+
 internal fun parseQuestionItem(el: JsonElement): QuestionItem? {
     val o = el as? JsonObject ?: return null
     return QuestionItem(
@@ -150,11 +167,11 @@ fun parseChatEvent(o: JsonObject): ChatEvent? {
     fun s(k: String) = o.str(k)
     val ts = o.long("ts")
     return when (s("type")) {
-        "user_text" -> ChatEvent.UserText(s("uuid"), s("text"), ts, o.strings("images"))
+        "user_text" -> ChatEvent.UserText(s("uuid"), s("text"), ts, o.strings("images"), o.imageSizes())
         "assistant_text" -> ChatEvent.AssistantText(s("uuid"), s("text"), ts)
         "tool_use" -> ChatEvent.ToolUse(s("uuid"), s("toolUseId"), s("tool"), s("summary"), ts)
         "task_notice" -> ChatEvent.TaskNotice(s("uuid"), s("status"), s("summary"), ts)
-        "tool_result" -> ChatEvent.ToolResult(s("toolUseId"), o.bool("isError"), s("preview"), o.strings("images"), ts)
+        "tool_result" -> ChatEvent.ToolResult(s("toolUseId"), o.bool("isError"), s("preview"), o.strings("images"), ts, o.imageSizes())
         "question" -> ChatEvent.Question(
             s("uuid"), s("toolUseId"),
             (o["questions"] as? JsonArray)?.mapNotNull(::parseQuestionItem) ?: emptyList(), ts)
