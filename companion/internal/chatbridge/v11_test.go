@@ -33,11 +33,11 @@ func toolResult(id string) json.RawMessage {
 func TestChunkedSnapshotSwapsAtEnd(t *testing.T) {
 	h := NewHub(nil)
 	h.Sync("p", "s", []json.RawMessage{hello("s"), raw(`{"type":"snapshot","events":[` + string(userText(1)) + `]}`)})
-	_, ch, cancel := h.Subscribe("p")
+	_, ch, cancel := h.Subscribe("p", "")
 	defer cancel()
 	h.Sync("p", "s", []json.RawMessage{raw(`{"type":"snapshot_begin","total":3}`), chunk(userText(10), userText(11))})
 	h.Sync("p", "s", []json.RawMessage{chunk(userText(12), raw(`{"type":"bogus"}`))})
-	snap, _, c2 := h.Subscribe("p")
+	snap, _, c2 := h.Subscribe("p", "")
 	c2()
 	if snap.Epoch != 2 || len(snap.Events) != 1 {
 		t.Fatalf("old epoch should stay visible during staging: %+v", snap)
@@ -71,7 +71,7 @@ func TestEmptyChunkedSnapshot(t *testing.T) {
 	h := NewHub(nil)
 	h.Sync("p", "s", []json.RawMessage{hello("s"), userText(1)})
 	h.Sync("p", "s", []json.RawMessage{raw(`{"type":"snapshot_begin","total":0}`), raw(`{"type":"snapshot_end"}`)})
-	snap, _, cancel := h.Subscribe("p")
+	snap, _, cancel := h.Subscribe("p", "")
 	defer cancel()
 	if snap.Epoch != 2 || len(snap.Events) != 0 || snap.HasMore {
 		t.Fatalf("empty chunked snapshot: %+v", snap)
@@ -82,14 +82,14 @@ func TestNewBeginDiscardsUnfinishedStaging(t *testing.T) {
 	h := NewHub(nil)
 	h.Sync("p", "s", []json.RawMessage{raw(`{"type":"snapshot_begin","total":2}`), chunk(userText(1), userText(2))})
 	h.Sync("p", "s", []json.RawMessage{raw(`{"type":"snapshot_begin","total":1}`), chunk(userText(3)), raw(`{"type":"snapshot_end"}`)})
-	snap, _, cancel := h.Subscribe("p")
+	snap, _, cancel := h.Subscribe("p", "")
 	defer cancel()
 	if snap.Epoch != 2 || len(snap.Events) != 1 || !strings.Contains(string(snap.Events[0].Event), `"u3"`) {
 		t.Fatalf("staging not discarded: %+v", snap)
 	}
 	// Stray chunk/end without a begin are ignored.
 	h.Sync("p", "s", []json.RawMessage{chunk(userText(4)), raw(`{"type":"snapshot_end"}`)})
-	snap2, _, c2 := h.Subscribe("p")
+	snap2, _, c2 := h.Subscribe("p", "")
 	c2()
 	if snap2.Epoch != 2 || len(snap2.Events) != 1 {
 		t.Fatalf("stray chunk/end applied: %+v", snap2)
@@ -110,12 +110,12 @@ func TestRingCap5000AndSubscribeTail(t *testing.T) {
 	}
 	h := NewHub(nil)
 	fill(h, RingCap+10)
-	snap, _, cancel := h.Subscribe("p")
+	snap, _, cancel := h.Subscribe("p", "")
 	defer cancel()
 	if len(snap.Events) != 300 || !snap.HasMore || snap.Events[0].Seq != RingCap+10-299 || snap.Events[299].Seq != RingCap+10 {
 		t.Fatalf("tail: len=%d hasMore=%v first=%d", len(snap.Events), snap.HasMore, snap.Events[0].Seq)
 	}
-	evs, more, ok := h.History("p", snap.Epoch, 1<<30, 5000)
+	evs, more, ok := h.History("p", "", snap.Epoch, 1<<30, 5000)
 	_ = more
 	if !ok || len(evs) != 300 {
 		t.Fatalf("clamp: ok=%v len=%d", ok, len(evs))
@@ -123,7 +123,7 @@ func TestRingCap5000AndSubscribeTail(t *testing.T) {
 	// Walk back to the start of the ring.
 	before, total := snap.Events[0].Seq, len(snap.Events)
 	for {
-		page, more, ok := h.History("p", snap.Epoch, before, 300)
+		page, more, ok := h.History("p", "", snap.Epoch, before, 300)
 		if !ok {
 			t.Fatal("not ok")
 		}
@@ -143,7 +143,7 @@ func TestRingCap5000AndSubscribeTail(t *testing.T) {
 func TestSubscribeSmallNoMore(t *testing.T) {
 	h := NewHub(nil)
 	fill(h, 300)
-	snap, _, cancel := h.Subscribe("p")
+	snap, _, cancel := h.Subscribe("p", "")
 	defer cancel()
 	if len(snap.Events) != 300 || snap.HasMore {
 		t.Fatalf("len=%d hasMore=%v", len(snap.Events), snap.HasMore)
@@ -153,24 +153,24 @@ func TestSubscribeSmallNoMore(t *testing.T) {
 func TestHistoryPaging(t *testing.T) {
 	h := NewHub(nil)
 	fill(h, 20)
-	snap, _, cancel := h.Subscribe("p")
+	snap, _, cancel := h.Subscribe("p", "")
 	defer cancel()
-	evs, more, ok := h.History("p", snap.Epoch, 11, 4)
+	evs, more, ok := h.History("p", "", snap.Epoch, 11, 4)
 	if !ok || !more || len(evs) != 4 || evs[0].Seq != 7 || evs[3].Seq != 10 {
 		t.Fatalf("page: ok=%v more=%v %+v", ok, more, evs)
 	}
-	evs, more, ok = h.History("p", snap.Epoch, 5, 10)
+	evs, more, ok = h.History("p", "", snap.Epoch, 5, 10)
 	if !ok || more || len(evs) != 4 || evs[0].Seq != 1 || evs[3].Seq != 4 {
 		t.Fatalf("start page: ok=%v more=%v %+v", ok, more, evs)
 	}
-	evs, more, ok = h.History("p", snap.Epoch, 1, 10)
+	evs, more, ok = h.History("p", "", snap.Epoch, 1, 10)
 	if !ok || more || len(evs) != 0 {
 		t.Fatalf("before first: ok=%v more=%v %+v", ok, more, evs)
 	}
-	if _, _, ok := h.History("p", snap.Epoch+1, 11, 4); ok {
+	if _, _, ok := h.History("p", "", snap.Epoch+1, 11, 4); ok {
 		t.Fatal("stale epoch should not be ok")
 	}
-	if _, _, ok := h.History("nope", 1, 11, 4); ok {
+	if _, _, ok := h.History("nope", "", 1, 11, 4); ok {
 		t.Fatal("unknown pane should not be ok")
 	}
 }
@@ -297,7 +297,7 @@ func TestNewSessionForgetsQuestions(t *testing.T) {
 
 func TestQuestionIsChatEvent(t *testing.T) {
 	h := NewHub(nil)
-	_, ch, cancel := h.Subscribe("p")
+	_, ch, cancel := h.Subscribe("p", "")
 	defer cancel()
 	h.Sync("p", "s", []json.RawMessage{questionEv("t1")})
 	if u := <-ch; u.Kind != "event" || !strings.Contains(string(u.Entry.Event), `"question"`) {
@@ -439,14 +439,14 @@ func TestStagingClearedOnDeathAndNewSession(t *testing.T) {
 	c.add(LiveWindow)
 	h.Tick()
 	h.Sync("p", "s1", []json.RawMessage{chunk(userText(2)), raw(`{"type":"snapshot_end"}`)})
-	snap, _, c1 := h.Subscribe("p")
+	snap, _, c1 := h.Subscribe("p", "")
 	c1()
 	if snap.Epoch != 1 {
 		t.Fatalf("staging survived the mod's death: %+v", snap)
 	}
 	h.Sync("p", "s1", []json.RawMessage{raw(`{"type":"snapshot_begin","total":2}`), chunk(userText(3))})
 	h.Sync("p", "s2", []json.RawMessage{hello("s2"), raw(`{"type":"snapshot_end"}`)})
-	snap, _, c2 := h.Subscribe("p")
+	snap, _, c2 := h.Subscribe("p", "")
 	c2()
 	if snap.Epoch != 1 {
 		t.Fatalf("staging survived a new session: %+v", snap)

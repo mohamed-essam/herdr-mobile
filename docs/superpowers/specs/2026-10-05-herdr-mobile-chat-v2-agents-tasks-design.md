@@ -51,7 +51,7 @@ Sources:
 
 - **No `agentId`:** unchanged (main stream).
 - **Linked `agentId`:** the normalized events are queued with `agentId` added to each event. Then the agent's summary updates:
-  - `activity` follows the same rules as the companion's dashboard `activityOf` (tool line, or the first text line).
+  - The mod does not compute `activity`. The companion fills it from the agent's thread events with its dashboard `activityOf` (tool line, or the first text line), see 1.3.
   - `ts` = now.
   - If the summary changed, an `agent` control is queued.
 - **Unlinked `agentId`:** held per 1.1, with a cap of 200 events per id. Older held events drop first.
@@ -68,10 +68,11 @@ Nested subagents: `parentAgentId` is kept. The parent card for a nested agent's 
 
 ### 1.3 Outgoing controls (`/sync` body)
 
-- `{ type: "agent", agent: { agentId, parentToolUseId, parentAgentId?, kind, label, type?, phase?, status, activity?, ts } }`: the whole summary, sent each time it changes.
+- `{ type: "agent", agent: { agentId, parentToolUseId, parentAgentId?, kind, label, type?, phase?, status, ts } }`: the whole summary, sent each time it changes. It carries no `activity`: the companion sets `activity` on the summary it stores and sends to the app from the thread's latest activity-bearing event (its existing `activityOf`), and re-sends the summary when a later thread event changes it. Wire shapes to the app are unchanged.
 - `{ type: "tasks", tasks: Task[] }`: the whole list, sent each time it changes.
 - Chat events may carry `agentId`.
 - Per-thread resync: `{ type: "snapshot_begin", total, agentId }`, `{ type: "snapshot_chunk", events, agentId }`, `{ type: "snapshot_end", agentId }`.
+- Gate: every `/sync` response from a v2 companion carries `"threads": true` (beside `messages` and `resync`). The mod sends all of the above only after seeing it, so a new mod never mixes agent rows into an old companion's main stream.
 
 ### 1.4 Background tasks
 

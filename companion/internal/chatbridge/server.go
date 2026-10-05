@@ -105,10 +105,14 @@ type answerRes struct {
 }
 
 // syncRes is the /sync answer. Resync asks the mod to send hello + snapshot
-// on its next tick (omitted when false; older mods ignore it).
+// on its next tick (omitted when false; older mods ignore it). Threads is
+// always true: it tells the mod this companion understands agent threads,
+// agent and tasks controls, so a newer mod never sends them to an older
+// companion (which would mix agent rows into the main stream).
 type syncRes struct {
 	Messages []OutMsg `json:"messages"`
 	Resync   bool     `json:"resync,omitempty"`
+	Threads  bool     `json:"threads"`
 }
 
 // Handler serves the mod's endpoints: POST /sync, and POST /answer, a
@@ -123,7 +127,7 @@ func (h *Hub) Handler() http.Handler {
 		}
 		msgs, resync := h.SyncBody(req.PaneID, req.SessionID, req.Events, req.Images)
 		w.Header().Set("content-type", "application/json")
-		_ = json.NewEncoder(w).Encode(syncRes{Messages: msgs, Resync: resync})
+		_ = json.NewEncoder(w).Encode(syncRes{Messages: msgs, Resync: resync, Threads: true})
 	})
 	mux.HandleFunc("POST /answer", func(w http.ResponseWriter, r *http.Request) {
 		var req answerReq

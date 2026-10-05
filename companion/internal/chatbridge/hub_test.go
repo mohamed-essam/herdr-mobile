@@ -26,14 +26,14 @@ func (c *fakeClock) add(d time.Duration) { c.mu.Lock(); c.t = c.t.Add(d); c.mu.U
 func TestSnapshotResetsEpochAndSeq(t *testing.T) {
 	h := NewHub(nil)
 	h.Sync("p", "s1", []json.RawMessage{raw(`{"type":"hello","sessionId":"s1","cwd":"/x"}`), raw(`{"type":"snapshot","events":[` + string(userText(1)) + `,{"type":"bogus"}]}`)})
-	snap, _, cancel := h.Subscribe("p")
+	snap, _, cancel := h.Subscribe("p", "")
 	defer cancel()
 	if snap.Epoch != 2 || len(snap.Events) != 1 || snap.Events[0].Seq != 1 {
 		t.Fatalf("after first snapshot: %+v", snap)
 	}
 	h.Sync("p", "s1", []json.RawMessage{userText(2)})
 	h.Sync("p", "s2", []json.RawMessage{raw(`{"type":"snapshot","events":[]}`)})
-	snap2, _, cancel2 := h.Subscribe("p")
+	snap2, _, cancel2 := h.Subscribe("p", "")
 	defer cancel2()
 	if snap2.Epoch != 3 || len(snap2.Events) != 0 {
 		t.Fatalf("after second snapshot: %+v", snap2)
@@ -42,7 +42,7 @@ func TestSnapshotResetsEpochAndSeq(t *testing.T) {
 
 func TestEventsGetMonotonicSeqAndFanOut(t *testing.T) {
 	h := NewHub(nil)
-	_, ch, cancel := h.Subscribe("p")
+	_, ch, cancel := h.Subscribe("p", "")
 	defer cancel()
 	h.Sync("p", "s", []json.RawMessage{userText(1), userText(2), raw(`{"type":"state","state":"working"}`)})
 	u1, u2, u3 := <-ch, <-ch, <-ch
@@ -57,7 +57,7 @@ func TestEventsGetMonotonicSeqAndFanOut(t *testing.T) {
 func TestInvalidStateIgnored(t *testing.T) {
 	h := NewHub(nil)
 	h.Sync("p", "s", []json.RawMessage{raw(`{"type":"state","state":"exploded"}`), raw(`not json`)})
-	snap, _, cancel := h.Subscribe("p")
+	snap, _, cancel := h.Subscribe("p", "")
 	defer cancel()
 	if snap.State != "idle" {
 		t.Fatalf("state = %q, want idle", snap.State)
@@ -71,13 +71,13 @@ func TestRingCap(t *testing.T) {
 		evs = append(evs, userText(i))
 	}
 	h.Sync("p", "s", evs)
-	snap, _, cancel := h.Subscribe("p")
+	snap, _, cancel := h.Subscribe("p", "")
 	defer cancel()
 	// The snapshot carries the newest SnapshotTail; the ring's oldest is 11.
 	if len(snap.Events) != SnapshotTail || snap.Events[len(snap.Events)-1].Seq != RingCap+10 || !snap.HasMore {
 		t.Fatalf("ring: len=%d last=%d", len(snap.Events), snap.Events[len(snap.Events)-1].Seq)
 	}
-	if page, _, _ := h.History("p", snap.Epoch, 12, 5); len(page) != 1 || page[0].Seq != 11 {
+	if page, _, _ := h.History("p", "", snap.Epoch, 12, 5); len(page) != 1 || page[0].Seq != 11 {
 		t.Fatalf("oldest in ring: %+v", page)
 	}
 }
@@ -147,7 +147,7 @@ func TestLivenessFlips(t *testing.T) {
 
 func TestFullSubscriberDoesNotBlockSync(t *testing.T) {
 	h := NewHub(nil)
-	_, _, cancel := h.Subscribe("p") // never read
+	_, _, cancel := h.Subscribe("p", "") // never read
 	defer cancel()
 	done := make(chan struct{})
 	go func() {
@@ -166,7 +166,7 @@ func TestFullSubscriberDoesNotBlockSync(t *testing.T) {
 func TestDropClosesSubscribersAndCancelAfterDropIsSafe(t *testing.T) {
 	h := NewHub(nil)
 	h.Sync("p", "s", nil)
-	_, ch, cancel := h.Subscribe("p")
+	_, ch, cancel := h.Subscribe("p", "")
 	h.Drop("p")
 	if _, ok := <-ch; ok {
 		t.Fatal("channel should be closed after Drop")
@@ -179,7 +179,7 @@ func TestDropClosesSubscribersAndCancelAfterDropIsSafe(t *testing.T) {
 
 func TestSnapshotUpdateFansOut(t *testing.T) {
 	h := NewHub(nil)
-	_, ch, cancel := h.Subscribe("p")
+	_, ch, cancel := h.Subscribe("p", "")
 	defer cancel()
 	h.Sync("p", "s", []json.RawMessage{raw(`{"type":"snapshot","events":[` + string(userText(1)) + `]}`)})
 	u := <-ch

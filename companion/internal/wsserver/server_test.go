@@ -733,7 +733,7 @@ type fakeChat struct {
 	subs []chan chatbridge.Update
 }
 
-func (f *fakeChat) Subscribe(paneID string) (chatbridge.Snapshot, <-chan chatbridge.Update, func()) {
+func (f *fakeChat) Subscribe(paneID, _ string) (chatbridge.Snapshot, <-chan chatbridge.Update, func()) {
 	ch := make(chan chatbridge.Update, 16)
 	f.mu.Lock()
 	f.subs = append(f.subs, ch)
@@ -742,7 +742,7 @@ func (f *fakeChat) Subscribe(paneID string) (chatbridge.Snapshot, <-chan chatbri
 }
 
 func (f *fakeChat) Send(string, string) error { return nil }
-func (f *fakeChat) History(string, int, int, int) ([]chatbridge.Entry, bool, bool) {
+func (f *fakeChat) History(string, string, int, int, int) ([]chatbridge.Entry, bool, bool) {
 	return nil, false, false
 }
 func (f *fakeChat) Image(string, string) (string, string, bool)    { return "", "", false }

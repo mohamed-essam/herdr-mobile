@@ -39,9 +39,9 @@ type HerdrRPC interface {
 
 // ChatHub is the chatbridge surface the WS server needs (a *chatbridge.Hub).
 type ChatHub interface {
-	Subscribe(paneID string) (chatbridge.Snapshot, <-chan chatbridge.Update, func())
+	Subscribe(paneID, agentID string) (chatbridge.Snapshot, <-chan chatbridge.Update, func())
 	Send(paneID, text string) error
-	History(paneID string, epoch, beforeSeq, limit int) (events []chatbridge.Entry, hasMore bool, ok bool)
+	History(paneID, agentID string, epoch, beforeSeq, limit int) (events []chatbridge.Entry, hasMore bool, ok bool)
 	Image(paneID, id string) (mediaType, data string, ok bool)
 	Answer(paneID, toolUseID string, answers map[string]string) error
 }
@@ -470,7 +470,7 @@ func (s *Server) openChat(ctx context.Context, c *client, paneID string) {
 		return
 	}
 	c.closeChat(paneID)
-	snap, ch, cancel := s.chat.Subscribe(paneID)
+	snap, ch, cancel := s.chat.Subscribe(paneID, "")
 	// stopped is set BEFORE cancel closes the channel, so the forwarder never
 	// delivers updates still buffered for a closed/replaced subscription.
 	//
@@ -553,7 +553,7 @@ func (s *Server) chatHistory(ctx context.Context, c *client, m proto.ClientMsg) 
 		sendBlocking(ctx, c, proto.ChatHistoryPage(m.ReqID, m.PaneID, m.Epoch, nil, false, true))
 		return
 	}
-	events, hasMore, ok := s.chat.History(m.PaneID, m.Epoch, m.BeforeSeq, m.Limit)
+	events, hasMore, ok := s.chat.History(m.PaneID, "", m.Epoch, m.BeforeSeq, m.Limit)
 	sendBlocking(ctx, c, proto.ChatHistoryPage(m.ReqID, m.PaneID, m.Epoch, events, hasMore, !ok))
 }
 

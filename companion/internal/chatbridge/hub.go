@@ -52,22 +52,36 @@ type Entry struct {
 }
 
 // Snapshot is a pane's view: the newest SnapshotTail entries of the current
-// epoch. HasMore reports older entries reachable through History.
+// epoch, of the main stream or (AgentID set) of one agent's thread. HasMore
+// reports older entries reachable through History. Missing marks a thread
+// the pane does not hold. Agents (sorted by ts) and Tasks are set on main
+// snapshots only; Tasks is nil when the mod sent no list.
 type Snapshot struct {
 	PaneID  string
+	AgentID string
 	Epoch   int
 	State   string
 	Events  []Entry
 	HasMore bool
+	Missing bool
+	Agents  []json.RawMessage
+	Tasks   json.RawMessage
 }
 
-// Update is one change fanned out to a pane's subscribers.
+// Update is one change fanned out to a pane's subscribers. Main-stream
+// subscribers get "event" | "state" | "snapshot" | "agent" (Agent is the
+// merged summary) | "agent_removed" | "tasks" (Tasks is the list); a
+// thread's subscribers get only its "event" and "snapshot". AgentID names
+// the thread or agent concerned.
 type Update struct {
-	Kind     string // "event" | "state" | "snapshot"
+	Kind     string
 	Epoch    int
+	AgentID  string
 	Entry    Entry
 	State    string
 	Snapshot Snapshot
+	Agent    json.RawMessage
+	Tasks    json.RawMessage
 }
 
 type OutMsg struct {
@@ -98,19 +112,21 @@ type Ask struct {
 	Questions json.RawMessage `json:"questions"`
 }
 
-// Summary is what the dashboard shows for a pane: its latest activity and
-// newest pending question. Both are nil while the pane's mod is not live.
+// Summary is what the dashboard shows for a pane: its latest activity,
+// newest pending question and number of running background tasks. All are
+// zero while the pane's mod is not live.
 type Summary struct {
-	Activity *Activity
-	Ask      *Ask
+	Activity  *Activity
+	Ask       *Ask
+	BgRunning int
 }
 
-func (s Summary) empty() bool { return s.Activity == nil && s.Ask == nil }
+func (s Summary) empty() bool { return s.Activity == nil && s.Ask == nil && s.BgRunning == 0 }
 
 func sameSummary(a, b Summary) bool {
 	actEq := a.Activity == b.Activity || (a.Activity != nil && b.Activity != nil && *a.Activity == *b.Activity)
 	askEq := a.Ask == b.Ask || (a.Ask != nil && b.Ask != nil && a.Ask.ToolUseID == b.Ask.ToolUseID && bytes.Equal(a.Ask.Questions, b.Ask.Questions))
-	return actEq && askEq
+	return actEq && askEq && a.BgRunning == b.BgRunning
 }
 
 // question is a pending AskUserQuestion, keyed by its toolUseId. order ranks
@@ -146,6 +162,14 @@ type pane struct {
 	// answered is closed (and cleared) when an answer is stored or the pane
 	// is dropped, waking every WaitAnswer on the pane.
 	answered chan struct{}
+
+	// threads holds the agent threads (threads.go), agents the merged
+	// summary object per agentId, tasks the latest background task list
+	// (nil = none) and bgRunning its running count. All belong to the epoch.
+	threads   map[string]*thread
+	agents    map[string]json.RawMessage
+	tasks     json.RawMessage
+	bgRunning int
 }
 
 type Hub struct {
@@ -260,6 +284,9 @@ func (p *pane) apply(paneID, sessionID string, raw json.RawMessage, now time.Tim
 		ToolUseID string            `json:"toolUseId"`
 		Questions json.RawMessage   `json:"questions"`
 		Events    []json.RawMessage `json:"events"`
+		AgentID   string            `json:"agentId"`
+		Agent     json.RawMessage   `json:"agent"`
+		Tasks     json.RawMessage   `json:"tasks"`
 	}
 	if json.Unmarshal(raw, &head) != nil {
 		return false
@@ -273,10 +300,18 @@ func (p *pane) apply(paneID, sessionID string, raw json.RawMessage, now time.Tim
 			p.outbox = nil // queued for the previous session
 			p.setIdle()    // the old session's turn state does not carry over
 			p.questions = map[string]*question{}
-			p.staging = nil // the old session's unfinished snapshot
+			p.dropStaging() // the old session's unfinished snapshots
 		}
 		p.sessionID = sessionID
 		return true
+	case head.AgentID != "" && (head.Type == "snapshot_begin" || head.Type == "snapshot_chunk" || head.Type == "snapshot_end"):
+		p.applyThreadSnapshot(paneID, head.Type, head.AgentID, head.Events, now)
+	case head.Type == "agent":
+		p.applyAgent(head.Agent)
+	case head.Type == "tasks":
+		p.applyTasks(head.Tasks)
+	case isChatEvent(head.Type) && head.AgentID != "":
+		p.applyThreadEvent(head.AgentID, head.Type, raw, now)
 	case head.Type == "snapshot":
 		p.staging = nil
 		p.swap(paneID, head.Events, now)
@@ -312,9 +347,12 @@ func (p *pane) apply(paneID, sessionID string, raw json.RawMessage, now time.Tim
 }
 
 // swap starts a new epoch holding the chat events of evs (seqs from 1, the
-// ring keeping the newest RingCap) and fans the snapshot.
+// ring keeping the newest RingCap) and fans the snapshot. The old epoch's
+// threads, agents and tasks go with it; the mod resends them after the main
+// snapshot.
 func (p *pane) swap(paneID string, evs []json.RawMessage, now time.Time) {
 	p.epoch++
+	p.resetAgents()
 	p.seq = 0
 	p.events = nil
 	p.activity = nil // recomputed from the new history
@@ -402,7 +440,7 @@ func (p *pane) summary(now time.Time) Summary {
 	if p == nil || !p.live {
 		return Summary{}
 	}
-	s := Summary{Activity: p.activity}
+	s := Summary{Activity: p.activity, BgRunning: p.bgRunning}
 	var best *question
 	for id, q := range p.questions {
 		if q.answer != nil || now.Sub(q.added) >= QuestionTTL || (best != nil && q.order < best.order) {
@@ -491,14 +529,7 @@ func (p *pane) setIdle() {
 func (p *pane) push(raw json.RawMessage) Entry {
 	p.seq++
 	e := Entry{Seq: p.seq, Event: append(json.RawMessage(nil), raw...)}
-	p.events = append(p.events, e)
-	if len(p.events) > RingCap {
-		// Reslice instead of copying the ring on every push: the backing
-		// array's next growth copies only the live window. The dropped slot
-		// is cleared so its event can be collected.
-		p.events[0] = Entry{}
-		p.events = p.events[len(p.events)-RingCap:]
-	}
+	p.events = appendCapped(p.events, e, RingCap)
 	return e
 }
 
@@ -506,19 +537,11 @@ func (p *pane) snapshot(paneID string) Snapshot {
 	start := max(0, len(p.events)-SnapshotTail)
 	ev := make([]Entry, len(p.events)-start)
 	copy(ev, p.events[start:])
-	return Snapshot{PaneID: paneID, Epoch: p.epoch, State: p.state, Events: ev, HasMore: start > 0}
+	return Snapshot{PaneID: paneID, Epoch: p.epoch, State: p.state, Events: ev, HasMore: start > 0, Agents: p.agentList(), Tasks: p.tasks}
 }
 
-// fan delivers u to every subscriber without blocking: a subscriber whose
-// buffer is full misses the update rather than stalling the mod's heartbeat.
-func (p *pane) fan(u Update) {
-	for _, ch := range p.subs {
-		select {
-		case ch <- u:
-		default:
-		}
-	}
-}
+// fan delivers u to every main-stream subscriber without blocking.
+func (p *pane) fan(u Update) { fanTo(p.subs, u) }
 
 // Send queues text for the pane's mod. The pane must be chat-capable.
 func (h *Hub) Send(paneID, text string) error {
@@ -540,9 +563,10 @@ func (h *Hub) Send(paneID, text string) error {
 }
 
 // History returns up to min(limit, HistoryMax) entries of the pane's current
-// epoch with seq < beforeSeq, ascending, and whether older ones remain. ok is
-// false when the pane is unknown or epoch is not its current one.
-func (h *Hub) History(paneID string, epoch, beforeSeq, limit int) (events []Entry, hasMore bool, ok bool) {
+// epoch with seq < beforeSeq, ascending, and whether older ones remain: of the
+// main stream, or of agentID's thread when set. ok is false when the pane or
+// thread is unknown or epoch is not the pane's current one.
+func (h *Hub) History(paneID, agentID string, epoch, beforeSeq, limit int) (events []Entry, hasMore bool, ok bool) {
 	if limit <= 0 || limit > HistoryMax {
 		limit = HistoryMax
 	}
@@ -552,11 +576,16 @@ func (h *Hub) History(paneID string, epoch, beforeSeq, limit int) (events []Entr
 	if p == nil || p.epoch != epoch {
 		return nil, false, false
 	}
-	end := sort.Search(len(p.events), func(i int) bool { return p.events[i].Seq >= beforeSeq })
-	start := max(0, end-limit)
-	events = make([]Entry, end-start)
-	copy(events, p.events[start:end])
-	return events, start > 0, true
+	ring := p.events
+	if agentID != "" {
+		t := p.threads[agentID]
+		if t == nil {
+			return nil, false, false
+		}
+		ring = t.events
+	}
+	events, hasMore = page(ring, beforeSeq, limit)
+	return events, hasMore, true
 }
 
 // Image returns a stored image of the pane and marks it recently used.
@@ -665,31 +694,63 @@ func (h *Hub) Live(paneID string) bool {
 }
 
 // Subscribe returns the pane's current snapshot and a channel of later
-// updates. cancel closes the channel; it is safe to call more than once and
-// after Drop.
-func (h *Hub) Subscribe(paneID string) (Snapshot, <-chan Update, func()) {
+// updates: of the main stream, or of agentID's thread when set. A thread the
+// pane does not hold yields Missing and a channel that receives nothing until
+// cancel. A thread subscription's channel is closed when the thread is
+// evicted or discarded by a main resync. cancel closes the channel; it is
+// safe to call more than once and after Drop.
+func (h *Hub) Subscribe(paneID, agentID string) (Snapshot, <-chan Update, func()) {
 	h.mu.Lock()
 	p := h.get(paneID)
 	h.nextSub++
 	id := h.nextSub
 	ch := make(chan Update, subBuffer)
-	p.subs[id] = ch
-	snap := p.snapshot(paneID)
+	registered := true
+	var snap Snapshot
+	switch t := p.threads[agentID]; {
+	case agentID == "":
+		p.subs[id] = ch
+		snap = p.snapshot(paneID)
+	case t != nil:
+		t.subs[id] = ch
+		snap = t.snapshot(p, paneID, agentID)
+	default:
+		registered = false
+		snap = Snapshot{PaneID: paneID, AgentID: agentID, Epoch: p.epoch, State: p.state, Events: []Entry{}, Missing: true}
+	}
 	h.mu.Unlock()
 	var once sync.Once
 	cancel := func() {
 		once.Do(func() {
 			h.mu.Lock()
 			defer h.mu.Unlock()
-			if q := h.panes[paneID]; q != nil {
-				if c, ok := q.subs[id]; ok {
-					delete(q.subs, id)
-					close(c)
-				}
+			if !registered {
+				close(ch)
+				return
+			}
+			subs := h.subsOf(paneID, agentID)
+			if c, ok := subs[id]; ok { // absent once closed (evicted, resync, Drop)
+				delete(subs, id)
+				close(c)
 			}
 		})
 	}
 	return snap, ch, cancel
+}
+
+// subsOf returns the subscriber set of the pane's main stream (agentID "")
+// or of one thread; nil when the pane or thread is gone. Caller holds mu.
+func (h *Hub) subsOf(paneID, agentID string) map[int]chan Update {
+	p := h.panes[paneID]
+	switch {
+	case p == nil:
+		return nil
+	case agentID == "":
+		return p.subs
+	case p.threads[agentID] != nil:
+		return p.threads[agentID].subs
+	}
+	return nil
 }
 
 // Tick expires panes whose mod has not synced within LiveWindow and resets
@@ -707,7 +768,7 @@ func (h *Hub) Tick() {
 			p.live = false
 			p.outbox = nil  // never deliver stale messages to a later session
 			p.setIdle()     // a dead mod is not working
-			p.staging = nil // it restarts its chunked snapshot after recovery
+			p.dropStaging() // it restarts its chunked snapshots after recovery
 			dead = append(dead, id)
 		} else if len(p.questions) != n {
 			dead = append(dead, id) // still live, but its ask may have changed
@@ -743,9 +804,9 @@ func (h *Hub) Drop(paneID string) {
 	if p == nil {
 		return
 	}
-	for id, ch := range p.subs {
-		delete(p.subs, id)
-		close(ch)
+	closeSubs(p.subs)
+	for _, t := range p.threads {
+		closeSubs(t.subs)
 	}
 }
 

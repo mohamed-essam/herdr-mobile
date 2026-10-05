@@ -81,6 +81,23 @@ func TestSyncRoundTrip(t *testing.T) {
 	}
 }
 
+// The mod sends v2 traffic (agentId, agent/tasks controls) only to a
+// companion that announces it, so every /sync reply carries threads: true.
+func TestSyncAnnouncesThreads(t *testing.T) {
+	_, c := serve(t, NewHub(nil))
+	res, err := c.Post("http://chat/sync", "application/json", strings.NewReader(`{"paneId":"p","sessionId":"s","events":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got["threads"] != true {
+		t.Fatalf("/sync reply %v lacks threads:true", got)
+	}
+}
+
 func TestSyncRejectsBadRequests(t *testing.T) {
 	_, c := serve(t, NewHub(nil))
 	for _, body := range []string{`not json`, `{"sessionId":"s","events":[]}`} {

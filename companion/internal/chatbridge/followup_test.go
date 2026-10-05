@@ -10,7 +10,7 @@ func TestTaskNoticeIsAcceptedAndFanned(t *testing.T) {
 	h := NewHub(nil)
 	notice := `{"type":"task_notice","uuid":"d1#0","status":"completed","summary":"done"}`
 	h.Sync("p", "s", raws(`{"type":"hello","sessionId":"s","cwd":"/x"}`, `{"type":"snapshot","events":[`+notice+`]}`))
-	snap, ch, cancel := h.Subscribe("p")
+	snap, ch, cancel := h.Subscribe("p", "")
 	defer cancel()
 	if len(snap.Events) != 1 || string(snap.Events[0].Event) != notice {
 		t.Fatalf("snapshot dropped task_notice: %+v", snap.Events)
@@ -38,7 +38,7 @@ func TestTickResetsWorkingToIdle(t *testing.T) {
 	c := &fakeClock{t: time.Unix(1000, 0)}
 	h := NewHub(c.now)
 	h.Sync("p", "s", raws(`{"type":"hello","sessionId":"s","cwd":"/x"}`, `{"type":"state","state":"working"}`))
-	_, ch, cancel := h.Subscribe("p")
+	_, ch, cancel := h.Subscribe("p", "")
 	defer cancel()
 	c.add(LiveWindow)
 	h.Tick()
@@ -46,7 +46,7 @@ func TestTickResetsWorkingToIdle(t *testing.T) {
 	if u.Kind != "state" || u.State != "idle" {
 		t.Fatalf("want idle state update, got %+v", u)
 	}
-	snap, _, cancel2 := h.Subscribe("p")
+	snap, _, cancel2 := h.Subscribe("p", "")
 	defer cancel2()
 	if snap.State != "idle" {
 		t.Fatalf("state = %q", snap.State)
@@ -57,7 +57,7 @@ func TestTickOnIdlePaneFansNothing(t *testing.T) {
 	c := &fakeClock{t: time.Unix(1000, 0)}
 	h := NewHub(c.now)
 	h.Sync("p", "s", raws(`{"type":"hello","sessionId":"s","cwd":"/x"}`))
-	_, ch, cancel := h.Subscribe("p")
+	_, ch, cancel := h.Subscribe("p", "")
 	defer cancel()
 	c.add(LiveWindow)
 	h.Tick()
@@ -72,7 +72,7 @@ func TestTickOnIdlePaneFansNothing(t *testing.T) {
 func TestHelloWithNewSessionResetsState(t *testing.T) {
 	h := NewHub(nil)
 	h.Sync("p", "s1", raws(`{"type":"hello","sessionId":"s1","cwd":"/x"}`, `{"type":"state","state":"working"}`))
-	_, ch, cancel := h.Subscribe("p")
+	_, ch, cancel := h.Subscribe("p", "")
 	defer cancel()
 	h.Sync("p", "s2", raws(`{"type":"hello","sessionId":"s2","cwd":"/x"}`))
 	u := drainState(t, ch)
