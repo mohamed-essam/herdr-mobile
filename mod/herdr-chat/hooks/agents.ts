@@ -1,4 +1,4 @@
-import type { ChatEvent } from './normalize'
+import type { ChatEvent, ChatImage } from './normalize'
 
 // Pure state and logic for linking subagents and workflow agents to the tool
 // call that started them (no `$`: the hooks in register.ts do the I/O). A
@@ -22,8 +22,9 @@ export type Workflow = { toolUseId: string; transcriptDir: string; name: string;
 export type AgentsState = {
   links: Map<string, AgentLink>
   workflows: Map<string, Workflow> // by runId
-  // Unlinked agentId → its held events, and the ticks it has been waiting.
-  held: Map<string, { events: ChatEvent[]; ticks: number }>
+  // Unlinked agentId → its held events, the images they reference, and the
+  // ticks it has been waiting.
+  held: Map<string, { events: ChatEvent[]; images: Record<string, ChatImage>; ticks: number }>
   ignored: Set<string> // gave up linking
 }
 
@@ -152,22 +153,38 @@ function tagged(events: ChatEvent[], agentId: string): ChatEvent[] {
   return events.map(e => ({ ...e, agentId }))
 }
 
-export function routeAgentEvents(a: AgentsState, agentId: string, events: ChatEvent[]): ChatEvent[] {
+// The image ids the events reference.
+export function referencedImages(events: readonly ChatEvent[]): Set<string> {
+  const ids = new Set<string>()
+  for (const ev of events) if ('images' in ev) for (const id of ev.images ?? []) ids.add(id)
+  return ids
+}
+
+// A linked agent's events, tagged; an unlinked one's are held, with the
+// images they reference (`images`), until it links or is given up on.
+export function routeAgentEvents(a: AgentsState, agentId: string, events: ChatEvent[], images: Record<string, ChatImage> = {}): ChatEvent[] {
   if (a.ignored.has(agentId)) return []
   if (a.links.has(agentId)) return tagged(events, agentId)
-  const h = a.held.get(agentId) ?? { events: [], ticks: 0 }
+  const h = a.held.get(agentId) ?? { events: [], images: {}, ticks: 0 }
   h.events.push(...events)
-  if (h.events.length > HOLD_EVENTS) h.events.splice(0, h.events.length - HOLD_EVENTS)
+  for (const id of referencedImages(events)) if (images[id]) h.images[id] = images[id]
+  if (h.events.length > HOLD_EVENTS) {
+    h.events.splice(0, h.events.length - HOLD_EVENTS)
+    const kept = referencedImages(h.events)
+    for (const id of Object.keys(h.images)) if (!kept.has(id)) delete h.images[id]
+  }
   a.held.set(agentId, h)
   return []
 }
 
-// Once per tick, after the journal reads.
-export function releaseHeld(a: AgentsState): ChatEvent[] {
+// Once per tick, after the journal reads. The released events' images go
+// into `images`.
+export function releaseHeld(a: AgentsState, images: Record<string, ChatImage> = {}): ChatEvent[] {
   const out: ChatEvent[] = []
   for (const [id, h] of [...a.held]) {
     if (a.links.has(id)) {
       out.push(...tagged(h.events, id))
+      Object.assign(images, h.images)
       a.held.delete(id)
     } else if (++h.ticks >= HOLD_TICKS) {
       a.held.delete(id)
@@ -183,4 +200,17 @@ export function setStatus(a: AgentsState, agentId: string, status: AgentStatus, 
   l.status = status
   l.ts = now
   return control(l)
+}
+
+// A workflow whose task has ended (its task notice names `toolUseId`, its
+// Workflow call): forgotten, so its journal is no longer read.
+export function forgetWorkflow(a: AgentsState, toolUseId: string): void {
+  if (!toolUseId) return
+  for (const [runId, wf] of [...a.workflows]) if (wf.toolUseId === toolUseId) a.workflows.delete(runId)
+}
+
+// At a resync (spec §1.5.5 "otherwise done"): a workflow agent still running
+// (no journal `result`) that `$.agent.list()` does not list is done.
+export function settleUnlisted(a: AgentsState, listed: ReadonlySet<string>, now: number): void {
+  for (const l of a.links.values()) if (l.kind === 'workflow' && l.status === 'running' && !listed.has(l.agentId)) setStatus(a, l.agentId, 'done', now)
 }

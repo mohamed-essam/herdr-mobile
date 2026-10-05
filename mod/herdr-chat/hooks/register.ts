@@ -1,5 +1,5 @@
 import type { EngineInterface, Register } from 'claude-code'
-import { agentControls, linkFromMeta, linkJournal, linkSpawn, newAgentsState, recordWorkflow, releaseHeld, resetAgents, routeAgentEvents, setStatus, type AgentControl, type AgentsState, type Workflow } from './agents'
+import { agentControls, forgetWorkflow, linkFromMeta, linkJournal, linkSpawn, newAgentsState, recordWorkflow, referencedImages, releaseHeld, resetAgents, routeAgentEvents, setStatus, settleUnlisted, type AgentControl, type AgentsState, type Workflow } from './agents'
 import { listStatus, newestAgents, parseListing, resyncTasks, THREAD_EVENTS, type AgentFile } from './resync'
 import { expireTasks, noticeStatus, taskFromLaunch, taskFromNotice, tasksControl, type TasksControl, type TasksState } from './tasks'
 import { normalizeBlocks, normalizeSnapshot, shouldForward, utf8Bytes, type ChatEvent, type ChatImage, type Normalized } from './normalize'
@@ -103,11 +103,46 @@ function isV2(ev: Outgoing): boolean {
 }
 
 // Queues agent rows and controls, and tasks controls, only for a companion
-// that takes them (see State.threads).
-function queueV2(s: State, events: readonly Outgoing[]) {
-  if (!events.length) return
-  if (s.threads) s.pending.push(...events)
-  else s.threadsMissed = true
+// that takes them (see State.threads). False when they were dropped.
+function queueV2(s: State, events: readonly Outgoing[]): boolean {
+  if (!events.length) return false
+  if (!s.threads) {
+    s.threadsMissed = true
+    return false
+  }
+  placeRows(s, events)
+  return true
+}
+
+// Queues rows in order. The companion swaps an agent's thread in at its
+// snapshot_end, wiping what it held: so a row for an agent whose thread
+// snapshot is still queued (its snapshot_end not yet taken into a body) goes
+// right after that snapshot_end, behind the rows already put there; any
+// other row goes to `pending`.
+export function placeRows(s: State, rows: readonly Outgoing[]) {
+  for (const ev of rows) {
+    const agentId = 'agentId' in ev && !ev.type.startsWith('snapshot_') ? ev.agentId : undefined
+    const end = agentId ? s.threadQueue.findIndex(q => q.type === 'snapshot_end' && q.agentId === agentId) : -1
+    if (end < 0) {
+      s.pending.push(ev)
+      continue
+    }
+    let at = end + 1
+    while (at < s.threadQueue.length) {
+      const q = s.threadQueue[at]!
+      if (q.type.startsWith('snapshot_') || !('agentId' in q) || q.agentId !== agentId) break
+      at++
+    }
+    s.threadQueue.splice(at, 0, ev)
+  }
+}
+
+// Queues the images the events reference (only for events that were queued).
+function queueImages(s: State, events: readonly ChatEvent[], images: Record<string, ChatImage>) {
+  for (const id of referencedImages(events)) {
+    const img = images[id]
+    if (img?.data) s.imageQueue.push(queued(id, img))
+  }
 }
 
 // Queues the tasks as they stand; one still queued from earlier is dropped.
@@ -289,8 +324,10 @@ async function buildHistory($: EngineInterface, s: State) {
     s.threadQueue = s.threads && agents ? agents.threads : []
     // A question queued during the build is in both: send it once, here; the
     // same for a tasks control.
+    // A row for an agent whose thread snapshot is now queued goes after it.
     const queued = s.pending.filter(ev => !(ev.type === 'tasks' && s.threads && sendTasks) && !(ev.type === 'question' && s.openQuestions.has(ev.toolUseId)))
-    s.pending = [...head, ...queued]
+    s.pending = head
+    placeRows(s, queued)
     // Thread images get what room the history's own leave (see historyImages).
     const threaded = s.threads && agents ? agents : null
     s.imageQueue = [...historyImages(events, history.images, threaded?.events ?? [], threaded?.images ?? {}), ...s.imageQueue]
@@ -367,6 +404,7 @@ async function rebuildAgents($: EngineInterface, s: State, sessionDir: string, r
     const status = listStatus(info.status)
     if (status) setStatus(s.agents, info.id, status, now)
   }
+  settleUnlisted(s.agents, new Set(list.map(info => info.id)), now)
   const threads: Outgoing[] = []
   const events: ChatEvent[] = []
   const images: Record<string, ChatImage> = {}
@@ -430,7 +468,8 @@ function newestReferenced(events: readonly ChatEvent[], images: Record<string, C
 // second snapshot chunk, then images while the body stays ≤ BODY_BYTES (an
 // image that doesn't fit waits; one over IMAGE_BYTES is dropped), then, once
 // `pending` is empty, thread snapshot parts in order while the body still
-// has room (the first one goes even alone in a body too small for it).
+// has room (the first one goes even alone in a body too small for it, but
+// only in a body that is otherwise empty).
 function takeBody(s: State): { events: Outgoing[]; images: Record<string, ChatImage> } {
   let bytes = utf8Bytes(JSON.stringify({ paneId: s.paneId, sessionId: s.sessionId, events: [], images: {} }))
   let n = 0
@@ -464,7 +503,7 @@ function takeBody(s: State): { events: Outgoing[]; images: Record<string, ChatIm
     let t = 0
     for (; t < s.threadQueue.length; t++) {
       const size = utf8Bytes(JSON.stringify(s.threadQueue[t])) + (events.length + t ? 1 : 0)
-      if ((events.length || t) && bytes + size > BODY_BYTES) break
+      if ((events.length || count || t) && bytes + size > BODY_BYTES) break
       bytes += size
     }
     events.push(...s.threadQueue.slice(0, t))
@@ -499,7 +538,10 @@ export async function linkWorkflowAgents($: EngineInterface, s: State) {
     const lines = await readJournal($, wf)
     if (lines.length) controls.push(...linkJournal(s.agents, runId, lines, Date.now()))
   }
-  queueV2(s, [...controls, ...releaseHeld(s.agents)])
+  const images: Record<string, ChatImage> = {}
+  const released = releaseHeld(s.agents, images)
+  // Held rows' images go with them (and are dropped with them).
+  if (queueV2(s, [...controls, ...released])) queueImages(s, released, images)
 }
 
 async function tick($: EngineInterface, s: State) {
@@ -656,21 +698,25 @@ export function queueAppended(s: State, e: Appended, stored: { content?: unknown
   if (e.agentId) {
     // Its row: the agent is running (again), and its control goes first.
     const revived = n.events.length && s.agents.links.get(e.agentId)?.status !== 'running' ? setStatus(s.agents, e.agentId, 'running', Date.now()) : null
-    queueV2(s, [...(revived ? [revived] : []), ...routeAgentEvents(s.agents, e.agentId, n.events)])
+    // A held row keeps its images (queued on release); a dropped one's go too.
+    const routed = routeAgentEvents(s.agents, e.agentId, n.events, n.images)
+    if (queueV2(s, [...(revived ? [revived] : []), ...routed])) queueImages(s, routed, n.images)
   } else {
     s.pending.push(...n.events)
+    queueImages(s, n.events, n.images)
     let changed = false
     for (const ev of n.events) {
       if (ev.type !== 'task_notice') continue
       const now = Date.now()
       changed = taskFromNotice(s.tasks, ev, now) || changed
+      // A workflow's notice ends its journal reads.
+      forgetWorkflow(s.agents, ev.toolUseId ?? (ev.taskId ? s.tasks.get(ev.taskId)?.toolUseId : undefined) ?? '')
       // A subagent's notice ends that agent too, when its task id is a linked one.
       const ended = ev.taskId ? setStatus(s.agents, ev.taskId, noticeStatus(ev.status), now) : null
       if (ended) queueV2(s, [ended])
     }
     if (changed) queueTasks(s)
   }
-  for (const [id, img] of Object.entries(n.images)) if (img.data) s.imageQueue.push(queued(id, img))
 }
 
 export const register: Register = on => {

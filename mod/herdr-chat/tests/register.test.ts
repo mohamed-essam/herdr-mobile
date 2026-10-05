@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { BODY_BYTES, HISTORY_IMAGE_BYTES, historyImages, IMAGE_BYTES, linkWorkflowAgents, queueAppended, type State } from '../hooks/register'
+import { BODY_BYTES, HISTORY_IMAGE_BYTES, historyImages, IMAGE_BYTES, linkWorkflowAgents, placeRows, queueAppended, type State } from '../hooks/register'
 import { eventsFromTranscript } from '../hooks/transcript'
 import { linkSpawn, newAgentsState, recordWorkflow } from '../hooks/agents'
 import { taskFromLaunch } from '../hooks/tasks'
@@ -454,6 +454,122 @@ describe('herdr-chat', () => {
     await w.clock.advance(1000)
     const last = tasksOf(w.all() as never).at(-1)!
     expect(last.tasks.map(t => t.id)).toEqual(['b4prbe90d'])
+  })
+
+  // C1: a thread part that starts a body already holding images is size-checked too.
+  test('a thread chunk queued behind more than a body of images never pushes a body over the limit', async ($, on) => {
+    const w = world(on)
+    const big = 'A'.repeat(1.5 * MB)
+    w.files[`${SESS}.jsonl`] = Array.from({ length: 6 }, (_, i) => imageRow(`i${i}`, big)).join('\n')
+    // One thread of 16 rows of 64 KB text: a single ~1 MB chunk.
+    w.files[`${SESS}/subagents/agent-d1.meta.json`] = meta('toolu_d1', 'd1')
+    w.files[`${SESS}/subagents/agent-d1.jsonl`] = Array.from({ length: 16 }, (_, i) => sideRow('d1', `x${i}`, 'assistant', 'y'.repeat(64 * 1024 - 8))).join('\n') + '\n'
+    await startAt($)
+    await w.clock.advance(10000)
+    for (const n of w.sizes) expect(n).toBeLessThanOrEqual(BODY_BYTES)
+    expect(w.threads().map(t => [t.agentId, t.events.length])).toEqual([['d1', 16]])
+    expect(w.snapshots().length).toBe(1)
+    expect(w.syncs.flatMap(s => Object.keys(s.images ?? {})).length).toBe(6)
+  })
+
+  // I2: the companion swaps a thread in at its snapshot_end; a live row for that
+  // agent sent before it would be wiped.
+  const snap = (agentId: string): any[] => [
+    { type: 'snapshot_begin', total: 1, agentId },
+    { type: 'snapshot_chunk', events: [{ type: 'assistant_text', uuid: `${agentId}-old`, text: 'old', agentId }], agentId },
+    { type: 'snapshot_end', agentId },
+  ]
+  test('a live row for an agent whose thread snapshot is still queued goes right after its snapshot_end', () => {
+    const s = state('w1:p1')
+    linkSpawn(s.agents, { tool_use_id: 'toolu_1', description: 'd', subagentType: 'general-purpose' }, 'aa1', 1)
+    s.threadQueue = [...snap('aa1'), ...snap('bb2')]
+    const row = (uuid: string, text: string) => ({ door: 'response', uuid, agentId: 'aa1', message: { role: 'assistant', content: [{ type: 'text', text }] } })
+    queueAppended(s, row('l1', 'live one'), undefined)
+    queueAppended(s, row('l2', 'live two'), undefined)
+    expect(s.pending).toEqual([])
+    expect(s.threadQueue.map((e: any) => [e.type, e.agentId, e.uuid ?? ''])).toEqual([
+      ['snapshot_begin', 'aa1', ''], ['snapshot_chunk', 'aa1', ''], ['snapshot_end', 'aa1', ''],
+      ['assistant_text', 'aa1', 'l1#0'], ['assistant_text', 'aa1', 'l2#0'],
+      ['snapshot_begin', 'bb2', ''], ['snapshot_chunk', 'bb2', ''], ['snapshot_end', 'bb2', ''],
+    ])
+    // Once its snapshot_end has gone out, a later row is a plain live row.
+    s.threadQueue = snap('bb2')
+    queueAppended(s, row('l3', 'live three'), undefined)
+    expect(s.pending.map((e: any) => e.uuid)).toEqual(['l3#0'])
+  })
+  test('at build time, rows queued meanwhile for an agent with a thread snapshot move after its snapshot_end', () => {
+    const s = state('w1:p1')
+    s.threadQueue = snap('aa1')
+    placeRows(s, [
+      { type: 'state', state: 'working' },
+      { type: 'assistant_text', uuid: 'l1#0', text: 'live', agentId: 'aa1' },
+      { type: 'assistant_text', uuid: 'l2#0', text: 'other', agentId: 'cc3' },
+    ])
+    expect(s.pending.map((e: any) => e.type === 'state' ? 'state' : e.uuid)).toEqual(['state', 'l2#0'])
+    expect(s.threadQueue.map((e: any) => e.uuid ?? e.type)).toEqual(['snapshot_begin', 'snapshot_chunk', 'snapshot_end', 'l1#0'])
+  })
+
+  // I7: an image is queued only beside an event that was queued.
+  const agentImageRow = (uuid: string, agentId: string) => ({
+    door: 'tool-result', uuid, agentId,
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'QUJD' } }] }] },
+  })
+  test('with the gate off, an agent row’s image is dropped with it', () => {
+    const s = state('w1:p1')
+    s.threads = false
+    linkSpawn(s.agents, { tool_use_id: 'toolu_1', description: 'd', subagentType: 'general-purpose' }, 'aa1', 1)
+    queueAppended(s, agentImageRow('r1', 'aa1'), undefined)
+    expect(s.pending).toEqual([])
+    expect(s.imageQueue).toEqual([])
+  })
+  test('an ignored agent’s row image is dropped', () => {
+    const s = state('w1:p1')
+    s.agents.ignored.add('zz9')
+    queueAppended(s, agentImageRow('r1', 'zz9'), undefined)
+    expect(s.imageQueue).toEqual([])
+  })
+  test('a held row keeps its image until the agent links, then both are queued', async () => {
+    const files: Record<string, string> = {}
+    const $ = {
+      process: {
+        run: async (argv: string[]) => {
+          const file = files[argv[4]!]
+          if (file === undefined) return { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+          return { exitCode: 0, stdout: file.split('\n').slice(Number(argv[2]!.slice(1)) - 1).join('\n'), stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+        },
+      },
+    } as never
+    const s = state('w1:p1')
+    recordWorkflow(s.agents, 'toolu_wf', { status: 'async_launched', taskId: 'wfu18ne1l', runId: 'wf_4ddcdf59-066', workflowName: 'w', summary: 's', transcriptDir: '/p/wf' })
+    queueAppended(s, agentImageRow('r1', 'a3ffd04f6c0bcfe58'), undefined)
+    expect(s.pending).toEqual([])
+    expect(s.imageQueue).toEqual([])
+    files['/p/wf/journal.jsonl'] = '{"type":"started","agentId":"a3ffd04f6c0bcfe58","label":"x"}\n'
+    await linkWorkflowAgents($, s)
+    expect(s.pending.map(e => e.type)).toEqual(['agent', 'tool_result'])
+    expect(s.imageQueue.map(q => q.id)).toEqual(['r1#0.0'])
+  })
+
+  // M-a: a finished workflow's journal is no longer read.
+  test('a workflow’s task notice forgets the workflow', () => {
+    const s = state('w1:p1')
+    const result = { status: 'async_launched', taskId: 'wfu18ne1l', runId: 'wf_4ddcdf59-066', workflowName: 'w', summary: 's', transcriptDir: '/p/wf' }
+    recordWorkflow(s.agents, 'toolu_wf', result)
+    recordWorkflow(s.agents, 'toolu_other', { ...result, taskId: 'wfu2', runId: 'wf_other' })
+    taskFromLaunch(s.tasks, 'Workflow', 'toolu_wf', {}, result, 1)
+    queueAppended(s, noticeRow('d1', 'wfu18ne1l'), undefined)
+    expect([...s.agents.workflows.keys()]).toEqual(['wf_other'])
+  })
+
+  // M-c: spec §1.5.5 "otherwise done".
+  test('at a resync, a workflow agent with no journal result and absent from agent.list is done', async ($, on) => {
+    const w = world(on)
+    sessionFiles(w)
+    w.files[`${SESS}/subagents/workflows/wf_r1/journal.jsonl`] = JSON.stringify({ type: 'started', agentId: 'bb2', label: 'Say one', phase: 'Reply' }) + '\n'
+    await startAt($)
+    await w.clock.advance(6000)
+    const agents = (w.all() as any[]).filter(e => e.type === 'agent').map(e => [e.agent.agentId, e.agent.status])
+    expect(agents).toEqual([['aa1', 'done'], ['bb2', 'done']])
   })
 
   test('live rows queued while threads drain go out in the next body, not after every thread', async ($, on) => {
