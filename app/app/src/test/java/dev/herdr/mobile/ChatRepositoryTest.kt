@@ -523,6 +523,44 @@ class ChatRepositoryTest {
         assertTrue(repo.view(ChatKey("p", "aa1")).value.agents.isEmpty())
     }
 
+    // I3: an open thread the companion dropped (missing) or a main resync re-opens.
+    @Test fun mainEpochChangeReopensEveryOpenedThreadOfThePane() {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> })
+        repo.open(ChatKey("p"))
+        repo.open(ChatKey("p", "aa1"))
+        repo.open(ChatKey("q", "cc3"))
+        repo.onFrame(ServerFrame.ChatSnapshot("p", 1, "idle", emptyList()))
+        repo.onFrame(ServerFrame.ChatSnapshot("p", 1, "idle", emptyList(), agentId = "aa1"))
+        sent.clear()
+        // Same epoch (a gap re-open): nothing re-sent.
+        repo.onFrame(ServerFrame.ChatSnapshot("p", 1, "idle", emptyList()))
+        assertEquals(emptyList<String>(), sent)
+        repo.onFrame(ServerFrame.ChatSnapshot("p", 2, "idle", emptyList()))
+        assertEquals(listOf(ClientMsg.chatOpen("p", "aa1")), sent)
+    }
+
+    @Test fun anAgentUpsertReopensItsMissingOpenedThread() {
+        val sent = mutableListOf<String>()
+        val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> })
+        repo.open(ChatKey("p", "aa1"))
+        repo.open(ChatKey("p", "bb2"))
+        repo.onFrame(ServerFrame.ChatSnapshot("p", 1, "idle", emptyList(), agentId = "aa1", missing = true))
+        repo.onFrame(ServerFrame.ChatSnapshot("p", 1, "idle", emptyList(), agentId = "bb2"))
+        sent.clear()
+        // Not missing: no re-open.
+        repo.onFrame(ServerFrame.ChatAgent("p", AgentSummary("bb2", "tu", kind = "subagent", label = "L", status = "running"), null))
+        // Missing but not opened: no re-open.
+        repo.onFrame(ServerFrame.ChatAgent("p", AgentSummary("zz9", "tu", kind = "subagent", label = "L", status = "running"), null))
+        assertEquals(emptyList<String>(), sent)
+        repo.onFrame(ServerFrame.ChatAgent("p", AgentSummary("aa1", "tu", kind = "subagent", label = "L", status = "running"), null))
+        assertEquals(listOf(ClientMsg.chatOpen("p", "aa1")), sent)
+        // A removal is no upsert.
+        sent.clear()
+        repo.onFrame(ServerFrame.ChatAgent("p", null, "aa1"))
+        assertEquals(emptyList<String>(), sent)
+    }
+
     @Test fun threadLoadOlderSendsAgentId() {
         val sent = mutableListOf<String>()
         val repo = ChatRepository(sendRaw = { sent += it }, sendChat = { _, _ -> })

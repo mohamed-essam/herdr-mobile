@@ -62,9 +62,16 @@ class ChatRepository(
         }
         val t = now()
         var gapped = false
-        flow(key).update { v -> ChatReducer.onFrame(v, f, t).also { gapped = !v.gap && it.gap } }
+        var newEpoch = false
+        flow(key).update { v ->
+            ChatReducer.onFrame(v, f, t).also {
+                gapped = !v.gap && it.gap
+                newEpoch = v.loaded && it.epoch != v.epoch
+            }
+        }
         // A seq gap: re-open once; the companion answers with a fresh snapshot.
         if (gapped && key in opened) sendRaw(ClientMsg.chatOpen(key.paneId, key.agentId))
+        if (key.agentId == null) reopenThreads(key.paneId, f, newEpoch)
         // The companion may hold images now that it lacked before (a resync
         // re-sends the history's newest): give this pane's missing ones another go.
         if (f is ServerFrame.ChatSnapshot) {
@@ -74,6 +81,22 @@ class ChatRepository(
             }
             sendImages(toSend)
         }
+    }
+
+    /**
+     * The companion closes a pane's threads at a main resync and evicts old
+     * ones; an open thread would then freeze. A new main epoch re-opens every
+     * opened thread of the pane; an agent's upsert re-opens its thread when
+     * that is opened and was answered missing.
+     */
+    private fun reopenThreads(paneId: String, f: ServerFrame, newEpoch: Boolean) {
+        val again = when {
+            f is ServerFrame.ChatSnapshot && newEpoch -> opened.filter { it.paneId == paneId && it.agentId != null }
+            f is ServerFrame.ChatAgent && f.agent != null -> listOf(ChatKey(paneId, f.agent.agentId))
+                .filter { it in opened && views[it]?.value?.missing == true }
+            else -> emptyList()
+        }
+        again.forEach { sendRaw(ClientMsg.chatOpen(it.paneId, it.agentId)) }
     }
 
     fun open(key: ChatKey) {

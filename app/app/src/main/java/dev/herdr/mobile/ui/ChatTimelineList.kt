@@ -181,7 +181,7 @@ fun ChatTimelineList(
                         }
                         is TimelineItem.AgentCard -> GutterRow(if (item.head) ts(item.call.ts) else null, top) {
                             if (item.head) SpeakerLabel(agentLabel, c.blue)
-                            AgentCardBody(item.call, agents, now, onOpenThread, tasks)
+                            AgentCardBody(item.call, agents, now, onOpenThread, tasks, results[item.call.toolUseId], working)
                         }
                         is TimelineItem.Event -> EventRow(
                             vm, paneId, item, top, agentLabel, ts, view.answering, view.answered,

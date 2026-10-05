@@ -57,7 +57,8 @@ private fun speakerOf(ev: ChatEvent): Speaker = when (ev) {
  * their call), an AskUserQuestion's own tool call is dropped (its question
  * shows instead), and runs of tool calls fold into one [TimelineItem.Tools]
  * keyed by its first call, so appending calls keeps the row's key. An Agent or
- * Workflow call ends the rail and becomes a [TimelineItem.AgentCard]. Nothing
+ * Workflow call ends the rail and becomes a [TimelineItem.AgentCard] (once per
+ * call id, should the call appear twice). Nothing
  * folds across a [pageStarts] seam (where a page of older history was joined
  * on), so prepending a page leaves the rows below it unchanged.
  */
@@ -73,6 +74,8 @@ fun buildTimeline(entries: List<ChatEntry>, epoch: Int, pageStarts: Set<Int> = e
         run = ArrayList()
     }
     var lastSeq = Int.MIN_VALUE
+    // A launch call repeated (a resync overlap) gets one card: its key must stay unique.
+    val cards = HashSet<String>()
     for (e in entries) {
         // The seam's own entry may be one that isn't shown (a tool result).
         if (pageStarts.any { it > lastSeq && it <= e.seq }) { flush(); prev = null }
@@ -81,6 +84,7 @@ fun buildTimeline(entries: List<ChatEntry>, epoch: Int, pageStarts: Set<Int> = e
         if (ev is ChatEvent.ToolResult) continue
         if (ev is ChatEvent.ToolUse) {
             if (ev.tool in AGENT_TOOLS) {
+                if (!cards.add(ev.toolUseId)) continue
                 flush()
                 out += TimelineItem.AgentCard("a:${ev.toolUseId}", e, ev, head(Speaker.Agent))
             } else if (ev.toolUseId !in questions) run += e

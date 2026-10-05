@@ -10,6 +10,7 @@ import dev.herdr.mobile.ui.ChatStatusKind
 import dev.herdr.mobile.ui.Speaker
 import dev.herdr.mobile.ui.TimelineItem
 import dev.herdr.mobile.ui.buildTimeline
+import dev.herdr.mobile.ui.fallbackStatus
 import dev.herdr.mobile.ui.agentsFor
 import dev.herdr.mobile.ui.chatStatus
 import dev.herdr.mobile.ui.workflowGroups
@@ -184,5 +185,25 @@ class ChatTimelineTest {
     @Test fun workflowTitleIgnoresNonWorkflowTasksWithTheSameToolUseId() {
         val call = ChatEvent.ToolUse("u1", "tu1", "Workflow", "script")
         assertEquals("Workflow", workflowTitle(call, listOf(bg("shell", "tu1", "sleep 5"))))
+    }
+
+    // I5: a resync overlap can repeat a launch call; its card is shown once (keys stay unique).
+    @Test fun aRepeatedAgentCallMakesOneCard() {
+        val items = buildTimeline(listOf(tool("A", "Agent"), said("x"), tool("A", "Agent"), tool("W", "Workflow"), tool("W", "Workflow")), 0)
+        val cards = items.filterIsInstance<TimelineItem.AgentCard>()
+        assertEquals(listOf("a:A", "a:W"), cards.map { it.key })
+        assertEquals(items.size, items.map { it.key }.toSet().size)
+    }
+
+    // I4: a card with no summary takes its status from the call's result.
+    @Test fun fallbackStatusFromTheCallsResult() {
+        fun r(preview: String, isError: Boolean = false) = ChatEvent.ToolResult("tu", isError, preview)
+        assertEquals("done", fallbackStatus(r("All tests pass."), working = true))
+        assertEquals("failed", fallbackStatus(r("boom", isError = true), working = false))
+        assertEquals("launched", fallbackStatus(r("Async agent launched successfully. agentId: aa1"), working = true))
+        assertEquals("launched", fallbackStatus(r("""{"status":"async_launched"}"""), working = false))
+        assertEquals("launched", fallbackStatus(r("Workflow launched in background"), working = false))
+        assertEquals("running", fallbackStatus(null, working = true))
+        assertEquals("unknown", fallbackStatus(null, working = false))
     }
 }
