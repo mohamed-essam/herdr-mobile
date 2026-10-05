@@ -1,6 +1,7 @@
 package dev.herdr.mobile
 
 import dev.herdr.mobile.net.ChatEntry
+import dev.herdr.mobile.net.AgentSummary
 import dev.herdr.mobile.net.ChatEvent
 import dev.herdr.mobile.net.QuestionItem
 import dev.herdr.mobile.ui.ChatStatus
@@ -8,7 +9,9 @@ import dev.herdr.mobile.ui.ChatStatusKind
 import dev.herdr.mobile.ui.Speaker
 import dev.herdr.mobile.ui.TimelineItem
 import dev.herdr.mobile.ui.buildTimeline
+import dev.herdr.mobile.ui.agentsFor
 import dev.herdr.mobile.ui.chatStatus
+import dev.herdr.mobile.ui.workflowGroups
 import dev.herdr.mobile.ui.pendingQuestion
 import dev.herdr.mobile.ui.runningTools
 import dev.herdr.mobile.ui.toolLine
@@ -111,5 +114,55 @@ class ChatTimelineTest {
         assertEquals(ChatStatus("waiting on you", ChatStatusKind.Waiting), chatStatus(true, "working", true))
         assertEquals(ChatStatus("working", ChatStatusKind.Working), chatStatus(true, "working", false))
         assertEquals(ChatStatus("idle", ChatStatusKind.Idle), chatStatus(true, "idle", false))
+    }
+
+    private fun agent(id: String, parent: String, ts: Long, phase: String? = null) =
+        AgentSummary(id, parent, null, "subagent", id, null, phase, "running", null, ts)
+
+    @Test fun agentCallFlushesTheRailAndResumesAfter() {
+        val items = buildTimeline(listOf(tool("1"), tool("A", "Agent"), tool("2", "Bash")), 0)
+        assertEquals(3, items.size)
+        assertTrue(items[0] is TimelineItem.Tools)
+        val card = items[1] as TimelineItem.AgentCard
+        assertEquals("A", card.call.toolUseId)
+        assertEquals(Speaker.Agent, card.speaker)
+        assertEquals("Bash", ((items[2] as TimelineItem.Tools).tools.single().event as ChatEvent.ToolUse).tool)
+    }
+
+    @Test fun agentCardKeyIsStableAcrossEpochs() {
+        val entries = listOf(tool("toolu_A", "Agent"))
+        assertEquals("a:toolu_A", (buildTimeline(entries, 1).single()).key)
+        assertEquals("a:toolu_A", (buildTimeline(entries, 2).single()).key)
+    }
+
+    @Test fun workflowCallBecomesACard() {
+        assertTrue(buildTimeline(listOf(tool("W", "Workflow")), 0).single() is TimelineItem.AgentCard)
+    }
+
+    @Test fun askUserQuestionCallStillDropped() {
+        val items = buildTimeline(listOf(tool("Q", "AskUserQuestion"), question("Q")), 0)
+        assertTrue(items.none { it is TimelineItem.AgentCard })
+        assertEquals(1, items.size)
+    }
+
+    @Test fun pageSeamBeforeAgentCallKeepsItsKey() {
+        val entries = listOf(said("x"), tool("A", "Agent"))
+        val plain = buildTimeline(entries, 0).last().key
+        val seamed = buildTimeline(entries, 0, setOf(entries[1].seq)).last().key
+        assertEquals(plain, seamed)
+    }
+
+    @Test fun agentsForFiltersByParentAndSortsByTs() {
+        val call = ChatEvent.ToolUse("u", "A", "Agent", "go")
+        val map = mapOf("x" to agent("x", "A", 30), "y" to agent("y", "B", 5), "z" to agent("z", "A", 10))
+        assertEquals(listOf("z", "x"), agentsFor(call, map).map { it.agentId })
+    }
+
+    @Test fun workflowGroupsKeepFirstSeenPhaseOrder() {
+        val groups = workflowGroups(listOf(
+            agent("a", "W", 1, "build"), agent("b", "W", 2, "test"), agent("c", "W", 3, "build"), agent("d", "W", 4),
+        ))
+        assertEquals(listOf<String?>("build", "test", null), groups.map { it.first })
+        assertEquals(listOf("a", "c"), groups[0].second.map { it.agentId })
     }
 }

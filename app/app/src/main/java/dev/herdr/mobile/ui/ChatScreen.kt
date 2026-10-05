@@ -59,7 +59,7 @@ private val GUTTER_GAP = 12.dp
  * question replaces it as a pinned sheet.
  */
 @Composable
-fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTerminal: () -> Unit) {
+fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTerminal: () -> Unit, onOpenThread: (String) -> Unit) {
     val c = Herdr.colors
     val view by remember(pane.paneId) { vm.chatView(pane.paneId) }.collectAsState()
     val connected by vm.connected.collectAsState()
@@ -104,6 +104,9 @@ fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTermina
         val grows = when (item) {
             is TimelineItem.Tools -> "${item.tools.size}/" + item.tools.sumOf { e ->
                 (e.event as? ChatEvent.ToolUse)?.let { results[it.toolUseId] }?.let { 1 + it.images.size } ?: 0
+            }
+            is TimelineItem.AgentCard -> agentsFor(item.call, view.agents).joinToString(",") {
+                "${it.agentId}:${it.status}:${activityLine(it.activity)}"
             }
             is TimelineItem.Event -> (item.entry.event as? ChatEvent.Question)?.let {
                 "${it.toolUseId in view.answering}${it.toolUseId in view.answered}"
@@ -191,6 +194,10 @@ fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTermina
                                         ) {
                                             if (item.head) SpeakerLabel(agent, c.blue)
                                             ToolRail(vm, pane.paneId, item, results, running, expanded, toggle)
+                                        }
+                                        is TimelineItem.AgentCard -> GutterRow(if (item.head) ts(item.call.ts) else null, top) {
+                                            if (item.head) SpeakerLabel(agent, c.blue)
+                                            AgentCardBody(item.call, view.agents, now, onOpenThread)
                                         }
                                         is TimelineItem.Event -> EventRow(
                                             vm, pane, item, top, agent, ts, view.answering, view.answered,

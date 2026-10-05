@@ -1,5 +1,6 @@
 package dev.herdr.mobile.ui
 
+import dev.herdr.mobile.net.AgentSummary
 import dev.herdr.mobile.net.ChatEntry
 import dev.herdr.mobile.net.ChatEvent
 
@@ -22,7 +23,28 @@ sealed interface TimelineItem {
     data class Tools(override val key: String, val tools: List<ChatEntry>, override val head: Boolean) : TimelineItem {
         override val speaker get() = Speaker.Agent
     }
+
+    /**
+     * A subagent or workflow launch, shown as a card of its own. Keyed by the
+     * call's id, so it is stable across epochs and pages.
+     */
+    data class AgentCard(override val key: String, val entry: ChatEntry, val call: ChatEvent.ToolUse, override val head: Boolean) : TimelineItem {
+        override val speaker get() = Speaker.Agent
+    }
 }
+
+/** Rows a workflow card shows before "+N more". */
+const val WORKFLOW_ROWS = 6
+
+private val AGENT_TOOLS = setOf("Agent", "Workflow")
+
+/** The agents launched by [call], oldest first. */
+fun agentsFor(call: ChatEvent.ToolUse, agents: Map<String, AgentSummary>): List<AgentSummary> =
+    agents.values.filter { it.parentToolUseId == call.toolUseId }.sortedBy { it.ts }
+
+/** [agents] grouped by phase, in the order each phase is first seen. */
+fun workflowGroups(agents: List<AgentSummary>): List<Pair<String?, List<AgentSummary>>> =
+    agents.groupBy { it.phase }.map { it.key to it.value }
 
 private fun speakerOf(ev: ChatEvent): Speaker = when (ev) {
     is ChatEvent.UserText -> Speaker.User
@@ -34,7 +56,8 @@ private fun speakerOf(ev: ChatEvent): Speaker = when (ev) {
  * The timeline rows for [entries]: tool results are dropped (they show under
  * their call), an AskUserQuestion's own tool call is dropped (its question
  * shows instead), and runs of tool calls fold into one [TimelineItem.Tools]
- * keyed by its first call, so appending calls keeps the row's key. Nothing
+ * keyed by its first call, so appending calls keeps the row's key. An Agent or
+ * Workflow call ends the rail and becomes a [TimelineItem.AgentCard]. Nothing
  * folds across a [pageStarts] seam (where a page of older history was joined
  * on), so prepending a page leaves the rows below it unchanged.
  */
@@ -57,7 +80,10 @@ fun buildTimeline(entries: List<ChatEntry>, epoch: Int, pageStarts: Set<Int> = e
         val ev = e.event
         if (ev is ChatEvent.ToolResult) continue
         if (ev is ChatEvent.ToolUse) {
-            if (ev.toolUseId !in questions) run += e
+            if (ev.tool in AGENT_TOOLS) {
+                flush()
+                out += TimelineItem.AgentCard("a:${ev.toolUseId}", e, ev, head(Speaker.Agent))
+            } else if (ev.toolUseId !in questions) run += e
             continue
         }
         flush()

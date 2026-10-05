@@ -11,7 +11,7 @@ import dev.herdr.mobile.net.Pane
 fun PaneScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit) {
     var showChat by remember(pane.paneId) { mutableStateOf(pane.chat) }
     if (showChat) {
-        ChatScreen(vm, pane, onExit = onExit, onTerminal = { showChat = false })
+        ChatScreen(vm, pane, onExit = onExit, onTerminal = { showChat = false }, onOpenThread = {})
     } else {
         TerminalScreen(vm, pane, onExit, onChat = if (pane.chat) ({ showChat = true }) else null)
     }
