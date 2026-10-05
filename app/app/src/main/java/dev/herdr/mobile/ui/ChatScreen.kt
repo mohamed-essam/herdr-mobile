@@ -31,6 +31,7 @@ import dev.herdr.mobile.data.BOTTOM_OFFSET
 import dev.herdr.mobile.data.PendingMsg
 import dev.herdr.mobile.data.PendingStatus
 import dev.herdr.mobile.data.entryScrollTarget
+import dev.herdr.mobile.data.followAfterScroll
 import dev.herdr.mobile.data.formatTs
 import dev.herdr.mobile.data.pendingLabel
 import dev.herdr.mobile.data.taskNoticeIsError
@@ -86,7 +87,7 @@ fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTermina
     val results = remember(view.entries) {
         view.entries.mapNotNull { it.event as? ChatEvent.ToolResult }.associateBy { it.toolUseId }
     }
-    val items = remember(view.entries, view.epoch) { buildTimeline(view.entries, view.epoch) }
+    val items = remember(view.entries, view.epoch, view.pageStarts) { buildTimeline(view.entries, view.epoch, view.pageStarts) }
     val running = remember(items, results, working) { runningTools(items, results.keys, working) }
     val asking = remember(view.entries, view.answered) { pendingQuestion(view.entries, view.answered) }
     val status = chatStatus(connected, view.state, asking != null && asking.toolUseId !in view.answering)
@@ -110,12 +111,13 @@ fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTermina
         }
         "${item.key}/$grows"
     }
-    // Follow new output only while the user is already at the bottom.
-    val atBottom by remember {
-        derivedStateOf {
-            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-            last >= listState.layoutInfo.totalItemsCount - 2
-        }
+    // Follow new output only while the user is at the very bottom, judged by
+    // where their own scrolling leaves the list: a folded tool rail can be
+    // taller than the screen, so "the last rows are visible" isn't "at bottom".
+    var follow by remember(pane.paneId) { mutableStateOf(true) }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
+            .collect { (scrolling, canScrollForward) -> follow = followAfterScroll(follow, scrolling, canScrollForward) }
     }
     // Entering the screen (or toggling back from the terminal) with a loaded
     // view opens at the newest item, once; later updates use the follow rule.
@@ -129,7 +131,7 @@ fun ChatScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onTermina
     // Keyed on the newest item, so a page of older history prepended above
     // doesn't count as new output.
     LaunchedEffect(lastKey) {
-        if (itemCount > 0 && atBottom) listState.scrollToItem(itemCount - 1, BOTTOM_OFFSET)
+        if (itemCount > 0 && follow) listState.scrollToItem(itemCount - 1, BOTTOM_OFFSET)
     }
     // Page back once the oldest item is on screen. Items are keyed by seq, so
     // the list keeps the visible item where it is when the page is prepended.

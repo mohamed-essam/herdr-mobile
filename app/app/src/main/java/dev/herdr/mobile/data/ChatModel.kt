@@ -39,6 +39,12 @@ data class ChatView(
     val answered: Set<String> = emptySet(),
     /** toolUseIds with an answer sent from the phone and no tool_result yet. */
     val answering: Set<String> = emptySet(),
+    /**
+     * Seqs where a page of older history was joined on (each was the first
+     * entry before that page landed). The timeline doesn't fold across them,
+     * so rows already on screen keep their keys and heights.
+     */
+    val pageStarts: Set<Int> = emptySet(),
 )
 
 const val PENDING_TIMEOUT_MS = 120_000L
@@ -76,6 +82,7 @@ object ChatReducer {
                 loadingOlder = false,
                 olderReqId = null,
                 answered = answered,
+                pageStarts = emptySet(),
                 // A new epoch (companion restart / new session) dropped any held answer.
                 answering = if (v.loaded && f.epoch == v.epoch) v.answering - answeredResults(entries) else emptySet(),
             )
@@ -113,6 +120,7 @@ object ChatReducer {
                         olderReqId = null,
                         answered = answeredIds(entries),
                         answering = v.answering - answeredResults(entries),
+                        pageStarts = if (f.entries.isNotEmpty() && v.entries.isNotEmpty()) v.pageStarts + first else v.pageStarts,
                     )
                 }
             }
@@ -233,6 +241,17 @@ const val BOTTOM_OFFSET = Int.MAX_VALUE
 /** The item to jump to when a chat screen is entered, or null (not ready / already done). */
 fun entryScrollTarget(loaded: Boolean, itemCount: Int, done: Boolean): Int? =
     if (loaded && itemCount > 0 && !done) itemCount - 1 else null
+
+/**
+ * Whether the chat keeps following new output: at the very end it does;
+ * scrolling away from the end stops it; new output growing below the end
+ * while the list is at rest keeps the current choice.
+ */
+fun followAfterScroll(follow: Boolean, scrolling: Boolean, canScrollForward: Boolean): Boolean = when {
+    !canScrollForward -> true
+    scrolling -> false
+    else -> follow
+}
 
 fun taskNoticeLabel(n: ChatEvent.TaskNotice): String = when {
     n.summary.isNotBlank() -> "⚙ ${n.summary.trim()}"

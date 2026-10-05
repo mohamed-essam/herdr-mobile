@@ -36,6 +36,20 @@ class ChatTimelineTest {
         assertEquals("e0-${entries[1].seq}", group.key)
     }
 
+    // Paging back prepends older entries. The rows already shown must keep
+    // their keys (the list's scroll anchor) and their head (label + spacing,
+    // i.e. their height), or the list jumps each time a page lands.
+    @Test fun aPrependedPageLeavesTheShownRowsUnchanged() {
+        val older = listOf(user("go"), said("ok"), tool("1"), result("1"), tool("2"))
+        val shown = listOf(result("2"), tool("3"), result("3"), said("more"), tool("4"))
+        val before = buildTimeline(shown, 0)
+        val after = buildTimeline(older + shown, 0, pageStarts = setOf(shown.first().seq))
+        assertEquals(before, after.takeLast(before.size))
+        // Without the seam, call 3 would fold into the older run and lose its key.
+        val merged = buildTimeline(older + shown, 0)
+        assertTrue(merged.none { it.key == before.first().key })
+    }
+
     @Test fun messagesSplitToolRuns() {
         val items = buildTimeline(listOf(tool("1"), said("mid"), tool("2")), 0)
         assertEquals(listOf(TimelineItem.Tools::class, TimelineItem.Event::class, TimelineItem.Tools::class), items.map { it::class })

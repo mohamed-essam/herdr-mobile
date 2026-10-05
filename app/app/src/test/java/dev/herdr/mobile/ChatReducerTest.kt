@@ -262,6 +262,20 @@ class ChatReducerTest {
         assertNull(entryScrollTarget(loaded = true, itemCount = 5, done = true))
     }
 
+    // Following new output is decided by where the user's own scrolling leaves
+    // the list, not by which rows are visible: a folded tool rail can be taller
+    // than the screen, and "last two rows visible" kept yanking the user back.
+    @Test fun followTracksTheUsersScrolling() {
+        // Dragging up, anywhere above the very end, stops following.
+        assertFalse(followAfterScroll(follow = true, scrolling = true, canScrollForward = true))
+        // Reaching the very end (scrolling or at rest) follows again.
+        assertTrue(followAfterScroll(follow = false, scrolling = true, canScrollForward = false))
+        assertTrue(followAfterScroll(follow = false, scrolling = false, canScrollForward = false))
+        // New output growing below the end at rest keeps the current choice.
+        assertTrue(followAfterScroll(follow = true, scrolling = false, canScrollForward = true))
+        assertFalse(followAfterScroll(follow = false, scrolling = false, canScrollForward = true))
+    }
+
     // ---- protocol 9: history paging ----
 
     private fun page(epoch: Int, vararg e: ChatEntry, hasMore: Boolean = false, stale: Boolean = false) =
@@ -290,6 +304,19 @@ class ChatReducerTest {
         assertEquals(listOf(1, 2, 3, 4, 5), v.entries.map { it.seq })
         assertFalse(v.hasMore)
         assertFalse(v.loadingOlder)
+    }
+
+    // Each prepended page records where it joined, so the timeline can keep
+    // the rows already on screen unchanged (no scroll jump).
+    @Test fun historyPageRecordsItsSeam() {
+        var v = onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", listOf(user(4, "d"), reply(5, "e")), hasMore = true))
+        assertEquals(emptySet<Int>(), v.pageStarts)
+        v = onFrame(loading(v), page(1, user(2, "b"), reply(3, "c"), hasMore = true))
+        assertEquals(setOf(4), v.pageStarts)
+        v = onFrame(loading(v), page(1, user(1, "a")))
+        assertEquals(setOf(2, 4), v.pageStarts)
+        // A snapshot replaces the entries, and with them the seams.
+        assertEquals(emptySet<Int>(), onFrame(v, snap(1, user(5, "a"))).pageStarts)
     }
 
     @Test fun pageWithoutAMatchingRequestIsIgnored() {

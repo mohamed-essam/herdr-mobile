@@ -34,9 +34,11 @@ private fun speakerOf(ev: ChatEvent): Speaker = when (ev) {
  * The timeline rows for [entries]: tool results are dropped (they show under
  * their call), an AskUserQuestion's own tool call is dropped (its question
  * shows instead), and runs of tool calls fold into one [TimelineItem.Tools]
- * keyed by its first call, so appending calls keeps the row's key.
+ * keyed by its first call, so appending calls keeps the row's key. Nothing
+ * folds across a [pageStarts] seam (where a page of older history was joined
+ * on), so prepending a page leaves the rows below it unchanged.
  */
-fun buildTimeline(entries: List<ChatEntry>, epoch: Int): List<TimelineItem> {
+fun buildTimeline(entries: List<ChatEntry>, epoch: Int, pageStarts: Set<Int> = emptySet()): List<TimelineItem> {
     val questions = entries.mapNotNullTo(HashSet()) { (it.event as? ChatEvent.Question)?.toolUseId }
     val out = ArrayList<TimelineItem>()
     var run = ArrayList<ChatEntry>()
@@ -47,7 +49,11 @@ fun buildTimeline(entries: List<ChatEntry>, epoch: Int): List<TimelineItem> {
         out += TimelineItem.Tools("e$epoch-${run.first().seq}", run, head(Speaker.Agent))
         run = ArrayList()
     }
+    var lastSeq = Int.MIN_VALUE
     for (e in entries) {
+        // The seam's own entry may be one that isn't shown (a tool result).
+        if (pageStarts.any { it > lastSeq && it <= e.seq }) { flush(); prev = null }
+        lastSeq = e.seq
         val ev = e.event
         if (ev is ChatEvent.ToolResult) continue
         if (ev is ChatEvent.ToolUse) {
