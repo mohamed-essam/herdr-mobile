@@ -409,6 +409,18 @@ describe('herdr-chat', () => {
     expect(w.reads).toContain(`${SESS}/subagents/workflows/wf_r1/journal.jsonl`)
   })
 
+  test('a resynced agent takes its ts from the last row of its transcript, not the rebuild time', async ($, on) => {
+    const w = world(on)
+    sessionFiles(w)
+    const late = JSON.stringify({ parentUuid: null, isSidechain: true, agentId: 'aa1', type: 'assistant', uuid: 's3', timestamp: '2026-10-04T15:10:20.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'end' }] } })
+    w.files[`${SESS}/subagents/agent-aa1.jsonl`] = [sideRow('aa1', 's1', 'user', 'go').replace('2026-10-05T09:24:37.482Z', '2026-10-04T15:10:00.000Z'), late].join('\n') + '\n'
+    await startAt($)
+    await w.clock.advance(6000)
+    const agents = (w.all() as any[]).filter(e => e.type === 'agent').map(e => e.agent)
+    expect(agents.find(a => a.agentId === 'aa1').ts).toBe(Date.parse('2026-10-04T15:10:20.000Z'))
+    expect(agents.find(a => a.agentId === 'bb2').ts).toBe(Date.parse('2026-10-05T09:24:37.482Z'))
+  })
+
   test('each thread snapshot comes from the agent’s own file, its events tagged', async ($, on) => {
     const w = world(on)
     sessionFiles(w)
@@ -575,6 +587,16 @@ describe('herdr-chat', () => {
     const sent = tasksOf(w.all() as never)
     expect(sent.length).toBe(1)
     expect(sent[0]!.tasks).toMatchObject([{ id: 'b4prbe90d', kind: 'shell', label: 'sleep 25', status: 'running' }])
+  })
+
+  test('a background Bash call inside a subagent (agentId set) adds no task', async ($, on) => {
+    const w = world(on)
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { backgroundTaskId: 'b4prbe90d', stdout: '', stderr: '' }, text: '' }) as never)
+    await start($)
+    await w.clock.advance(2000)
+    await $.tool.call({ tool: 'Bash', command: 'sleep 25', run_in_background: true, agentId: 'aa1' } as never)
+    await w.clock.advance(1000)
+    expect(tasksOf(w.all() as never)).toEqual([])
   })
 
   test('a foreground Bash call sends no tasks control', async ($, on) => {

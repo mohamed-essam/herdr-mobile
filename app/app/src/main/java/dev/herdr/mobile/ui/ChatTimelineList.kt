@@ -32,6 +32,7 @@ import dev.herdr.mobile.data.pendingLabel
 import dev.herdr.mobile.data.taskNoticeIsError
 import dev.herdr.mobile.data.taskNoticeLabel
 import dev.herdr.mobile.net.AgentSummary
+import dev.herdr.mobile.net.BgTask
 import dev.herdr.mobile.net.ChatEvent
 import dev.herdr.mobile.ui.theme.Herdr
 import dev.herdr.mobile.ui.theme.HerdrRadius
@@ -67,6 +68,7 @@ fun ChatTimelineList(
     readOnly: Boolean,
     onOpenThread: (String) -> Unit,
     modifier: Modifier = Modifier,
+    tasks: List<BgTask> = emptyList(),
     scrollToToolUse: String? = null,
     onScrolledToToolUse: () -> Unit = {},
 ) {
@@ -179,7 +181,7 @@ fun ChatTimelineList(
                         }
                         is TimelineItem.AgentCard -> GutterRow(if (item.head) ts(item.call.ts) else null, top) {
                             if (item.head) SpeakerLabel(agentLabel, c.blue)
-                            AgentCardBody(item.call, agents, now, onOpenThread)
+                            AgentCardBody(item.call, agents, now, onOpenThread, tasks)
                         }
                         is TimelineItem.Event -> EventRow(
                             vm, paneId, item, top, agentLabel, ts, view.answering, view.answered,

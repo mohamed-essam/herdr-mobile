@@ -367,7 +367,6 @@ async function rebuildAgents($: EngineInterface, s: State, sessionDir: string, r
     const status = listStatus(info.status)
     if (status) setStatus(s.agents, info.id, status, now)
   }
-  const controls: Outgoing[] = agentControls(s.agents)
   const threads: Outgoing[] = []
   const events: ChatEvent[] = []
   const images: Record<string, ChatImage> = {}
@@ -379,12 +378,17 @@ async function rebuildAgents($: EngineInterface, s: State, sessionDir: string, r
       thread = null
     }
     if (!thread) continue
+    // The agent ended with its last row: that, not the rebuild time, is its ts.
+    const link = s.agents.links.get(f.id)
+    const last = thread.events.reduce((m, ev) => Math.max(m, ev.ts ?? 0), 0)
+    if (link && last > 0) link.ts = last
     const tagged: ChatEvent[] = []
     for (const ev of thread.events.slice(-THREAD_EVENTS)) tagged.push({ ...ev, agentId: f.id })
     threads.push(...snapshot(tagged, f.id))
     events.push(...tagged)
     Object.assign(images, thread.images)
   }
+  const controls: Outgoing[] = agentControls(s.agents)
   return { controls, threads, events, images, list }
 }
 
@@ -798,25 +802,26 @@ export const register: Register = on => {
     const r = await next(e)
     if (s.paneId && 'result' in r) {
       recordWorkflow(s.agents, e.tool_use_id, r.result)
-      if (taskFromLaunch(s.tasks, 'Workflow', e.tool_use_id, e, r.result, Date.now())) queueTasks(s)
+      if (!e.agentId && taskFromLaunch(s.tasks, 'Workflow', e.tool_use_id, e, r.result, Date.now())) queueTasks(s)
     }
     return r
   })
 
-  // Background launches become tasks; the hooks only record.
+  // Background launches become tasks; the hooks only record. Only the main loop's launches count: a subagent's own
+  // background work reports to that agent's loop (e.agentId set), never to the pane's task list.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const r = await next(e)
-    if (s.paneId && 'result' in r && taskFromLaunch(s.tasks, 'Bash', e.tool_use_id, e, r.result, Date.now())) queueTasks(s)
+    if (s.paneId && !e.agentId && 'result' in r && taskFromLaunch(s.tasks, 'Bash', e.tool_use_id, e, r.result, Date.now())) queueTasks(s)
     return r
   })
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
     const r = await next(e)
-    if (s.paneId && 'result' in r && taskFromLaunch(s.tasks, 'Agent', e.tool_use_id, e, r.result, Date.now())) queueTasks(s)
+    if (s.paneId && !e.agentId && 'result' in r && taskFromLaunch(s.tasks, 'Agent', e.tool_use_id, e, r.result, Date.now())) queueTasks(s)
     return r
   })
   on('tool.call', { tool: 'Monitor' }, async ($, e, next) => {
     const r = await next(e)
-    if (s.paneId && 'result' in r && taskFromLaunch(s.tasks, 'Monitor', e.tool_use_id, e, r.result, Date.now())) queueTasks(s)
+    if (s.paneId && !e.agentId && 'result' in r && taskFromLaunch(s.tasks, 'Monitor', e.tool_use_id, e, r.result, Date.now())) queueTasks(s)
     return r
   })
 

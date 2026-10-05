@@ -91,6 +91,7 @@ fun ChatScreen(
                         agentId = null,
                         view = view,
                         agents = view.agents,
+                        tasks = view.tasks,
                         agentLabel = agent,
                         listState = listState,
                         readOnly = false,

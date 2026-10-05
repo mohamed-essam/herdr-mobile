@@ -13,6 +13,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.herdr.mobile.net.AgentSummary
+import dev.herdr.mobile.net.BgTask
 import dev.herdr.mobile.net.ChatEvent
 import dev.herdr.mobile.ui.theme.Herdr
 import dev.herdr.mobile.ui.theme.HerdrRadius
@@ -28,6 +29,10 @@ private fun elapsedLabel(from: Long, to: Long): String {
         else -> "${s / 3600}h"
     }
 }
+
+/** A workflow card's title: its task's label (the workflow's name), else "Workflow". */
+fun workflowTitle(call: ChatEvent.ToolUse, tasks: List<BgTask>): String =
+    tasks.firstOrNull { it.kind == "workflow" && it.toolUseId == call.toolUseId }?.label?.takeIf { it.isNotBlank() } ?: "Workflow"
 
 /** A status glyph: the working spinner, ✓ in green or ✗ in red (mono, like the dashboard's). */
 @Composable
@@ -64,7 +69,8 @@ fun SubagentCard(call: ChatEvent.ToolUse, agent: AgentSummary?, now: Long, onOpe
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatusGlyph(status)
             Text(label, Modifier.weight(1f, fill = false), style = HerdrType.meta.copy(fontWeight = FontWeight.SemiBold), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            agent?.type?.takeIf { it.isNotBlank() }?.let { Text(it, style = HerdrType.meta, color = c.overlay2, maxLines = 1) }
+            // The label has priority: the type is what gets cut (a smaller weight claims space after the label).
+            agent?.type?.takeIf { it.isNotBlank() }?.let { Text(it, Modifier.weight(0.001f, fill = false), style = HerdrType.meta, color = c.overlay2, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             Spacer(Modifier.weight(1f))
             Text(elapsed, style = HerdrType.meta, color = c.overlay0)
         }
@@ -82,7 +88,7 @@ fun SubagentCard(call: ChatEvent.ToolUse, agent: AgentSummary?, now: Long, onOpe
  * rest fold into "+N more", which expands in place.
  */
 @Composable
-fun WorkflowCard(call: ChatEvent.ToolUse, agents: List<AgentSummary>, now: Long, onOpen: (String) -> Unit) {
+fun WorkflowCard(call: ChatEvent.ToolUse, agents: List<AgentSummary>, now: Long, onOpen: (String) -> Unit, tasks: List<BgTask> = emptyList()) {
     val c = Herdr.colors
     var all by rememberSaveable(call.toolUseId) { mutableStateOf(false) }
     val overall = when {
@@ -98,7 +104,7 @@ fun WorkflowCard(call: ChatEvent.ToolUse, agents: List<AgentSummary>, now: Long,
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatusGlyph(overall)
             Text(
-                toolLine(call.tool, call.summary), Modifier.weight(1f),
+                workflowTitle(call, tasks), Modifier.weight(1f),
                 style = HerdrType.meta.copy(fontWeight = FontWeight.SemiBold), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             Text(elapsedLabel(start, end), style = HerdrType.meta, color = c.overlay0)
@@ -134,7 +140,7 @@ private fun AgentRow(a: AgentSummary, onOpen: (String) -> Unit) {
 
 /** The launch call's card: a workflow's rows, or one subagent. */
 @Composable
-fun AgentCardBody(call: ChatEvent.ToolUse, agents: Map<String, AgentSummary>, now: Long, onOpen: (String) -> Unit) {
+fun AgentCardBody(call: ChatEvent.ToolUse, agents: Map<String, AgentSummary>, now: Long, onOpen: (String) -> Unit, tasks: List<BgTask> = emptyList()) {
     val mine = remember(call.toolUseId, agents) { agentsFor(call, agents) }
-    if (call.tool == "Workflow") WorkflowCard(call, mine, now, onOpen) else SubagentCard(call, mine.firstOrNull(), now, onOpen)
+    if (call.tool == "Workflow") WorkflowCard(call, mine, now, onOpen, tasks) else SubagentCard(call, mine.firstOrNull(), now, onOpen)
 }

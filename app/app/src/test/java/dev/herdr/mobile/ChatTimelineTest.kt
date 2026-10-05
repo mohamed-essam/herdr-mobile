@@ -2,6 +2,7 @@ package dev.herdr.mobile
 
 import dev.herdr.mobile.net.ChatEntry
 import dev.herdr.mobile.net.AgentSummary
+import dev.herdr.mobile.net.BgTask
 import dev.herdr.mobile.net.ChatEvent
 import dev.herdr.mobile.net.QuestionItem
 import dev.herdr.mobile.ui.ChatStatus
@@ -12,6 +13,7 @@ import dev.herdr.mobile.ui.buildTimeline
 import dev.herdr.mobile.ui.agentsFor
 import dev.herdr.mobile.ui.chatStatus
 import dev.herdr.mobile.ui.workflowGroups
+import dev.herdr.mobile.ui.workflowTitle
 import dev.herdr.mobile.ui.pendingQuestion
 import dev.herdr.mobile.ui.runningTools
 import dev.herdr.mobile.ui.toolLine
@@ -164,5 +166,23 @@ class ChatTimelineTest {
         ))
         assertEquals(listOf<String?>("build", "test", null), groups.map { it.first })
         assertEquals(listOf("a", "c"), groups[0].second.map { it.agentId })
+    }
+
+    private fun bg(kind: String, toolUseId: String, label: String) = BgTask("id-$label", kind, label, toolUseId, "running", 0L)
+
+    @Test fun workflowTitleIsTheMatchingWorkflowTasksLabel() {
+        val call = ChatEvent.ToolUse("u1", "tu1", "Workflow", "export const meta = { name: 'ti")
+        assertEquals("ticket-triage", workflowTitle(call, listOf(bg("workflow", "other", "x"), bg("workflow", "tu1", "ticket-triage"))))
+    }
+
+    @Test fun workflowTitleFallsBackWhenNoTaskMatches() {
+        val call = ChatEvent.ToolUse("u1", "tu1", "Workflow", "script")
+        assertEquals("Workflow", workflowTitle(call, listOf(bg("workflow", "other", "x"))))
+        assertEquals("Workflow", workflowTitle(call, emptyList()))
+    }
+
+    @Test fun workflowTitleIgnoresNonWorkflowTasksWithTheSameToolUseId() {
+        val call = ChatEvent.ToolUse("u1", "tu1", "Workflow", "script")
+        assertEquals("Workflow", workflowTitle(call, listOf(bg("shell", "tu1", "sleep 5"))))
     }
 }
