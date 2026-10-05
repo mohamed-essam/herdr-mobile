@@ -46,6 +46,8 @@ fun ChatScreen(
     val repoTree by vm.repoTree.collectAsState()
     var draft by rememberSaveable(pane.paneId) { mutableStateOf("") }
     val snackbarHostState = remember { SnackbarHostState() }
+    var showTasks by rememberSaveable(pane.paneId) { mutableStateOf(false) }
+    var scrollToToolUse by remember { mutableStateOf<String?>(null) }
 
     // PaneScreen holds the chat subscription, so it stays open under a thread.
     LaunchedEffect(pane.paneId) {
@@ -78,6 +80,7 @@ fun ChatScreen(
                 toggleLabel = ">_ terminal",
                 onToggle = onTerminal,
             )
+            TasksStrip(view.tasks) { showTasks = true }
             if (!pane.chat) UnavailableBanner(onTerminal)
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                 val sheetMax = maxHeight * 0.8f
@@ -93,6 +96,8 @@ fun ChatScreen(
                         readOnly = false,
                         onOpenThread = onOpenThread,
                         modifier = Modifier.weight(1f).fillMaxWidth().alpha(if (asking != null) 0.45f else 1f),
+                        scrollToToolUse = scrollToToolUse,
+                        onScrolledToToolUse = { scrollToToolUse = null },
                     )
                     if (asking != null) {
                         QuestionSheet(
@@ -115,6 +120,17 @@ fun ChatScreen(
                     }
                 }
             }
+        }
+        if (showTasks) {
+            TasksSheet(
+                tasks = view.tasks,
+                now = System.currentTimeMillis(),
+                onPick = { t ->
+                    scrollToToolUse = t.toolUseId
+                    showTasks = false
+                },
+                onDismiss = { showTasks = false },
+            )
         }
         SnackbarHost(
             snackbarHostState,

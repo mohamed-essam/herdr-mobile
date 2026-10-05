@@ -15,6 +15,7 @@ import dev.herdr.mobile.ui.actionHeader
 import dev.herdr.mobile.ui.activityLine
 import dev.herdr.mobile.ui.answerFailed
 import dev.herdr.mobile.ui.answerSent
+import dev.herdr.mobile.ui.bgBadge
 import dev.herdr.mobile.ui.closeSummary
 import dev.herdr.mobile.ui.dashboardSections
 import dev.herdr.mobile.ui.expireAnswers
@@ -219,5 +220,10 @@ class DashboardModelTest {
         assertEquals(OpenRequest.Drop, resolveOpenRequest("p1", listOf(agent("p1", "blocked"))))
         assertEquals(OpenRequest.Open(p.copy(terminalId = "", chat = true)),
             resolveOpenRequest("p1", listOf(p.copy(terminalId = "", chat = true))))
+    }
+
+    @Test fun bgBadgeShowsRunningCount() {
+        assertEquals("⟳ 2", bgBadge(agent("p1", "blocked").copy(bgRunning = 2)))
+        assertNull(bgBadge(agent("p1", "blocked").copy(bgRunning = 0)))
     }
 }

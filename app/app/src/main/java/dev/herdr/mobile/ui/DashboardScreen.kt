@@ -32,6 +32,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.herdr.mobile.net.Pane
@@ -477,7 +478,21 @@ private fun NeedsYouCard(
                 GhostButton("›", onOpen, Modifier.width(48.dp).semantics { contentDescription = "Open pane" }, height = 40.dp)
             }
         }
+        bgBadge(pane)?.let { BgChip(it, start = 0.dp) }
     }
+}
+
+/** A small meta-style chip: the pane's background tasks still running. */
+@Composable
+private fun BgChip(text: String, start: Dp = 8.dp) {
+    val c = Herdr.colors
+    Text(
+        text,
+        style = HerdrType.meta,
+        color = c.yellow,
+        modifier = Modifier.padding(start = start).clip(HerdrRadius.badge).background(c.yellow.copy(alpha = 0.12f))
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    )
 }
 
 @Composable
@@ -596,7 +611,10 @@ private fun PaneListRow(ctx: PaneContext, ageColor: Color, now: Long, onOpen: (P
             )
             val sub = activityLine(pane.activity)
                 ?: listOf(pane.agent ?: "shell", tabCrumb(ctx)).filter { it.isNotBlank() }.joinToString(" · ")
-            Text(sub, style = HerdrType.meta, color = c.subtext1, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(sub, style = HerdrType.meta, color = c.subtext1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                bgBadge(pane)?.let { BgChip(it) }
+            }
         }
         val age = relativeAge(pane.activity?.ts ?: 0, now)
         if (age.isNotEmpty()) {

@@ -67,6 +67,8 @@ fun ChatTimelineList(
     readOnly: Boolean,
     onOpenThread: (String) -> Unit,
     modifier: Modifier = Modifier,
+    scrollToToolUse: String? = null,
+    onScrolledToToolUse: () -> Unit = {},
 ) {
     val c = Herdr.colors
     var expanded by remember(paneId, agentId) { mutableStateOf(setOf<String>()) }
@@ -122,6 +124,14 @@ fun ChatTimelineList(
     // doesn't count as new output.
     LaunchedEffect(lastKey) {
         if (itemCount > 0 && follow) listState.scrollToItem(itemCount - 1, BOTTOM_OFFSET)
+    }
+    // A request to show the agent card of a tool call (from the tasks sheet).
+    // A card that isn't loaded is a no-op; either way the request is consumed.
+    LaunchedEffect(scrollToToolUse, items) {
+        if (scrollToToolUse == null) return@LaunchedEffect
+        val i = items.indexOfFirst { it is TimelineItem.AgentCard && it.call.toolUseId == scrollToToolUse }
+        if (i >= 0) listState.animateScrollToItem(i)
+        onScrolledToToolUse()
     }
     // Page back once the oldest item is on screen. Items are keyed by seq, so
     // the list keeps the visible item where it is when the page is prepended.
