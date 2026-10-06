@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -38,41 +41,54 @@ func call(t *testing.T, method, url, body string) (int, string) {
 	return resp.StatusCode, strings.TrimSpace(string(b))
 }
 
+// dial serves f's WS side and connects an app to it.
+func dial(ctx context.Context, t *testing.T, f *fake) (*websocket.Conn, string) {
+	t.Helper()
+	ws := httptest.NewServer(f.wsHandler())
+	t.Cleanup(ws.Close)
+	wsURL := "ws" + strings.TrimPrefix(ws.URL, "http")
+	c, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.CloseNow() })
+	return c, wsURL
+}
+
 func TestFakeCompanionControlAPI(t *testing.T) {
 	f, err := newFake("../../../e2e/scenarios", "one-idle-pane")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ws := httptest.NewServer(f.wsHandler())
-	defer ws.Close()
 	ctl := httptest.NewServer(f.controlHandler())
 	defer ctl.Close()
-	wsURL := "ws" + strings.TrimPrefix(ws.URL, "http")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
-	c, _, err := websocket.Dial(ctx, wsURL, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.CloseNow()
+	c, wsURL := dial(ctx, t, f)
 	for _, want := range []string{"welcome", "panes", "workspaces", "tabs"} {
 		if got := readType(ctx, t, c); got != want {
 			t.Fatalf("connect frames: got %q, want %q", got, want)
 		}
 	}
 
-	// GET /received returns what the app sent.
-	if err := c.Write(ctx, websocket.MessageText, []byte(`{"t":"read_pane","paneId":"w1:p1"}`)); err != nil {
-		t.Fatal(err)
+	// GET /received returns the companion calls the app caused, answered as wsserver does.
+	// hello and ping cause no call; wsserver answers both with pong.
+	for _, step := range []struct{ msg, reply string }{
+		{`{"t":"hello","client":"ios"}`, "pong"},
+		{`{"t":"ping"}`, "pong"},
+		{`{"t":"action","reqId":"a1","op":"rename","kind":"pane","id":"w1:p1","label":"build"}`, "action_result"},
+		{`{"t":"register_push","endpoint":"https://push.example/abc"}`, "ack"},
+	} {
+		if err := c.Write(ctx, websocket.MessageText, []byte(step.msg)); err != nil {
+			t.Fatal(err)
+		}
+		if got := readType(ctx, t, c); got != step.reply {
+			t.Fatalf("%s: got %q, want %q", step.msg, got, step.reply)
+		}
 	}
-	var got string
-	for i := 0; i < 50 && got != `[{"t":"read_pane","paneId":"w1:p1"}]`; i++ {
-		time.Sleep(10 * time.Millisecond)
-		_, got = call(t, "GET", ctl.URL+"/received", "")
-	}
-	if got != `[{"t":"read_pane","paneId":"w1:p1"}]` {
-		t.Fatalf("received = %s", got)
+	want := `[{"call":"RenamePane","args":["w1:p1","build"]},{"call":"RegisterPush","args":["https://push.example/abc"]}]`
+	if _, got := call(t, "GET", ctl.URL+"/received", ""); got != want {
+		t.Fatalf("received = %s, want %s", got, want)
 	}
 
 	// POST /emit sends a frame mid-flow; it must be JSON.
@@ -112,30 +128,49 @@ func TestFakeCompanionControlAPI(t *testing.T) {
 	}
 }
 
-func TestFakeCompanionAnswersHelloAndPingWithPong(t *testing.T) {
-	f, err := newFake("../../../e2e/scenarios", "one-idle-pane")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ws := httptest.NewServer(f.wsHandler())
-	defer ws.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(ws.URL, "http"), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.CloseNow()
-	for range 4 { // welcome + snapshots
-		readType(ctx, t, c)
-	}
+var update = flag.Bool("update", false, "rewrite the golden .frames.json files")
 
-	for _, msg := range []string{`{"t":"hello","client":"ios"}`, `{"t":"ping"}`} {
-		if err := c.Write(ctx, websocket.MessageText, []byte(msg)); err != nil {
-			t.Fatal(err)
+// TestScenarioFrames keeps e2e/scenarios/<name>.frames.json equal to the frames
+// the fake sends an app on connect, read over a real WebSocket. The iOS tests
+// decode every frame in them, so a proto or scenario change shows up there too.
+// Refresh with: go test ./cmd/fake-companion -run TestScenarioFrames -update
+func TestScenarioFrames(t *testing.T) {
+	paths, err := filepath.Glob("../../../e2e/scenarios/*.json")
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("no scenarios: %v", err)
+	}
+	for _, path := range paths {
+		if strings.HasSuffix(path, ".frames.json") {
+			continue
 		}
-		if got := readType(ctx, t, c); got != "pong" {
-			t.Fatalf("%s: got %q, want pong", msg, got)
-		}
+		name := strings.TrimSuffix(filepath.Base(path), ".json")
+		t.Run(name, func(t *testing.T) {
+			f, err := newFake(filepath.Dir(path), name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			c, _ := dial(ctx, t, f)
+			frames := []json.RawMessage{}
+			for range 4 { // welcome + panes, workspaces, tabs
+				_, b, err := c.Read(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				frames = append(frames, b)
+			}
+			got, _ := json.MarshalIndent(frames, "", "  ")
+			golden := strings.TrimSuffix(path, ".json") + ".frames.json"
+			if *update {
+				if err := os.WriteFile(golden, append(got, '\n'), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			want, err := os.ReadFile(golden)
+			if err != nil || string(want) != string(got)+"\n" {
+				t.Fatalf("%s is stale (%v); rerun with -update", golden, err)
+			}
+		})
 	}
 }

@@ -1,0 +1,619 @@
+[
+  {
+    "companionProtocol": 10,
+    "herdrProtocol": 3,
+    "herdrVersion": "0.9.1",
+    "t": "welcome"
+  },
+  {
+    "panes": [
+      {
+        "paneId": "w1:p1",
+        "workspaceId": "w1",
+        "tabId": "w1:t1",
+        "terminalId": "term_1",
+        "cwd": "/Users/dev/herdr",
+        "focused": true,
+        "agent": "claude",
+        "agentStatus": "blocked",
+        "chat": true,
+        "activity": {
+          "kind": "tool",
+          "tool": "Bash",
+          "text": "Bash: go test ./...",
+          "ts": 1791279000000
+        },
+        "ask": {
+          "toolUseId": "toolu_ask",
+          "questions": [
+            {
+              "question": "Which database?",
+              "header": "DB",
+              "options": [
+                {
+                  "label": "Postgres",
+                  "description": "relational"
+                },
+                {
+                  "label": "SQLite"
+                }
+              ],
+              "multiSelect": false
+            },
+            {
+              "question": "How many workers?",
+              "header": "Workers",
+              "kind": "number",
+              "min": 1,
+              "max": 8,
+              "step": 1,
+              "unit": "workers"
+            },
+            {
+              "question": "Branch name?",
+              "header": "Branch",
+              "kind": "text",
+              "placeholder": "feat/…"
+            }
+          ]
+        },
+        "bgRunning": 2
+      },
+      {
+        "paneId": "w2:p1",
+        "workspaceId": "w2",
+        "tabId": "w2:t1",
+        "terminalId": "term_2",
+        "cwd": "/tmp",
+        "focused": false
+      }
+    ],
+    "t": "panes"
+  },
+  {
+    "t": "workspaces",
+    "workspaces": [
+      {
+        "workspaceId": "w1",
+        "label": "herdr",
+        "number": 1,
+        "agentStatus": "blocked",
+        "focused": true,
+        "paneCount": 1,
+        "tabCount": 1,
+        "lastActivity": 1791279000000,
+        "worktree": {
+          "repoName": "herdr",
+          "isLinkedWorktree": true
+        }
+      },
+      {
+        "workspaceId": "w2",
+        "label": "scratch",
+        "number": 2,
+        "focused": false,
+        "paneCount": 1,
+        "tabCount": 1
+      }
+    ]
+  },
+  {
+    "t": "tabs",
+    "tabs": [
+      {
+        "tabId": "w1:t1",
+        "label": "1",
+        "number": 1,
+        "workspaceId": "w1",
+        "agentStatus": "blocked",
+        "focused": true,
+        "paneCount": 1
+      }
+    ]
+  },
+  {
+    "pane": {
+      "paneId": "w1:p1",
+      "workspaceId": "w1",
+      "tabId": "w1:t1",
+      "terminalId": "term_1",
+      "cwd": "/Users/dev/herdr",
+      "focused": true,
+      "agent": "claude",
+      "agentStatus": "blocked",
+      "chat": true,
+      "activity": {
+        "kind": "tool",
+        "tool": "Bash",
+        "text": "Bash: go test ./...",
+        "ts": 1791279000000
+      },
+      "ask": {
+        "toolUseId": "toolu_ask",
+        "questions": [
+          {
+            "question": "Which database?",
+            "header": "DB",
+            "options": [
+              {
+                "label": "Postgres",
+                "description": "relational"
+              },
+              {
+                "label": "SQLite"
+              }
+            ],
+            "multiSelect": false
+          },
+          {
+            "question": "How many workers?",
+            "header": "Workers",
+            "kind": "number",
+            "min": 1,
+            "max": 8,
+            "step": 1,
+            "unit": "workers"
+          },
+          {
+            "question": "Branch name?",
+            "header": "Branch",
+            "kind": "text",
+            "placeholder": "feat/…"
+          }
+        ]
+      },
+      "bgRunning": 2
+    },
+    "t": "pane_update"
+  },
+  {
+    "paneId": "w2:p1",
+    "t": "pane_removed"
+  },
+  {
+    "paneId": "w1:p1",
+    "reqId": "r1",
+    "source": "detection",
+    "t": "pane_read",
+    "text": "$ go test ./...\nok"
+  },
+  {
+    "reqId": "r2",
+    "t": "ack"
+  },
+  {
+    "code": "read_failed",
+    "message": "pane not found",
+    "reqId": "r3",
+    "t": "error"
+  },
+  {
+    "ok": true,
+    "reqId": "a4",
+    "t": "action_result"
+  },
+  {
+    "error": "unknown kind: window",
+    "ok": false,
+    "reqId": "a5",
+    "t": "action_result"
+  },
+  {
+    "ok": true,
+    "paneId": "w1:p2",
+    "reqId": "n6",
+    "t": "created",
+    "terminalId": "term_3"
+  },
+  {
+    "error": "unknown what: window",
+    "ok": false,
+    "reqId": "n7",
+    "t": "created"
+  },
+  {
+    "agents": [
+      "claude",
+      "codex"
+    ],
+    "reqId": "g8",
+    "t": "agents"
+  },
+  {
+    "alsoCloses": [
+      {
+        "workspaceId": "w3",
+        "label": "herdr-feature"
+      }
+    ],
+    "reqId": "i9",
+    "t": "close_impact",
+    "workspaceId": "w1"
+  },
+  {
+    "t": "pong"
+  },
+  {
+    "reqId": "r10",
+    "t": "term_opened",
+    "termId": "t1"
+  },
+  {
+    "data": "aGVsbG8=",
+    "t": "term_data",
+    "termId": "t1"
+  },
+  {
+    "code": 0,
+    "reason": "ended",
+    "t": "term_exit",
+    "termId": "t1"
+  },
+  {
+    "message": "invalid target",
+    "reqId": "r11",
+    "t": "term_error",
+    "termId": ""
+  },
+  {
+    "agents": [
+      {
+        "agentId": "ag1",
+        "parentToolUseId": "toolu_2",
+        "kind": "subagent",
+        "label": "review",
+        "type": "code-reviewer",
+        "status": "running",
+        "activity": {
+          "kind": "tool",
+          "tool": "Read",
+          "text": "Read: main.go",
+          "ts": 1791279006000
+        },
+        "ts": 1791279004000
+      }
+    ],
+    "epoch": 2,
+    "events": [
+      {
+        "seq": 1,
+        "event": {
+          "type": "user_text",
+          "uuid": "u1",
+          "text": "look at this",
+          "ts": 1791279000000,
+          "images": [
+            "img1"
+          ],
+          "imageSizes": {
+            "img1": [
+              640,
+              480
+            ]
+          }
+        }
+      },
+      {
+        "seq": 2,
+        "event": {
+          "type": "assistant_text",
+          "uuid": "u2",
+          "text": "On it.",
+          "ts": 1791279001000
+        }
+      },
+      {
+        "seq": 3,
+        "event": {
+          "type": "tool_use",
+          "uuid": "u3",
+          "toolUseId": "toolu_1",
+          "tool": "Bash",
+          "summary": "Bash: go test ./...",
+          "ts": 1791279002000
+        }
+      },
+      {
+        "seq": 4,
+        "event": {
+          "type": "tool_result",
+          "toolUseId": "toolu_1",
+          "isError": true,
+          "preview": "FAIL",
+          "images": [
+            "img2"
+          ],
+          "imageSizes": {
+            "img2": [
+              100,
+              50
+            ]
+          },
+          "ts": 1791279003000
+        }
+      },
+      {
+        "seq": 5,
+        "event": {
+          "type": "task_notice",
+          "uuid": "u5",
+          "taskId": "bg1",
+          "toolUseId": "toolu_2",
+          "status": "completed",
+          "summary": "Agent \"review\" finished",
+          "ts": 1791279004000
+        }
+      },
+      {
+        "seq": 6,
+        "event": {
+          "type": "question",
+          "uuid": "toolu_ask",
+          "toolUseId": "toolu_ask",
+          "questions": [
+            {
+              "question": "Which database?",
+              "header": "DB",
+              "options": [
+                {
+                  "label": "Postgres",
+                  "description": "relational"
+                },
+                {
+                  "label": "SQLite"
+                }
+              ],
+              "multiSelect": false
+            },
+            {
+              "question": "How many workers?",
+              "header": "Workers",
+              "kind": "number",
+              "min": 1,
+              "max": 8,
+              "step": 1,
+              "unit": "workers"
+            },
+            {
+              "question": "Branch name?",
+              "header": "Branch",
+              "kind": "text",
+              "placeholder": "feat/…"
+            }
+          ],
+          "ts": 1791279005000
+        }
+      },
+      {
+        "seq": 7,
+        "event": {
+          "type": "from_a_newer_mod",
+          "uuid": "u7"
+        }
+      }
+    ],
+    "hasMore": true,
+    "paneId": "w1:p1",
+    "state": "working",
+    "t": "chat_snapshot",
+    "tasks": [
+      {
+        "id": "bg1",
+        "kind": "subagent",
+        "label": "review",
+        "toolUseId": "toolu_2",
+        "status": "running",
+        "startedAt": 1791279004000
+      },
+      {
+        "id": "bg2",
+        "kind": "shell",
+        "label": "npm run dev",
+        "toolUseId": "toolu_3",
+        "status": "done",
+        "startedAt": 1791279000000,
+        "endedAt": 1791279007000
+      }
+    ]
+  },
+  {
+    "agentId": "ag1",
+    "epoch": 2,
+    "events": [
+      {
+        "seq": 2,
+        "event": {
+          "type": "assistant_text",
+          "uuid": "u2",
+          "text": "On it.",
+          "ts": 1791279001000
+        }
+      }
+    ],
+    "hasMore": false,
+    "paneId": "w1:p1",
+    "state": "idle",
+    "t": "chat_snapshot"
+  },
+  {
+    "agentId": "ag9",
+    "epoch": 2,
+    "events": [],
+    "hasMore": false,
+    "missing": true,
+    "paneId": "w1:p1",
+    "state": "",
+    "t": "chat_snapshot"
+  },
+  {
+    "epoch": 2,
+    "event": {
+      "type": "assistant_text",
+      "uuid": "u2",
+      "text": "On it.",
+      "ts": 1791279001000
+    },
+    "paneId": "w1:p1",
+    "seq": 2,
+    "t": "chat_event"
+  },
+  {
+    "agentId": "ag1",
+    "epoch": 2,
+    "event": {
+      "type": "tool_use",
+      "uuid": "u3",
+      "toolUseId": "toolu_1",
+      "tool": "Bash",
+      "summary": "Bash: go test ./...",
+      "ts": 1791279002000
+    },
+    "paneId": "w1:p1",
+    "seq": 3,
+    "t": "chat_event"
+  },
+  {
+    "epoch": 2,
+    "event": {
+      "type": "from_a_newer_mod",
+      "uuid": "u7"
+    },
+    "paneId": "w1:p1",
+    "seq": 7,
+    "t": "chat_event"
+  },
+  {
+    "agent": {
+      "agentId": "ag1",
+      "parentToolUseId": "toolu_2",
+      "kind": "subagent",
+      "label": "review",
+      "type": "code-reviewer",
+      "status": "running",
+      "activity": {
+        "kind": "tool",
+        "tool": "Read",
+        "text": "Read: main.go",
+        "ts": 1791279006000
+      },
+      "ts": 1791279004000
+    },
+    "paneId": "w1:p1",
+    "t": "chat_agent"
+  },
+  {
+    "agentId": "ag1",
+    "paneId": "w1:p1",
+    "removed": true,
+    "t": "chat_agent"
+  },
+  {
+    "paneId": "w1:p1",
+    "t": "chat_tasks",
+    "tasks": [
+      {
+        "id": "bg1",
+        "kind": "subagent",
+        "label": "review",
+        "toolUseId": "toolu_2",
+        "status": "running",
+        "startedAt": 1791279004000
+      },
+      {
+        "id": "bg2",
+        "kind": "shell",
+        "label": "npm run dev",
+        "toolUseId": "toolu_3",
+        "status": "done",
+        "startedAt": 1791279000000,
+        "endedAt": 1791279007000
+      }
+    ]
+  },
+  {
+    "paneId": "w1:p1",
+    "state": "idle",
+    "t": "chat_state"
+  },
+  {
+    "ok": true,
+    "reqId": "c12",
+    "t": "chat_send_result"
+  },
+  {
+    "error": "no_mod",
+    "ok": false,
+    "reqId": "c13",
+    "t": "chat_send_result"
+  },
+  {
+    "epoch": 2,
+    "events": [
+      {
+        "seq": 1,
+        "event": {
+          "type": "user_text",
+          "uuid": "u1",
+          "text": "look at this",
+          "ts": 1791279000000,
+          "images": [
+            "img1"
+          ],
+          "imageSizes": {
+            "img1": [
+              640,
+              480
+            ]
+          }
+        }
+      },
+      {
+        "seq": 2,
+        "event": {
+          "type": "assistant_text",
+          "uuid": "u2",
+          "text": "On it.",
+          "ts": 1791279001000
+        }
+      }
+    ],
+    "hasMore": true,
+    "paneId": "w1:p1",
+    "reqId": "h14",
+    "t": "chat_history_page"
+  },
+  {
+    "agentId": "ag1",
+    "epoch": 1,
+    "events": [],
+    "hasMore": false,
+    "paneId": "w1:p1",
+    "reqId": "h15",
+    "stale": true,
+    "t": "chat_history_page"
+  },
+  {
+    "data": "iVBORw0KGgo=",
+    "id": "img1",
+    "mediaType": "image/png",
+    "paneId": "w1:p1",
+    "t": "chat_image_data"
+  },
+  {
+    "id": "img2",
+    "missing": true,
+    "paneId": "w1:p1",
+    "t": "chat_image_data"
+  },
+  {
+    "ok": true,
+    "reqId": "q16",
+    "t": "chat_answer_result"
+  },
+  {
+    "error": "no_question",
+    "ok": false,
+    "reqId": "q17",
+    "t": "chat_answer_result"
+  }
+]

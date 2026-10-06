@@ -1,0 +1,51 @@
+[
+  {
+    "companionProtocol": 10,
+    "herdrProtocol": 0,
+    "herdrVersion": "fake",
+    "t": "welcome"
+  },
+  {
+    "panes": [
+      {
+        "paneId": "w1:p1",
+        "workspaceId": "w1",
+        "tabId": "w1:t1",
+        "terminalId": "term_1",
+        "cwd": "/Users/dev/herdr",
+        "focused": true,
+        "agent": "claude",
+        "agentStatus": "idle"
+      }
+    ],
+    "t": "panes"
+  },
+  {
+    "t": "workspaces",
+    "workspaces": [
+      {
+        "workspaceId": "w1",
+        "label": "herdr",
+        "number": 1,
+        "agentStatus": "idle",
+        "focused": true,
+        "paneCount": 1,
+        "tabCount": 1
+      }
+    ]
+  },
+  {
+    "t": "tabs",
+    "tabs": [
+      {
+        "tabId": "w1:t1",
+        "label": "1",
+        "number": 1,
+        "workspaceId": "w1",
+        "agentStatus": "idle",
+        "focused": true,
+        "paneCount": 1
+      }
+    ]
+  }
+]

@@ -1,13 +1,15 @@
 // Command fake-companion serves the companion WebSocket protocol from scenario
-// files in e2e/scenarios, for the iOS end-to-end flows. Frames come from the
-// companion's own proto package, so they can't drift from the real wire format.
-// Like the real server, it answers hello and ping with pong.
+// files in e2e/scenarios, for the iOS end-to-end flows. It runs the real
+// wsserver.Server (orchestrator default, CPE-2091) over a scenario's state,
+// with a herdr and a chat hub that only record what the app asked for, so the
+// handshake, replies and frames can't drift from the real companion.
 //
 // A localhost control API lets a flow drive it:
 //
 //	POST /scenario {"name":"one-idle-pane"}  load a scenario, (re)start the WS side, clear /received
 //	POST /emit     <one JSON frame>          send a frame to every connected app
-//	GET  /received                           JSON array of the frames the app sent
+//	GET  /received                           JSON array of the companion calls the app caused,
+//	                                         e.g. {"call":"RenamePane","args":["w1:p1","build"]}
 //	POST /stop                               drop every app and refuse new WS connections (503)
 package main
 
@@ -23,21 +25,16 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"time"
 
-	"github.com/coder/websocket"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/proto"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/wsserver"
 )
 
 type scenario struct {
 	Workspaces []state.Workspace `json:"workspaces"`
 	Tabs       []state.Tab       `json:"tabs"`
 	Panes      []state.Pane      `json:"panes"`
-}
-
-func (s scenario) snapshot() [][]byte {
-	return [][]byte{proto.PanesSnapshot(s.Panes), proto.WorkspacesSnapshot(s.Workspaces), proto.TabsSnapshot(s.Tabs)}
 }
 
 func loadScenario(dir, name string) (scenario, error) {
@@ -53,16 +50,15 @@ func loadScenario(dir, name string) (scenario, error) {
 	return s, err
 }
 
-// ponytail: one lock held across socket writes keeps frame order simple; fine
-// for one app on localhost, per-client send queues if a flow ever needs more.
 type fake struct {
 	dir string
+	srv *wsserver.Server
+	rec *recorder
 
 	mu       sync.Mutex
 	scenario scenario
-	stopped  bool
-	clients  map[*websocket.Conn]struct{}
-	received []json.RawMessage
+	drop     context.CancelFunc // ends every live app connection; /stop until the next /scenario
+	dropped  context.Context
 }
 
 func newFake(dir, name string) (*fake, error) {
@@ -70,69 +66,43 @@ func newFake(dir, name string) (*fake, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &fake{dir: dir, scenario: s, clients: map[*websocket.Conn]struct{}{}, received: []json.RawMessage{}}, nil
+	f := &fake{dir: dir, scenario: s, rec: &recorder{}}
+	f.dropped, f.drop = context.WithCancel(context.Background())
+	f.srv = wsserver.NewServer(wsserver.AllowAll{}, f.rec)
+	f.srv.SetHerdrInfo("fake", 0)
+	f.srv.SetInitialSnapshot(func() []state.Pane { return f.current().Panes })
+	f.srv.SetWorkspaceSnapshot(func() []state.Workspace { return f.current().Workspaces })
+	f.srv.SetTabSnapshot(func() []state.Tab { return f.current().Tabs })
+	f.srv.SetPushEndpoint(func(endpoint string) { f.rec.record("RegisterPush", endpoint) })
+	f.srv.SetChat(f.rec)
+	return f, nil
 }
 
-func write(c *websocket.Conn, frame []byte) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := c.Write(ctx, websocket.MessageText, frame); err != nil {
-		log.Printf("write: %v", err)
-	}
+func (f *fake) current() scenario {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.scenario
 }
 
+// wsHandler is wsserver's handler, refusing apps while stopped. Each app's
+// request context ends on /stop, which makes wsserver close its socket.
 func (f *fake) wsHandler() http.Handler {
+	h := f.srv.Handler()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
-		if f.stopped {
-			f.mu.Unlock()
+		dropped := f.dropped
+		f.mu.Unlock()
+		if dropped.Err() != nil {
 			http.Error(w, "companion stopped", http.StatusServiceUnavailable)
 			return
 		}
-		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
-		if err != nil {
-			f.mu.Unlock()
-			return
-		}
-		write(c, proto.Welcome("fake", 0))
-		for _, frame := range f.scenario.snapshot() {
-			write(c, frame)
-		}
-		f.clients[c] = struct{}{}
-		f.mu.Unlock()
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		defer context.AfterFunc(dropped, cancel)()
 		log.Printf("app connected from %s", r.RemoteAddr)
-
-		defer func() {
-			f.mu.Lock()
-			delete(f.clients, c)
-			f.mu.Unlock()
-			c.CloseNow()
-			log.Printf("app disconnected")
-		}()
-		for {
-			_, b, err := c.Read(r.Context())
-			if err != nil {
-				return
-			}
-			log.Printf("app sent %s", b)
-			m, perr := proto.ParseClient(b)
-			if !json.Valid(b) {
-				b, _ = json.Marshal(string(b))
-			}
-			f.mu.Lock()
-			f.received = append(f.received, b)
-			if perr == nil && (m.T == "hello" || m.T == "ping") {
-				write(c, proto.Pong()) // as wsserver's readLoop does
-			}
-			f.mu.Unlock()
-		}
+		h.ServeHTTP(w, r.WithContext(ctx))
+		log.Printf("app disconnected")
 	})
-}
-
-func (f *fake) broadcast(frame []byte) {
-	for c := range f.clients {
-		write(c, frame)
-	}
 }
 
 func (f *fake) controlHandler() http.Handler {
@@ -149,11 +119,15 @@ func (f *fake) controlHandler() http.Handler {
 			return
 		}
 		f.mu.Lock()
-		defer f.mu.Unlock()
-		f.scenario, f.stopped, f.received = s, false, []json.RawMessage{}
-		for _, frame := range s.snapshot() {
-			f.broadcast(frame)
+		f.scenario = s
+		if f.dropped.Err() != nil {
+			f.dropped, f.drop = context.WithCancel(context.Background())
 		}
+		f.mu.Unlock()
+		f.rec.reset()
+		f.srv.Broadcast(proto.PanesSnapshot(s.Panes))
+		f.srv.Broadcast(proto.WorkspacesSnapshot(s.Workspaces))
+		f.srv.Broadcast(proto.TabsSnapshot(s.Tabs))
 		log.Printf("scenario %s", req.Name)
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -163,25 +137,18 @@ func (f *fake) controlHandler() http.Handler {
 			http.Error(w, "body must be one JSON frame", http.StatusBadRequest)
 			return
 		}
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		f.broadcast(b)
+		f.srv.Broadcast(b)
 		log.Printf("emit %s", b)
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("GET /received", func(w http.ResponseWriter, r *http.Request) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(f.received)
+		json.NewEncoder(w).Encode(f.rec.all())
 	})
 	mux.HandleFunc("POST /stop", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
-		defer f.mu.Unlock()
-		f.stopped = true
-		for c := range f.clients {
-			c.CloseNow()
-		}
+		f.drop()
+		f.mu.Unlock()
 		log.Printf("stopped")
 		w.WriteHeader(http.StatusNoContent)
 	})
