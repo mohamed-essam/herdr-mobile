@@ -1,0 +1,19 @@
+# Tapping an option chip on a "needs you" card answers the question in place (chat_answer).
+appId: dev.herdr.mobile
+---
+- runFlow:
+    file: subflows/launch.yaml
+    env:
+      SCENARIO: dashboard
+- assertVisible: { id: "choice-w1:p1-Postgres" }
+- assertVisible: { id: "other-w1:p1", enabled: false }
+- tapOn: { id: "choice-w1:p1-SQLite" }
+- extendedWaitUntil:
+    visible: { id: "resumed-w1:p1", text: ".*api resumed.*" }
+    timeout: 5000
+- assertVisible: { id: answerToast, text: Answer sent to api }
+- runScript:
+    file: ../scripts/received.js
+    env:
+      CALL: ChatAnswer
+      ARGS: '["w1:p1","toolu_db",{"Which database?":"SQLite"}]'

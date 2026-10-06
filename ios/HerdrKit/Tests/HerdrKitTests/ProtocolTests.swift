@@ -44,15 +44,15 @@ private func frame(_ json: String) throws -> ServerFrame {
     #expect(decoded.first == .welcome)
     #expect(decoded.contains(.panes([Pane(
         paneId: "w1:p1", workspaceId: "w1", tabId: "w1:t1", terminalId: "term_1", cwd: "/Users/dev/herdr",
-        focused: true, agent: "claude", agentStatus: "idle", chat: false, activity: nil, ask: nil, bgRunning: 0)])))
+        focused: true, agent: "claude", agentStatus: .idle, chat: false, activity: nil, ask: nil, bgRunning: 0)])))
 }
 
 @Test func decodesAPaneWithItsActivityAndPendingQuestion() throws {
     let all = try frames(in: everyFrame)
     let panes = all.compactMap { f -> [Pane]? in if case .panes(let p) = f { p } else { nil } }.first
     let pane = try #require(panes?.first)
-    #expect(pane.agentStatus == "blocked" && pane.chat && pane.bgRunning == 2)
-    #expect(pane.activity == PaneActivity(kind: "tool", tool: "Bash", text: "Bash: go test ./...", ts: 1_791_279_000_000))
+    #expect(pane.agentStatus == .blocked && pane.chat && pane.bgRunning == 2)
+    #expect(pane.activity == PaneActivity(kind: .tool, tool: "Bash", text: "Bash: go test ./...", ts: 1_791_279_000_000))
     let ask = try #require(pane.ask)
     #expect(ask.toolUseId == "toolu_ask")
     #expect(ask.questions.map(\.kind) == [.choice, .number, .text])
@@ -70,7 +70,7 @@ private func frame(_ json: String) throws -> ServerFrame {
     #expect(workspaces?.first?.worktree == Worktree(repoName: "herdr", isLinkedWorktree: true))
     #expect(workspaces?.first?.lastActivity == 1_791_279_000_000)
     #expect(workspaces?.last?.worktree == nil)
-    #expect(all.contains(.tabs([Tab(tabId: "w1:t1", label: "1", number: 1, workspaceId: "w1", agentStatus: "blocked", focused: true, paneCount: 1)])))
+    #expect(all.contains(.tabs([Tab(tabId: "w1:t1", label: "1", number: 1, workspaceId: "w1", agentStatus: .blocked, focused: true, paneCount: 1)])))
     #expect(all.contains(.paneRemoved(paneId: "w2:p1")))
     #expect(all.contains(.paneRead(reqId: "r1", paneId: "w1:p1", source: "detection", text: "$ go test ./...\nok")))
     #expect(all.contains(.ack(reqId: "r2")))
@@ -93,7 +93,7 @@ private func frame(_ json: String) throws -> ServerFrame {
     let snapshot = try #require(all.compactMap { f -> ChatSnapshot? in
         if case .chatSnapshot(let s) = f, s.agentId == nil { s } else { nil }
     }.first)
-    #expect(snapshot.paneId == "w1:p1" && snapshot.epoch == 2 && snapshot.state == "working" && snapshot.hasMore)
+    #expect(snapshot.paneId == "w1:p1" && snapshot.epoch == 2 && snapshot.state == .working && snapshot.hasMore)
     // seq 7 is an event type this app doesn't know: left out, but still counted in maxSeq.
     #expect(snapshot.entries.map(\.seq) == [1, 2, 3, 4, 5, 6])
     #expect(snapshot.maxSeq == 7)
@@ -110,12 +110,12 @@ private func frame(_ json: String) throws -> ServerFrame {
     }
     #expect(uuid == "toolu_ask" && toolUseId == "toolu_ask" && questions.count == 3)
     #expect(snapshot.agents == [AgentSummary(
-        agentId: "ag1", parentToolUseId: "toolu_2", parentAgentId: nil, kind: "subagent", label: "review", type: "code-reviewer",
-        phase: nil, status: "running", activity: PaneActivity(kind: "tool", tool: "Read", text: "Read: main.go", ts: 1_791_279_006_000),
+        agentId: "ag1", parentToolUseId: "toolu_2", parentAgentId: nil, kind: .subagent, label: "review", type: "code-reviewer",
+        phase: nil, status: .running, activity: PaneActivity(kind: .tool, tool: "Read", text: "Read: main.go", ts: 1_791_279_006_000),
         ts: 1_791_279_004_000)])
     #expect(snapshot.tasks == [
-        BgTask(id: "bg1", kind: "subagent", label: "review", toolUseId: "toolu_2", status: "running", startedAt: 1_791_279_004_000, endedAt: nil),
-        BgTask(id: "bg2", kind: "shell", label: "npm run dev", toolUseId: "toolu_3", status: "done", startedAt: 1_791_279_000_000, endedAt: 1_791_279_007_000),
+        BgTask(id: "bg1", kind: .subagent, label: "review", toolUseId: "toolu_2", status: .running, startedAt: 1_791_279_004_000, endedAt: nil),
+        BgTask(id: "bg2", kind: .shell, label: "npm run dev", toolUseId: "toolu_3", status: .done, startedAt: 1_791_279_000_000, endedAt: 1_791_279_007_000),
     ])
 }
 
@@ -132,7 +132,7 @@ private func frame(_ json: String) throws -> ServerFrame {
     #expect(all.contains { if case .chatAgent("w1:p1", .some(let a), nil) = $0 { a.agentId == "ag1" } else { false } })
     #expect(all.contains(.chatAgent(paneId: "w1:p1", agent: nil, removedId: "ag1")))
     #expect(all.contains { if case .chatTasks("w1:p1", let tasks) = $0 { tasks.map(\.id) == ["bg1", "bg2"] } else { false } })
-    #expect(all.contains(.chatState(paneId: "w1:p1", state: "idle")))
+    #expect(all.contains(.chatState(paneId: "w1:p1", state: .idle)))
     #expect(all.contains(.chatSendResult(reqId: "c12", ok: true, error: nil)))
     #expect(all.contains(.chatSendResult(reqId: "c13", ok: false, error: "no_mod")))
     #expect(all.contains { if case .chatHistoryPage(let p) = $0 { p.reqId == "h14" && p.entries.count == 2 && p.hasMore && !p.stale } else { false } })
@@ -172,7 +172,7 @@ func rejectsFramesWithoutAType(_ text: String) {
         Issue.record("not a snapshot: \(f)")
         return
     }
-    #expect(s.state == "idle")
+    #expect(s.state == .idle)
     #expect(s.entries[0].event == .userText(uuid: "u", text: "hi", ts: nil, images: [], imageSizes: ["c": PixelSize(width: 3, height: 4)]))
     guard case .question(_, _, let questions, _) = s.entries[1].event else {
         Issue.record("not a question: \(s.entries[1].event)")
@@ -191,6 +191,52 @@ func rejectsFramesWithoutAType(_ text: String) {
         return
     }
     #expect(s.agents == nil && s.tasks == nil)
+}
+
+// MARK: Fixed-value fields
+
+@Test func readsFixedValueFieldsAsEnums() throws {
+    let f = try frame(#"""
+    {"t":"panes","panes":[
+      {"paneId":"a","agent":"claude","agentStatus":"working","activity":{"kind":"notice","text":"x","ts":1}},
+      {"paneId":"b","agentStatus":"unknown"}
+    ]}
+    """#)
+    guard case .panes(let panes) = f else {
+        Issue.record("not panes: \(f)")
+        return
+    }
+    #expect(panes[0].agentStatus == .working && panes[0].activity?.kind == .notice)
+    // herdr reports "unknown" for a pane without an agent.
+    #expect(panes[1].agentStatus == .unknown("unknown"))
+    #expect(AgentStatus(raw: "blocked") == .blocked && AgentStatus.blocked.raw == "blocked")
+}
+
+/// A value from a newer companion stays readable and never fails its frame,
+/// so one odd pane can't drop the whole `panes` list.
+@Test func keepsAValueThisAppDoesNotKnow() throws {
+    let f = try frame(#"""
+    {"t":"panes","panes":[{"paneId":"a","agent":"claude","agentStatus":"napping",
+      "activity":{"kind":"thought","text":"hmm","ts":1}},{"paneId":"b","agentStatus":"idle"}]}
+    """#)
+    guard case .panes(let panes) = f else {
+        Issue.record("not panes: \(f)")
+        return
+    }
+    #expect(panes.map(\.agentStatus) == [.unknown("napping"), .idle])
+    #expect(panes[0].activity?.kind == .unknown("thought"))
+    #expect(AgentStatus.unknown("napping").raw == "napping")
+
+    guard case .chatSnapshot(let s) = try frame(#"""
+    {"t":"chat_snapshot","paneId":"p","epoch":1,"state":"dreaming","events":[],
+     "agents":[{"agentId":"a1","kind":"swarm","status":"paused"}],"tasks":[{"id":"t1","kind":"cron","status":"queued"}]}
+    """#) else {
+        Issue.record("not a snapshot")
+        return
+    }
+    #expect(s.state == .unknown("dreaming"))
+    #expect(s.agents?.first?.kind == .unknown("swarm") && s.agents?.first?.status == .unknown("paused"))
+    #expect(s.tasks?.first?.kind == .unknown("cron") && s.tasks?.first?.status == .unknown("queued"))
 }
 
 // MARK: Client frames
@@ -221,12 +267,12 @@ func encodesMessages(_ message: ClientMessage, _ json: String) throws {
     (ClientRequest.readPane(paneId: "w1:p1"), "r", #"{"t":"read_pane","paneId":"w1:p1","source":"detection","lines":40}"#),
     (.sendText(paneId: "w1:p1", text: "y"), "r", #"{"t":"send_text","paneId":"w1:p1","text":"y"}"#),
     (.sendKeys(paneId: "w1:p1", keys: "Enter"), "r", #"{"t":"send_keys","paneId":"w1:p1","keys":"Enter"}"#),
-    (.action(op: "rename", kind: "pane", id: "w1:p1", label: "build"), "a", #"{"t":"action","op":"rename","kind":"pane","id":"w1:p1","label":"build"}"#),
-    (.action(op: "close", kind: "tab", id: "w1:t1"), "a", #"{"t":"action","op":"close","kind":"tab","id":"w1:t1"}"#),
-    (.create(what: "workspace"), "n", #"{"t":"create","what":"workspace"}"#),
-    (.create(what: "agent", workspaceId: "w1", tabId: "w1:t1", direction: "right", agentName: "claude", argv: ["claude", "--resume"]), "n",
+    (.action(op: .rename, kind: .pane, id: "w1:p1", label: "build"), "a", #"{"t":"action","op":"rename","kind":"pane","id":"w1:p1","label":"build"}"#),
+    (.action(op: .close, kind: .tab, id: "w1:t1"), "a", #"{"t":"action","op":"close","kind":"tab","id":"w1:t1"}"#),
+    (.create(what: .workspace), "n", #"{"t":"create","what":"workspace"}"#),
+    (.create(what: .agent, workspaceId: "w1", tabId: "w1:t1", direction: .right, agentName: "claude", argv: ["claude", "--resume"]), "n",
      #"{"t":"create","what":"agent","workspaceId":"w1","tabId":"w1:t1","direction":"right","agentName":"claude","argv":["claude","--resume"]}"#),
-    (.move(paneId: "w1:p1", dest: "tab", tabId: "w1:t2"), "v", #"{"t":"move","paneId":"w1:p1","dest":"tab","tabId":"w1:t2"}"#),
+    (.move(paneId: "w1:p1", dest: .tab, tabId: "w1:t2"), "v", #"{"t":"move","paneId":"w1:p1","dest":"tab","tabId":"w1:t2"}"#),
     (.chatSend(paneId: "w1:p1", text: "hi"), "c", #"{"t":"chat_send","paneId":"w1:p1","text":"hi"}"#),
     (.chatAnswer(paneId: "w1:p1", toolUseId: "toolu_ask", answers: ["DB": "Postgres"]), "q",
      #"{"t":"chat_answer","paneId":"w1:p1","toolUseId":"toolu_ask","answers":{"DB":"Postgres"}}"#),

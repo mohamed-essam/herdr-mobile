@@ -4,7 +4,10 @@ import Foundation
 /// into a UserDefaults value, so each switch is a plain settings read, and a saved
 /// setting under the same key works the same way.
 public struct LaunchOptions: Sendable {
-    /// `-companionURL <ws url>`: connect to this companion. Nil unless it is a ws/wss URL with a host.
+    /// The `-companionURL` switch's key, which is also where the app saves the companion.
+    public static let companionURLKey = "companionURL"
+
+    /// `-companionURL <ws url>`: connect to this companion. Nil unless it is a ws/wss URL (any case) with a host.
     public let companionURL: URL?
     /// `-disableAnimations YES`
     public let disableAnimations: Bool
@@ -13,9 +16,9 @@ public struct LaunchOptions: Sendable {
 
     /// `string` reads a setting, e.g. `UserDefaults.standard.string(forKey:)`.
     public init(reading string: (String) -> String?) {
-        companionURL = string("companionURL")
+        companionURL = string(Self.companionURLKey)
             .flatMap(URL.init(string:))
-            .flatMap { ["ws", "wss"].contains($0.scheme) && $0.host()?.isEmpty == false ? $0 : nil }
+            .flatMap { ["ws", "wss"].contains($0.scheme?.lowercased()) && $0.host()?.isEmpty == false ? $0 : nil }
         disableAnimations = string("disableAnimations").map { ($0 as NSString).boolValue } ?? false
         fixedNow = string("fixedNow").flatMap { try? Date($0, strategy: .iso8601) }
     }

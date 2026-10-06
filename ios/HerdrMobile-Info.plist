@@ -4,6 +4,9 @@
 <plist version="1.0">
 <dict>
 	<!-- The companion speaks cleartext ws:// over the tailnet (WireGuard encrypts it), as Android's usesCleartextTraffic="true". Without this, ATS blocks hostnames such as box.tailnet.ts.net (IPs are exempt). -->
+	<!-- Shown if iOS asks before the app reaches a companion on the local network (a LAN address rather than a tailnet one). -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>herdr connects to the herdr companion running on your computer.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

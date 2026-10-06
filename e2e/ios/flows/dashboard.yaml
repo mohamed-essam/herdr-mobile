@@ -1,0 +1,60 @@
+# The dashboard scenario renders as sections, blocked first; the switcher groups by repo;
+# a pane_update mid-flow shows up live.
+appId: dev.herdr.mobile
+---
+- runFlow:
+    file: subflows/launch.yaml
+    env:
+      SCENARIO: dashboard
+- assertVisible: { id: paneCount, text: 5 panes }
+- assertVisible: { id: stat-blocked, text: "1.*" }
+- assertVisible: { id: stat-working, text: "1.*" }
+- assertVisible: { id: stat-done, text: "1.*" }
+- assertVisible: { id: section-needs, text: ".*needs you · 1" }
+- assertVisible:
+    id: "needs-w1:p1"
+    below: { id: section-needs }
+- assertVisible: { id: "question-w1:p1", text: 'Which database\?' }
+- assertVisible:
+    id: section-working
+    below: { id: "needs-w1:p1" }
+- assertVisible:
+    id: "row-w1:p3"
+    below: { id: section-working }
+- assertVisible: { id: "bg-w1:p3", text: ⟳ 2 }
+- assertVisible:
+    id: "row-w2:p1"
+    below: { id: "row-w1:p3" }
+- assertVisible:
+    id: section-idle
+    below: { id: "row-w2:p1" }
+- scrollUntilVisible:
+    element: { id: "row-w1:p2" }
+- assertVisible:
+    id: "row-w1:p2"
+    below: { id: "row-w3:p1" }
+
+# Live: the idle agent in "notes" gets blocked.
+- runScript:
+    file: ../scripts/control.js
+    env:
+      ENDPOINT: /emit
+      BODY: '{"t":"pane_update","pane":{"paneId":"w3:p1","workspaceId":"w3","tabId":"w3:t1","terminalId":"term_5","cwd":"/Users/dev/wiki","focused":false,"agent":"claude","agentStatus":"blocked","activity":{"kind":"text","text":"Can I delete the draft?","ts":1791279200000}}}'
+- scrollUntilVisible:
+    element: { id: section-needs }
+    direction: UP
+- extendedWaitUntil:
+    visible: { id: section-needs, text: ".*needs you · 2" }
+    timeout: 5000
+- assertVisible: { id: "needs-w3:p1" }
+
+# The switcher groups workspaces under their repo.
+- tapOn: { id: workspacesButton }
+- assertVisible: { id: repo-shop }
+- assertVisible: { id: tile-w1 }
+- assertVisible: { id: tile-w2 }
+- assertVisible: { id: repo-wiki }
+- tapOn: { id: switcherSearch }
+- inputText: notes
+- assertVisible: { id: tile-w3 }
+- assertNotVisible: { id: tile-w1 }

@@ -174,3 +174,35 @@ func TestScenarioFrames(t *testing.T) {
 		})
 	}
 }
+
+// The New Agent picker and the close cascade warning need real replies: the
+// fake answers list_agents and close_impact from the scenario's agents and worktrees.
+func TestFakeCompanionAnswersFromTheScenario(t *testing.T) {
+	f, err := newFake("../../../e2e/scenarios", "dashboard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, _ := dial(ctx, t, f)
+	for range 4 { // welcome + panes, workspaces, tabs
+		readType(ctx, t, c)
+	}
+	for _, step := range []struct{ msg, reply string }{
+		{`{"t":"list_agents","reqId":"g1"}`, `{"agents":["claude","codex","gemini"],"reqId":"g1","t":"agents"}`},
+		{`{"t":"close_impact","reqId":"i2","workspaceId":"w1"}`,
+			`{"alsoCloses":[{"workspaceId":"w2","label":"api-feature"}],"reqId":"i2","t":"close_impact","workspaceId":"w1"}`},
+		{`{"t":"close_impact","reqId":"i3","workspaceId":"w3"}`, `{"alsoCloses":[],"reqId":"i3","t":"close_impact","workspaceId":"w3"}`},
+	} {
+		if err := c.Write(ctx, websocket.MessageText, []byte(step.msg)); err != nil {
+			t.Fatal(err)
+		}
+		_, got, err := c.Read(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != step.reply {
+			t.Fatalf("%s: got %s, want %s", step.msg, got, step.reply)
+		}
+	}
+}

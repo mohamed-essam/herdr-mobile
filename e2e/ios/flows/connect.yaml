@@ -1,28 +1,19 @@
-# Launch against the fake companion and see "Connected"; stop it and see "Reconnecting".
+# Launch against the fake companion and see the dashboard connected; stop it and see "Reconnecting".
 appId: dev.herdr.mobile
 ---
-- runScript:
-    file: ../scripts/control.js
+- runFlow:
+    file: subflows/launch.yaml
     env:
-      ENDPOINT: /scenario
-      BODY: '{"name":"one-idle-pane"}'
-- launchApp:
-    clearState: true
-    arguments:
-      companionURL: ${COMPANION_URL}
-      resetState: "YES"
-      disableAnimations: "YES"
-- extendedWaitUntil:
-    visible:
-      id: connectionState
-      text: Connected
-    timeout: 15000
+      SCENARIO: one-idle-pane
+- assertVisible:
+    id: paneCount
+    text: 1 pane
 - runScript:
     file: ../scripts/control.js
     env:
       ENDPOINT: /stop
 - extendedWaitUntil:
     visible:
-      id: connectionState
+      id: reconnecting
       text: Reconnecting.*
     timeout: 15000

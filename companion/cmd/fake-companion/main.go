@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/herdr"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/proto"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/wsserver"
@@ -35,6 +36,9 @@ type scenario struct {
 	Workspaces []state.Workspace `json:"workspaces"`
 	Tabs       []state.Tab       `json:"tabs"`
 	Panes      []state.Pane      `json:"panes"`
+	// What herdr answers for agent.list and, by workspace id, worktree.list.
+	Agents    []string                         `json:"agents"`
+	Worktrees map[string][]herdr.WorktreeEntry `json:"worktrees"`
 }
 
 func loadScenario(dir, name string) (scenario, error) {
@@ -66,7 +70,8 @@ func newFake(dir, name string) (*fake, error) {
 	if err != nil {
 		return nil, err
 	}
-	f := &fake{dir: dir, scenario: s, rec: &recorder{}}
+	f := &fake{dir: dir, scenario: s}
+	f.rec = &recorder{scenario: f.current}
 	f.dropped, f.drop = context.WithCancel(context.Background())
 	f.srv = wsserver.NewServer(wsserver.AllowAll{}, f.rec)
 	f.srv.SetHerdrInfo("fake", 0)

@@ -12,7 +12,7 @@ public struct Pane: Equatable, Sendable {
     public let cwd: String
     public let focused: Bool
     public let agent: String?
-    public let agentStatus: String?
+    public let agentStatus: AgentStatus?
     /// The herdr-chat mod in this pane is syncing, so it has a chat view.
     public let chat: Bool
     /// What the agent last did; nil when no herdr-chat mod is live.
@@ -23,10 +23,10 @@ public struct Pane: Equatable, Sendable {
     public let bgRunning: Int
 }
 
-/// A one-line summary of a pane's latest chat event. `kind` is "tool", "text",
-/// "user", "question" or "notice"; `tool` is set only for "tool". `ts` is epoch ms.
+/// A one-line summary of a pane's latest chat event. `tool` is set only for
+/// `.tool`. `ts` is epoch ms.
 public struct PaneActivity: Equatable, Sendable {
-    public let kind: String
+    public let kind: ActivityKind
     public let tool: String?
     public let text: String
     public let ts: Int
@@ -46,7 +46,7 @@ public struct Workspace: Equatable, Sendable {
     public let workspaceId: String
     public let label: String
     public let number: Int
-    public let agentStatus: String?
+    public let agentStatus: AgentStatus?
     public let focused: Bool
     public let paneCount: Int
     public let tabCount: Int
@@ -60,7 +60,7 @@ public struct Tab: Equatable, Sendable {
     public let label: String
     public let number: Int
     public let workspaceId: String
-    public let agentStatus: String?
+    public let agentStatus: AgentStatus?
     public let focused: Bool
     public let paneCount: Int
 }
@@ -119,30 +119,28 @@ public struct QuestionItem: Equatable, Sendable {
     public let description: String?
 }
 
-/// A subagent or workflow of a pane's chat. `kind` is "subagent" or "workflow";
-/// `status` is "running", "done" or "failed". `parentToolUseId` links it to the
+/// A subagent or workflow of a pane's chat. `parentToolUseId` links it to the
 /// tool call that launched it, `parentAgentId` to the agent that did (nested).
 public struct AgentSummary: Equatable, Sendable {
     public let agentId: String
     public let parentToolUseId: String
     public let parentAgentId: String?
-    public let kind: String
+    public let kind: AgentKind
     public let label: String
     public let type: String?
     public let phase: String?
-    public let status: String
+    public let status: RunStatus
     public let activity: PaneActivity?
     public let ts: Int
 }
 
-/// A background task of a pane. `kind` is "shell", "subagent", "workflow" or
-/// "monitor"; `status` is "running", "done" or "failed". Times are epoch ms.
+/// A background task of a pane. Times are epoch ms.
 public struct BgTask: Equatable, Sendable {
     public let id: String
-    public let kind: String
+    public let kind: TaskKind
     public let label: String
     public let toolUseId: String
-    public let status: String
+    public let status: RunStatus
     public let startedAt: Int
     public let endedAt: Int?
 }
@@ -151,7 +149,7 @@ public struct BgTask: Equatable, Sendable {
 public struct ChatSnapshot: Equatable, Sendable {
     public let paneId: String
     public let epoch: Int
-    public let state: String
+    public let state: ChatState
     public let entries: [ChatEntry]
     public let hasMore: Bool
     /// The highest seq among all events, counting those left out of `entries`.
@@ -207,7 +205,7 @@ extension Pane: Decodable {
 extension PaneActivity: Decodable {
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: JSONKey.self)
-        kind = try c.value("kind", or: "")
+        kind = try c.value("kind", or: .unknown(""))
         tool = try c.value("tool")
         text = try c.value("text", or: "")
         ts = try c.value("ts", or: 0)
@@ -341,11 +339,11 @@ extension AgentSummary: Decodable {
         }
         parentToolUseId = try c.value("parentToolUseId", or: "")
         parentAgentId = try c.value("parentAgentId")
-        kind = try c.value("kind", or: "")
+        kind = try c.value("kind", or: .unknown(""))
         label = try c.value("label", or: "")
         type = try c.value("type")
         phase = try c.value("phase")
-        status = try c.value("status", or: "")
+        status = try c.value("status", or: .unknown(""))
         activity = try? c.value("activity")
         ts = try c.value("ts", or: 0)
     }
@@ -359,10 +357,10 @@ extension BgTask: Decodable {
         guard !id.isEmpty else {
             throw DecodingError.dataCorruptedError(forKey: "id", in: c, debugDescription: "task without an id")
         }
-        kind = try c.value("kind", or: "")
+        kind = try c.value("kind", or: .unknown(""))
         label = try c.value("label", or: "")
         toolUseId = try c.value("toolUseId", or: "")
-        status = try c.value("status", or: "")
+        status = try c.value("status", or: .unknown(""))
         startedAt = try c.value("startedAt", or: 0)
         endedAt = try c.value("endedAt")
     }
@@ -394,7 +392,7 @@ extension ChatSnapshot: Decodable {
         let c = try decoder.container(keyedBy: JSONKey.self)
         paneId = try c.value("paneId", or: "")
         epoch = try c.value("epoch", or: 0)
-        state = try c.value("state", or: "idle")
+        state = try c.value("state", or: .idle)
         (entries, maxSeq) = try c.events()
         hasMore = try c.value("hasMore", or: false)
         agentId = try c.value("agentId")

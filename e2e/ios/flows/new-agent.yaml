@@ -1,0 +1,33 @@
+# The New Agent picker lists the companion's agents, starts one, remembers it as recent,
+# and runs a typed "Other…" command.
+appId: dev.herdr.mobile
+---
+- runFlow:
+    file: subflows/launch.yaml
+    env:
+      SCENARIO: dashboard
+- tapOn: { id: workspacesButton }
+- longPressOn: { id: tile-w3 }
+- tapOn: { id: action-newAgent }
+- extendedWaitUntil:
+    visible: { id: agent-gemini }
+    timeout: 5000
+- assertNotVisible: { id: section-recent }
+- tapOn: { id: agent-codex }
+- runScript:
+    file: ../scripts/received.js
+    env: { CALL: StartAgent, ARGS: '["codex",["codex"],"w3","",""]' }
+
+- tapOn: { id: workspacesButton }
+- longPressOn: { id: tile-w3 }
+- tapOn: { id: action-newAgent }
+- extendedWaitUntil:
+    visible: { id: recent-codex }
+    timeout: 5000
+- tapOn: { id: agentOther }
+- tapOn: { id: otherCommandField }
+- inputText: aider --yes
+- tapOn: { id: otherStart }
+- runScript:
+    file: ../scripts/received.js
+    env: { CALL: StartAgent, ARGS: '["aider",["aider","--yes"],"w3","",""]' }

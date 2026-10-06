@@ -66,7 +66,8 @@ grep -q 'fake-companion: ws=' "$ART/fake-companion.log" || { cat "$ART/fake-comp
 
 log "Running Maestro flows…"
 if maestro --device "$UDID" test "$FLOWS" \
-  -e COMPANION_URL="ws://127.0.0.1:$WS_PORT" -e CONTROL_URL="http://127.0.0.1:$CONTROL_PORT" \
+  -e COMPANION_URL="ws://127.0.0.1:$WS_PORT" -e COMPANION_HOST="127.0.0.1.nip.io:$WS_PORT" \
+  -e CONTROL_URL="http://127.0.0.1:$CONTROL_PORT" \
   --test-output-dir "$ART/maestro" --debug-output "$ART/maestro"; then
   rm -rf "$ART"
   log "All flows passed."

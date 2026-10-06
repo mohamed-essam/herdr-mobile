@@ -30,7 +30,7 @@ public enum ServerFrame: Equatable, Sendable {
     case chatAgent(paneId: String, agent: AgentSummary?, removedId: String?)
     /// The pane's background tasks, replacing the previous list.
     case chatTasks(paneId: String, tasks: [BgTask])
-    case chatState(paneId: String, state: String)
+    case chatState(paneId: String, state: ChatState)
     case chatSendResult(reqId: String, ok: Bool, error: String?)
     /// A frame from a newer companion; the client ignores it.
     case unknown(String)
@@ -109,7 +109,7 @@ extension ServerFrame: Decodable {
             self = .chatAgent(paneId: try c.value("paneId", or: ""), agent: try? c.value("agent"),
                               removedId: removed ? try c.value("agentId") : nil)
         case "chat_tasks": self = .chatTasks(paneId: try c.value("paneId", or: ""), tasks: try c.lossy("tasks") ?? [])
-        case "chat_state": self = .chatState(paneId: try c.value("paneId", or: ""), state: try c.value("state", or: "idle"))
+        case "chat_state": self = .chatState(paneId: try c.value("paneId", or: ""), state: try c.value("state", or: .idle))
         case "chat_send_result": self = .chatSendResult(reqId: try reqId(), ok: try c.value("ok", or: false), error: try c.value("error"))
         default: self = .unknown(t)
         }

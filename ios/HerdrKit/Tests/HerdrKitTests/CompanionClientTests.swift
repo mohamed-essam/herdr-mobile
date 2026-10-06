@@ -26,16 +26,6 @@ extension Peer {
     }
 }
 
-@MainActor
-private func until(within wait: Duration = .seconds(5), _ condition: () -> Bool) async -> Bool {
-    let deadline = ContinuousClock.now + wait
-    while !condition() {
-        guard ContinuousClock.now < deadline else { return false }
-        try? await Task.sleep(for: .milliseconds(10))
-    }
-    return true
-}
-
 /// The client's next connection, past its hello and welcomed, so the client is connected.
 @MainActor
 private func welcomed(_ server: TestServer, _ client: CompanionClient) async throws -> Peer {
@@ -78,10 +68,10 @@ private func welcomed(_ server: TestServer, _ client: CompanionClient) async thr
     defer { run.cancel() }
     let peer = try await welcomed(server, client)
 
-    let close = Task { try await client.request(.action(op: "close", kind: "window", id: "x")) }
+    let close = Task { try await client.request(.action(op: .close, kind: .pane, id: "x")) }
     _ = await peer.next()
-    peer.send(#"{"t":"action_result","reqId":"a1","ok":false,"error":"unknown kind: window"}"#)
-    await #expect(throws: CompanionError.rejected("unknown kind: window")) { try await close.value }
+    peer.send(#"{"t":"action_result","reqId":"a1","ok":false,"error":"invalid id"}"#)
+    await #expect(throws: CompanionError.rejected("invalid id")) { try await close.value }
 
     let read = Task { try await client.request(.readPane(paneId: "nope")) }
     _ = await peer.next()
@@ -170,7 +160,7 @@ private func welcomed(_ server: TestServer, _ client: CompanionClient) async thr
     #expect(await nextElement(of: images) == ChatImage(paneId: "w1:p1", id: "img1", mediaType: "image/png", data: bytes, missing: false))
     let frames = client.frames()
     #expect(await nextElement(of: frames) == .welcome)
-    #expect(await nextElement(of: frames) == .chatState(paneId: "w1:p1", state: "idle"))
+    #expect(await nextElement(of: frames) == .chatState(paneId: "w1:p1", state: .idle))
 }
 
 @Test @MainActor func skipsPongsAndFramesItCannotRead() async throws {

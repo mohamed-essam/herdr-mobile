@@ -37,12 +37,11 @@ public enum ClientRequest: Equatable, Sendable {
     case readPane(paneId: String, source: String = "detection", lines: Int = 40)
     case sendText(paneId: String, text: String)
     case sendKeys(paneId: String, keys: String)
-    /// `op` is "rename" (with `label`) or "close"; `kind` is "workspace", "tab" or "pane".
-    case action(op: String, kind: String, id: String, label: String? = nil)
-    /// `what` is "workspace", "tab", "shell" or "agent".
-    case create(what: String, workspaceId: String? = nil, tabId: String? = nil, paneId: String? = nil,
-                direction: String? = nil, agentName: String? = nil, argv: [String]? = nil)
-    case move(paneId: String, dest: String, tabId: String? = nil, direction: String? = nil)
+    /// `label` goes with `.rename`.
+    case action(op: ActionOp, kind: NodeKind, id: String, label: String? = nil)
+    case create(what: CreateWhat, workspaceId: String? = nil, tabId: String? = nil, paneId: String? = nil,
+                direction: SplitDirection? = nil, agentName: String? = nil, argv: [String]? = nil)
+    case move(paneId: String, dest: MoveDest, tabId: String? = nil, direction: SplitDirection? = nil)
     case chatSend(paneId: String, text: String)
     case chatAnswer(paneId: String, toolUseId: String, answers: [String: String])
     case chatHistory(paneId: String, epoch: Int, beforeSeq: Int, limit: Int, agentId: String? = nil)

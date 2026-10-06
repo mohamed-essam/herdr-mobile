@@ -1,0 +1,19 @@
+# Load SCENARIO in the fake companion and launch a fresh app on it, clock frozen.
+appId: dev.herdr.mobile
+---
+- runScript:
+    file: ../../scripts/control.js
+    env:
+      ENDPOINT: /scenario
+      NAME: ${SCENARIO}
+- launchApp:
+    clearState: true
+    arguments:
+      companionURL: ${COMPANION_URL}
+      resetState: "YES"
+      disableAnimations: "YES"
+      fixedNow: "2026-10-06T09:35:00Z"
+- extendedWaitUntil:
+    visible:
+      id: paneCount
+    timeout: 15000

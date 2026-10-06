@@ -17,8 +17,11 @@ type rpcCall struct {
 }
 
 // recorder stands in for herdr and the chat hub behind wsserver: every call
-// is recorded and succeeds with an empty result.
+// is recorded and succeeds, with the scenario's agents and worktrees or an
+// empty result.
 type recorder struct {
+	scenario func() scenario
+
 	mu    sync.Mutex
 	calls []rpcCall
 }
@@ -104,11 +107,11 @@ func (r *recorder) MovePane(_ context.Context, paneID, dest, tabID, direction st
 }
 func (r *recorder) ListAgentNames(context.Context) ([]string, error) {
 	r.record("ListAgentNames")
-	return nil, nil
+	return r.scenario().Agents, nil
 }
 func (r *recorder) ListWorktrees(_ context.Context, workspaceID string) ([]herdr.WorktreeEntry, error) {
 	r.record("ListWorktrees", workspaceID)
-	return nil, nil
+	return r.scenario().Worktrees[workspaceID], nil
 }
 
 // wsserver.ChatHub. A subscription gets an idle, empty snapshot and no updates.

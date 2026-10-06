@@ -19,6 +19,14 @@ func acceptsWebSocketURLs(_ url: String) {
     #expect(options(["companionURL": url]).companionURL == URL(string: url))
 }
 
+/// The connect screen saves the address under the same key; any address it accepts must
+/// read back on the next launch (code review #3: "WS://" was saved, then rejected).
+@Test(arguments: ["WS://box:1", "Wss://box.ts.net/ws", "box"])
+func readsBackWhatTheConnectScreenSaves(_ input: String) throws {
+    let saved = try #require(CompanionAddress(parsing: input)).url.absoluteString
+    #expect(options([LaunchOptions.companionURLKey: saved]).companionURL?.absoluteString == saved)
+}
+
 @Test(arguments: ["http://127.0.0.1:8787", "127.0.0.1:8787", "ws://", ""])
 func rejectsAnythingButAWebSocketURL(_ url: String) {
     #expect(options(["companionURL": url]).companionURL == nil)
