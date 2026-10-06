@@ -1,0 +1,28 @@
+# Launch against the fake companion and see "Connected"; stop it and see "Reconnecting".
+appId: dev.herdr.mobile
+---
+- runScript:
+    file: ../scripts/control.js
+    env:
+      ENDPOINT: /scenario
+      BODY: '{"name":"one-idle-pane"}'
+- launchApp:
+    clearState: true
+    arguments:
+      companionURL: ${COMPANION_URL}
+      resetState: "YES"
+      disableAnimations: "YES"
+- extendedWaitUntil:
+    visible:
+      id: connectionState
+      text: Connected
+    timeout: 15000
+- runScript:
+    file: ../scripts/control.js
+    env:
+      ENDPOINT: /stop
+- extendedWaitUntil:
+    visible:
+      id: connectionState
+      text: Reconnecting.*
+    timeout: 15000

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged into the generated Info.plist. Kept outside the synchronized HerdrMobile/ folder so it isn't also copied as a resource. -->
+<plist version="1.0">
+<dict>
+	<!-- The companion speaks cleartext ws:// over the tailnet (WireGuard encrypts it), as Android's usesCleartextTraffic="true". Without this, ATS blocks hostnames such as box.tailnet.ts.net (IPs are exempt). -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+</dict>
+</plist>

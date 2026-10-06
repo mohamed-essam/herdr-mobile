@@ -20,3 +20,8 @@ RELEASE_NOTES.md
 # misc
 .DS_Store
 mod/herdr-chat/.claude-plugin/types/
+# iOS
+/build/
+/ios/HerdrKit/.build/
+/ios/HerdrKit/.swiftpm/
+xcuserdata/
