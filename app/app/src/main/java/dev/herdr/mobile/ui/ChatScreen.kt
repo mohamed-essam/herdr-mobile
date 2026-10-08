@@ -43,6 +43,8 @@ fun ChatScreen(
     val c = Herdr.colors
     val view by remember(pane.paneId) { vm.chatView(pane.paneId) }.collectAsState()
     val connected by vm.connected.collectAsState()
+    val limits by vm.limits.collectAsState()
+    val now = rememberNow()
     val repoTree by vm.repoTree.collectAsState()
     var draft by rememberSaveable(pane.paneId) { mutableStateOf("") }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -79,6 +81,7 @@ fun ChatScreen(
                 onBack = onExit,
                 toggleLabel = ">_ terminal",
                 onToggle = onTerminal,
+                usage = pane.context, limits = limits, now = now,
             )
             TasksStrip(view.tasks) { showTasks = true }
             if (!pane.chat) UnavailableBanner(onTerminal)

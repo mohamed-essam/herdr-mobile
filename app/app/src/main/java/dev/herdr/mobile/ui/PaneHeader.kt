@@ -17,13 +17,16 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.herdr.mobile.ui.theme.Herdr
+import dev.herdr.mobile.net.Limits
+import dev.herdr.mobile.net.PaneUsage
 import dev.herdr.mobile.ui.theme.HerdrRadius
 import dev.herdr.mobile.ui.theme.HerdrType
 
 /**
  * The timeline header shared by chat and terminal: back, a chat/terminal
  * toggle on the right, then the workspace badge + large title and a mono
- * breadcrumb that ends in the live status ("… › claude · working").
+ * breadcrumb that ends in the live status ("… › claude · working"), then
+ * the usage line (context and 5h/7d limits) when there is anything to show.
  */
 @Composable
 fun PaneHeader(
@@ -34,6 +37,9 @@ fun PaneHeader(
     onBack: () -> Unit,
     toggleLabel: String?,
     onToggle: () -> Unit,
+    usage: PaneUsage? = null,
+    limits: Limits? = null,
+    now: Long = 0L,
     modifier: Modifier = Modifier,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
@@ -85,6 +91,7 @@ fun PaneHeader(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            UsageLine(usage, limits, now)
         }
         HorizontalDivider(color = c.base, thickness = 1.dp)
     }

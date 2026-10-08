@@ -58,6 +58,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onChat: (() -> Unit)? = null) {
     val connected by vm.connected.collectAsState()
+    val limits by vm.limits.collectAsState()
+    val now = rememberNow()
     var termId by remember { mutableStateOf<String?>(null) }
     var session by remember { mutableStateOf<RemoteTerminalSession?>(null) }
     var view by remember { mutableStateOf<TerminalView?>(null) }
@@ -215,6 +217,7 @@ fun TerminalScreen(vm: DashboardViewModel, pane: Pane, onExit: () -> Unit, onCha
                 onBack = { hideKeyboard(); onExit() },
                 toggleLabel = if (onChat != null) "chat" else null,
                 onToggle = { hideKeyboard(); onChat?.invoke() },
+                usage = pane.context, limits = limits, now = now,
             )
         },
     ) { pad ->

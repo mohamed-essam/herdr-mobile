@@ -127,6 +127,7 @@ fun DashboardScreen(
     val tree by vm.tree.collectAsState()
     val lastOpened by vm.lastOpenedPaneId.collectAsState()
     val disconnectedSince by vm.disconnectedSince.collectAsState()
+    val limits by vm.limits.collectAsState()
     val now by produceState(System.currentTimeMillis(), connected) {
         while (true) {
             value = System.currentTimeMillis()
@@ -192,6 +193,11 @@ fun DashboardScreen(
                         ReconnectBanner(staleLabel(disconnectedSince ?: now, now))
                     }
                     item(key = "stats") { StatTiles(counts, dim) }
+                    limits?.let { l ->
+                        if (limitWindows(l).isNotEmpty()) item(key = "limits") {
+                            LimitsStrip(l, now, dim.padding(bottom = 16.dp))
+                        }
+                    }
                     if (sections.needsYou.isNotEmpty() || resumed.isNotEmpty()) {
                         item(key = "h:needs") {
                             SectionHeader("● needs you · ${sections.needsYou.size}", c.red, dim)
@@ -402,7 +408,7 @@ private fun StatTiles(counts: StatusCounts, modifier: Modifier) {
     val c = Herdr.colors
     val dark = isSystemInDarkTheme()
     Row(
-        modifier.padding(start = 16.dp, end = 16.dp, bottom = 24.dp).fillMaxWidth(),
+        modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp).fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         for ((n, status) in listOf(counts.blocked to "blocked", counts.working to "working", counts.done to "done")) {
@@ -615,6 +621,7 @@ private fun PaneListRow(ctx: PaneContext, ageColor: Color, now: Long, onOpen: (P
                 Text(sub, style = HerdrType.meta, color = c.subtext1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 bgBadge(pane)?.let { BgChip(it) }
             }
+            pane.context?.let { ContextBar(it.percent, Modifier.padding(top = 4.dp)) }
         }
         val age = relativeAge(pane.activity?.ts ?: 0, now)
         if (age.isNotEmpty()) {
