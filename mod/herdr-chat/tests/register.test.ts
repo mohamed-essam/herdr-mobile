@@ -5,7 +5,7 @@ import { eventsFromTranscript } from '../hooks/transcript'
 import { linkSpawn, newAgentsState, recordWorkflow } from '../hooks/agents'
 import { taskFromLaunch } from '../hooks/tasks'
 
-const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], imageQueue: [], offline: false, inFlight: false, building: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined, historyLacksPath: false, openQuestions: new Map(), agents: newAgentsState(), tasks: new Map(), tasksQueued: false, threadQueue: [], threads: true, threadsMissed: false, usage: null })
+const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], imageQueue: [], offline: false, inFlight: false, building: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined, historyLacksPath: false, openQuestions: new Map(), agents: newAgentsState(), tasks: new Map(), tasksQueued: false, threadQueue: [], threads: true, threadsMissed: false, usage: null, usageGen: 0 })
 
 const MB = 1024 * 1024
 const FETCH_BODY_LIMIT = 4 * MB
@@ -129,7 +129,8 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
   on('classic.Stop', () => ({}))
   on('session.id', () => ({ value: current.id }))
   on('session.measure', (_, e) => ({ changed: e.changed }))
-  if (opts.usage !== undefined) on('session.usage', () => ({ value: opts.usage as never }))
+  // `usage`: what session.usage answers, or a function giving each answer.
+  if (opts.usage !== undefined) on('session.usage', () => (typeof opts.usage === 'function' ? opts.usage() : { value: opts.usage as never }))
   const counts = { messages: 0 }
   on('session.messages', () => { counts.messages++; return { value: current.history as never } })
   on('http.fetch', ($, e) => {
@@ -198,9 +199,15 @@ const imageRow = (uuid: string, data: string) =>
 
 const start = ($: any) => $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
 
+const measure = ($: any) => $.session.measure({
+  context: { tokens: 160000, window: 200000, percent: 80 },
+  rateLimits: [{ kind: 'seven_day', percentUsed: 30 }],
+  changed: ['context', 'rateLimits'],
+})
+
 describe('herdr-chat', () => {
   const USAGE = {
-    startedAt: 0,
+    startedAt: 1234,
     context: { tokens: 50000, window: 200000, percent: 25 },
     rateLimits: [{ kind: 'five_hour', percentUsed: 10, resetsAt: '2026-10-08T19:40:00Z' }],
   }
@@ -213,21 +220,82 @@ describe('herdr-chat', () => {
     expect(last.usage).toEqual({
       context: { percent: 25, tokens: 50000, window: 200000 },
       limits: [{ kind: 'five_hour', percentUsed: 10, resetsAt: '2026-10-08T19:40:00Z' }],
+      limitsAt: 1234,
     })
+  })
+
+  test('heartbeats held while the history builds carry the seeded usage', async ($, on) => {
+    const w = world(on, { usage: USAGE })
+    w.files['/t/p1.jsonl'] = TRANSCRIPT
+    await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/p1.jsonl' })
+    await start($)
+    const release = w.holdReads()
+    await w.clock.advance(1000) // the read starts and blocks
+    await w.clock.advance(1000)
+    await w.clock.advance(1000)
+    expect(w.syncs.length).toBe(3)
+    for (const s of w.syncs.slice(1) as any[]) {
+      expect(s.events).toEqual([])
+      expect(s.usage?.limitsAt).toBe(1234)
+    }
+    release()
+    await w.clock.settle()
   })
 
   test('session.measure replaces the reading', async ($, on) => {
     const w = world(on, { usage: USAGE })
     await start($)
     await w.clock.advance(2000)
-    await $.session.measure({
-      context: { tokens: 160000, window: 200000, percent: 80 },
-      rateLimits: [{ kind: 'seven_day', percentUsed: 30 }],
-      changed: ['context', 'rateLimits'],
-    })
+    const at = w.clock.now()
+    await measure($)
     await w.clock.advance(1000)
     const last = w.syncs[w.syncs.length - 1] as any
-    expect(last.usage).toEqual({ context: { percent: 80, tokens: 160000, window: 200000 }, limits: [{ kind: 'seven_day', percentUsed: 30 }] })
+    expect(last.usage).toEqual({ context: { percent: 80, tokens: 160000, window: 200000 }, limits: [{ kind: 'seven_day', percentUsed: 30 }], limitsAt: at })
+  })
+
+  test('a seed resolving after a measure does not overwrite it', async ($, on) => {
+    let release = () => {}
+    const w = world(on, { usage: () => new Promise(r => { release = () => r({ value: USAGE as never }) }) })
+    await start($)
+    await w.clock.advance(1000) // the resync's seed is in flight
+    const at = w.clock.now()
+    await measure($)
+    release()
+    await w.clock.advance(2000)
+    const last = w.syncs[w.syncs.length - 1] as any
+    expect(last.usage).toEqual({ context: { percent: 80, tokens: 160000, window: 200000 }, limits: [{ kind: 'seven_day', percentUsed: 30 }], limitsAt: at })
+  })
+
+  test('/clear drops the context but keeps the limits', async ($, on) => {
+    let seeds = 0
+    // The second (post-/clear) seed never answers.
+    const w = world(on, { usage: () => (++seeds > 1 ? new Promise(() => {}) : { value: USAGE as never }) })
+    on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+    await start($)
+    await w.clock.advance(2000)
+    const at = w.clock.now()
+    await measure($)
+    await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+    await w.clock.advance(1000)
+    const cleared = w.syncs[w.syncs.length - 1] as any
+    expect(cleared.usage).toEqual({ limits: [{ kind: 'seven_day', percentUsed: 30 }], limitsAt: at })
+  })
+
+  test('/clear: the resync seed fills the new context, keeping the held stamp', async ($, on) => {
+    const w = world(on, { usage: USAGE })
+    on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+    await start($)
+    await w.clock.advance(2000)
+    const at = w.clock.now()
+    await measure($)
+    await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+    await w.clock.advance(3000)
+    const last = w.syncs[w.syncs.length - 1] as any
+    expect(last.usage).toEqual({
+      context: { percent: 25, tokens: 50000, window: 200000 },
+      limits: [{ kind: 'five_hour', percentUsed: 10, resetsAt: '2026-10-08T19:40:00Z' }],
+      limitsAt: at,
+    })
   })
 
   test('no usage hook: syncs carry no usage', async ($, on) => {

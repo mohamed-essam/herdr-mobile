@@ -2,10 +2,13 @@
 // `usage` field): the live context window's fill and the account's 5-hour
 // and 7-day rate-limit windows. A gateway's spend_limit is not carried.
 export type UsageWindow = { kind: 'five_hour' | 'seven_day'; percentUsed: number; resetsAt?: string }
-export type Usage = {
+export type Reading = {
   context?: { percent: number; tokens?: number; window: number }
   limits: UsageWindow[]
 }
+// `limitsAt`: when the limits were measured (epoch ms), so the companion keeps
+// the newest measurement across panes rather than the last one sent.
+export type Usage = Reading & { limitsAt: number }
 
 type Measured = {
   context?: { tokens?: number; window: number; percent?: number }
@@ -13,13 +16,14 @@ type Measured = {
 } | null | undefined
 
 // `$.session.usage()`'s answer or a `session.measure` event, as sent. Null
-// when there is nothing to read (an engine without the op).
-export function toUsage(u: Measured): Usage | null {
+// when there is nothing to read (an engine without the op). The context
+// figures are rounded: the companion takes integers. The caller stamps it.
+export function toUsage(u: Measured): Reading | null {
   if (!u) return null
-  const out: Usage = { limits: [] }
+  const out: Reading = { limits: [] }
   const c = u.context
   if (c && typeof c.percent === 'number') {
-    out.context = { percent: c.percent, ...(typeof c.tokens === 'number' ? { tokens: c.tokens } : {}), window: c.window }
+    out.context = { percent: Math.round(c.percent), ...(typeof c.tokens === 'number' ? { tokens: Math.round(c.tokens) } : {}), window: Math.round(c.window) }
   }
   for (const r of u.rateLimits ?? []) {
     if (r.kind !== 'five_hour' && r.kind !== 'seven_day') continue

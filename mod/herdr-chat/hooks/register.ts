@@ -92,6 +92,9 @@ export type State = {
   // The latest status-line figures (session.measure, seeded by
   // $.session.usage() at each resync); sent on every /sync while set.
   usage: Usage | null
+  // Bumped by every session.measure and /clear or /resume reset: a seed
+  // whose read spans a bump is stale and is dropped.
+  usageGen: number
 }
 
 export type QueuedImage = { id: string; img: ChatImage; bytes: number }
@@ -290,12 +293,17 @@ function resync($: EngineInterface, s: State) {
   void buildHistory($, s)
 }
 
-// Reads the status line's figures once; a session.measure that landed
-// meanwhile is newer and wins. An engine without the op leaves usage unset.
+// Reads the status line's figures once; a session.measure or reset that
+// landed meanwhile wins. An engine without the op leaves usage unset. The
+// seed has no stamp of its own: the held one, else the session's start (a
+// lower bound on the reading's age).
 async function seedUsage($: EngineInterface, s: State) {
+  const gen = s.usageGen
   try {
-    const u = toUsage(await $.session.usage())
-    if (!s.usage) s.usage = u
+    const raw = await $.session.usage()
+    const u = toUsage(raw)
+    if (s.usageGen !== gen || !u) return
+    s.usage = { ...u, limitsAt: s.usage?.limitsAt ?? raw.startedAt }
   } catch {
     // the next session.measure fills it
   }
@@ -774,6 +782,7 @@ export const register: Register = on => {
     threads: false,
     threadsMissed: false,
     usage: null,
+    usageGen: 0,
   }
 
   // Only remembers the path; the read happens at the next resync.
@@ -826,7 +835,10 @@ export const register: Register = on => {
       s.pending = []
       s.imageQueue = []
       s.threadQueue = []
-      s.usage = null
+      // The old session's context goes (a usage without one clears it in
+      // the companion); the account's limits stay.
+      s.usage = s.usage ? { limits: s.usage.limits, limitsAt: s.usage.limitsAt } : null
+      s.usageGen++
       s.needResync = true
       // The new session's transcript is found by its new id at the resync, or
       // named by its own classic event (whose arrival upgrades an api-form
@@ -846,7 +858,10 @@ export const register: Register = on => {
   })
 
   on('session.measure', async ($, e, next) => {
-    s.usage = toUsage(e)
+    // Every measure follows an API response: its limits are measured now.
+    const u = toUsage(e)
+    s.usage = u ? { ...u, limitsAt: await $.clock.now() } : null
+    s.usageGen++
     return next(e)
   })
 

@@ -23,6 +23,13 @@ describe('toUsage', () => {
     expect(toUsage({ context: { window: 200000 }, rateLimits: [] })).toEqual({ limits: [] })
   })
 
+  test('rounds the context figures (the companion takes integers)', () => {
+    expect(toUsage({ context: { tokens: 122000.4, window: 200000, percent: 61.6 }, rateLimits: [] })).toEqual({
+      context: { percent: 62, tokens: 122000, window: 200000 },
+      limits: [],
+    })
+  })
+
   test('nothing to read: null', () => {
     expect(toUsage(undefined)).toBeNull()
     expect(toUsage(null)).toBeNull()
