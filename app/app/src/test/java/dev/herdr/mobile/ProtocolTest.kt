@@ -453,4 +453,19 @@ class ProtocolTest {
         assertFalse(ClientMsg.chatHistory("r", "p", 1, 5, 300).contains("agentId"))
         assertTrue(ClientMsg.chatHistory("r", "p", 1, 5, 300, "aa1").contains(""""agentId":"aa1""""))
     }
+
+    @Test fun parsesPaneContext() {
+        val p = (parseServerFrame("""{"t":"pane_update","pane":{"paneId":"w1:p1","context":{"percent":61,"tokens":122000,"window":200000}}}""") as ServerFrame.PaneUpdate).pane
+        assertEquals(PaneUsage(61, 122000, 200000), p.context)
+        val q = (parseServerFrame("""{"t":"pane_update","pane":{"paneId":"w1:p2"}}""") as ServerFrame.PaneUpdate).pane
+        assertNull(q.context)
+    }
+
+    @Test fun parsesLimitsFrame() {
+        val f = parseServerFrame("""{"t":"limits","limits":[{"kind":"five_hour","percentUsed":42.5,"resetsAt":"2026-10-08T19:40:00Z"},{"kind":"seven_day","percentUsed":18}],"observedAt":77}""")
+        val l = (f as ServerFrame.LimitsFrame).limits
+        assertEquals(77L, l.observedAt)
+        assertEquals(LimitWindow("five_hour", 42.5, "2026-10-08T19:40:00Z"), l.windows[0])
+        assertNull(l.windows[1].resetsAt)
+    }
 }

@@ -22,6 +22,8 @@ data class Pane(
     val ask: PaneAsk? = null,
     /** Background tasks (shells, agents, workflows, monitors) still running; 0 when none. */
     val bgRunning: Int = 0,
+    /** The Claude session's context-window fill; null when no herdr-chat mod is live. */
+    val context: PaneUsage? = null,
 )
 
 /**
@@ -45,6 +47,25 @@ data class PaneAsk(
     /** [questions] parsed like a chat question event's. */
     val items: List<QuestionItem> get() = questions.mapNotNull(::parseQuestionItem)
 }
+
+/** A session's context window: [percent] of [window] tokens used ([tokens] when known, else 0). */
+@Serializable
+data class PaneUsage(
+    val percent: Int = 0,
+    val tokens: Long = 0,
+    val window: Long = 0,
+)
+
+/** One rate-limit window: [kind] "five_hour" or "seven_day"; [resetsAt] ISO 8601 or null. */
+@Serializable
+data class LimitWindow(
+    val kind: String = "",
+    val percentUsed: Double = 0.0,
+    val resetsAt: String? = null,
+)
+
+/** The account's rate-limit reading and when a mod last reported it (epoch ms). */
+data class Limits(val windows: List<LimitWindow>, val observedAt: Long)
 
 @Serializable
 data class Worktree(
@@ -289,6 +310,7 @@ sealed interface ServerFrame {
     data class Tabs(val tabs: List<Tab>) : ServerFrame
     data class PaneUpdate(val pane: Pane) : ServerFrame
     data class PaneRemoved(val paneId: String) : ServerFrame
+    data class LimitsFrame(val limits: Limits) : ServerFrame
     data class PaneRead(val reqId: String, val paneId: String, val source: String, val text: String) : ServerFrame
     data class Ack(val reqId: String) : ServerFrame
     data class ErrorFrame(val reqId: String, val code: String, val message: String) : ServerFrame
@@ -313,6 +335,9 @@ fun parseServerFrame(text: String): ServerFrame {
         "tabs" -> ServerFrame.Tabs(json.decodeFromJsonElement(obj["tabs"]!!))
         "pane_update" -> ServerFrame.PaneUpdate(json.decodeFromJsonElement(obj["pane"]!!))
         "pane_removed" -> ServerFrame.PaneRemoved(obj["paneId"]!!.jsonPrimitive.content)
+        "limits" -> ServerFrame.LimitsFrame(Limits(
+            (obj["limits"] as? JsonArray)?.map { json.decodeFromJsonElement<LimitWindow>(it) } ?: emptyList(),
+            obj["observedAt"]?.jsonPrimitive?.longOrNull ?: 0L))
         "pane_read" -> ServerFrame.PaneRead(
             obj["reqId"]!!.jsonPrimitive.content, obj["paneId"]!!.jsonPrimitive.content,
             obj["source"]!!.jsonPrimitive.content, obj["text"]!!.jsonPrimitive.content)

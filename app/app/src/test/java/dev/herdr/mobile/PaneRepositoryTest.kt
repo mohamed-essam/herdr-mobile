@@ -33,4 +33,14 @@ class PaneRepositoryTest {
         assertEquals("omega3", repo.workspaces.value.single().label)
         assertEquals("w7:t1", repo.tabs.value.single().tabId)
     }
+
+    @Test fun keepsLatestLimits() {
+        val repo = PaneRepository()
+        assertNull(repo.limits.value)
+        val l = Limits(listOf(LimitWindow("five_hour", 42.0, null)), 5)
+        repo.onFrame(ServerFrame.LimitsFrame(l))
+        assertEquals(l, repo.limits.value)
+        repo.onFrame(ServerFrame.Panes(emptyList())) // a reconnect's snapshot keeps it
+        assertEquals(l, repo.limits.value)
+    }
 }

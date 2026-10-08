@@ -1,5 +1,6 @@
 package dev.herdr.mobile.data
 
+import dev.herdr.mobile.net.Limits
 import dev.herdr.mobile.net.Pane
 import dev.herdr.mobile.net.ServerFrame
 import dev.herdr.mobile.net.Tab
@@ -16,6 +17,9 @@ class PaneRepository {
     val workspaces: StateFlow<List<Workspace>> = _workspaces.asStateFlow()
     private val _tabs = MutableStateFlow<List<Tab>>(emptyList())
     val tabs: StateFlow<List<Tab>> = _tabs.asStateFlow()
+    private val _limits = MutableStateFlow<Limits?>(null)
+    /** The latest rate-limit reading; null until the companion sends one. */
+    val limits: StateFlow<Limits?> = _limits.asStateFlow()
 
     fun onFrame(frame: ServerFrame) {
         when (frame) {
@@ -27,6 +31,7 @@ class PaneRepository {
             is ServerFrame.PaneRemoved -> map.remove(frame.paneId)
             is ServerFrame.Workspaces -> { _workspaces.value = frame.workspaces; return }
             is ServerFrame.Tabs -> { _tabs.value = frame.tabs; return }
+            is ServerFrame.LimitsFrame -> { _limits.value = frame.limits; return }
             else -> return
         }
         _panes.value = map.values.sortedWith(comparator)
