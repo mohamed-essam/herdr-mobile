@@ -2,6 +2,7 @@ package dev.herdr.mobile.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.herdr.mobile.data.ChatDrafts
 import dev.herdr.mobile.data.ChatKey
 import dev.herdr.mobile.data.ChatRepository
 import dev.herdr.mobile.data.ChatView
@@ -81,6 +82,8 @@ class DashboardViewModel(
     }
     fun closeChat(paneId: String, agentId: String? = null) = chat.close(ChatKey(paneId, agentId))
     fun sendChat(paneId: String, text: String) { viewModelScope.launch { chat.send(paneId, text) } }
+    /** Unsent composer text per pane, kept while the app runs. */
+    val drafts = ChatDrafts()
     fun retryChat(paneId: String, pendingId: String) { viewModelScope.launch { chat.retry(paneId, pendingId) } }
     fun expireChat() = chat.expirePending()
     /** Esc to the pane, the way the terminal interrupts a working agent. */

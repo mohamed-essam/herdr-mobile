@@ -276,6 +276,20 @@ private fun EventRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        is ChatEvent.CommandOutput -> GutterRow(time(ev.ts), top, spacing = 4.dp) {
+            if (item.head) SpeakerLabel("you", c.mauve)
+            Column(
+                Modifier.fillMaxWidth().clip(HerdrRadius.tile).background(c.base).padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(ev.command, style = HerdrType.code, color = c.mauve, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (ev.text.isNotBlank()) {
+                    SelectionContainer {
+                        Text(ev.text.trimEnd(), style = HerdrType.code, color = if (ev.isError) c.red else c.subtext1, maxLines = 20, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        }
         is ChatEvent.ToolUse, is ChatEvent.ToolResult -> {}
     }
 }

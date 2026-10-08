@@ -57,6 +57,7 @@ class ChatRepository(
             is ServerFrame.ChatHistoryPage -> ChatKey(f.paneId, f.agentId)
             is ServerFrame.ChatAgent -> ChatKey(f.paneId)
             is ServerFrame.ChatTasks -> ChatKey(f.paneId)
+            is ServerFrame.ChatCommands -> ChatKey(f.paneId)
             is ServerFrame.ChatImageData -> return onImage(f)
             else -> return
         }

@@ -122,6 +122,11 @@ sealed interface ChatEvent {
     ) : ChatEvent
     /** A background task finished (Claude Code's task-notification). */
     data class TaskNotice(val uuid: String, val status: String, val summary: String, val ts: Long? = null) : ChatEvent
+    /**
+     * A slash command sent from the phone ran: [command] as run (`/name args`)
+     * and what it printed ([text], empty when nothing), or why it was refused ([isError]).
+     */
+    data class CommandOutput(val uuid: String, val command: String, val text: String, val isError: Boolean = false, val ts: Long? = null) : ChatEvent
     /** An AskUserQuestion call; may repeat (e.g. after a resync), so key it by [toolUseId]. */
     data class Question(val uuid: String, val toolUseId: String, val questions: List<QuestionItem>, val ts: Long? = null) : ChatEvent
 }
@@ -252,6 +257,19 @@ private fun JsonObject.agentsOrNull(k: String): List<AgentSummary>? =
 private fun JsonObject.tasksOrNull(k: String): List<BgTask>? =
     (this[k] as? JsonArray)?.mapNotNull(::parseBgTask)
 
+/** One of the session's slash commands, as the composer's picker lists it. */
+data class SlashCommand(val name: String, val description: String, val source: String)
+
+private fun parseSlashCommand(el: JsonElement): SlashCommand? {
+    val o = el as? JsonObject ?: return null
+    val name = o.strOrNull("name")?.takeIf { it.isNotEmpty() } ?: return null
+    return SlashCommand(name, o.strOrNull("description") ?: "", o.strOrNull("source") ?: "")
+}
+
+/** Null when [k] isn't an array: a mod that sent no list (no picker). */
+private fun JsonObject.commandsOrNull(k: String): List<SlashCommand>? =
+    (this[k] as? JsonArray)?.mapNotNull(::parseSlashCommand)
+
 /** Null for an event type this app version doesn't know (skipped, not an error). */
 fun parseChatEvent(o: JsonObject): ChatEvent? {
     fun s(k: String) = o.str(k)
@@ -261,6 +279,7 @@ fun parseChatEvent(o: JsonObject): ChatEvent? {
         "assistant_text" -> ChatEvent.AssistantText(s("uuid"), s("text"), ts)
         "tool_use" -> ChatEvent.ToolUse(s("uuid"), s("toolUseId"), s("tool"), s("summary"), ts)
         "task_notice" -> ChatEvent.TaskNotice(s("uuid"), s("status"), s("summary"), ts)
+        "command_output" -> ChatEvent.CommandOutput(s("uuid"), s("command"), s("text"), o.bool("isError"), ts)
         "tool_result" -> ChatEvent.ToolResult(s("toolUseId"), o.bool("isError"), s("preview"), o.strings("images"), ts, o.imageSizes())
         "question" -> ChatEvent.Question(
             s("uuid"), s("toolUseId"),
@@ -284,12 +303,14 @@ sealed interface ServerFrame {
      * [maxSeq]: the highest seq among all its events, including ones of an unknown type (left out of [entries]).
      * [agentId] is set for a thread's snapshot; [missing] says the companion doesn't know that thread.
      * [agents] and [tasks] come with the main stream's snapshot; null means not sent (distinct from empty).
+     * [commands] too, from a mod that lists them.
      */
     data class ChatSnapshot(
         val paneId: String, val epoch: Int, val state: String, val entries: List<ChatEntry>,
         val hasMore: Boolean = false, val maxSeq: Int = 0,
         val agentId: String? = null, val missing: Boolean = false,
         val agents: List<AgentSummary>? = null, val tasks: List<BgTask>? = null,
+        val commands: List<SlashCommand>? = null,
     ) : ServerFrame
     /** A [stale] page (the epoch moved on) carries no entries and hasMore false. */
     data class ChatHistoryPage(val reqId: String, val paneId: String, val epoch: Int, val entries: List<ChatEntry>, val hasMore: Boolean, val stale: Boolean = false, val agentId: String? = null) : ServerFrame
@@ -302,6 +323,8 @@ sealed interface ServerFrame {
     data class ChatAgent(val paneId: String, val agent: AgentSummary?, val removedId: String?) : ServerFrame
     /** The pane's background tasks, replacing the previous list. */
     data class ChatTasks(val paneId: String, val tasks: List<BgTask>) : ServerFrame
+    /** The session's slash commands, replacing the previous list. */
+    data class ChatCommands(val paneId: String, val commands: List<SlashCommand>) : ServerFrame
     data class ChatState(val paneId: String, val state: String) : ServerFrame
     data class ChatSendResult(val reqId: String, val ok: Boolean, val error: String?) : ServerFrame
     data object Welcome : ServerFrame
@@ -381,7 +404,7 @@ fun parseServerFrame(text: String): ServerFrame {
             obj.bool("hasMore"),
             maxSeq(obj["events"] as? JsonArray),
             obj.strOrNull("agentId"), obj.bool("missing"),
-            obj.agentsOrNull("agents"), obj.tasksOrNull("tasks"))
+            obj.agentsOrNull("agents"), obj.tasksOrNull("tasks"), obj.commandsOrNull("commands"))
         "chat_history_page" -> ServerFrame.ChatHistoryPage(
             obj.str("reqId"), obj.str("paneId"),
             obj["epoch"]?.jsonPrimitive?.intOrNull ?: 0,
@@ -401,6 +424,7 @@ fun parseServerFrame(text: String): ServerFrame {
             obj["agent"]?.let(::parseAgentSummary),
             if (obj.bool("removed")) obj.strOrNull("agentId") else null)
         "chat_tasks" -> ServerFrame.ChatTasks(obj.str("paneId"), obj.tasksOrNull("tasks") ?: emptyList())
+        "chat_commands" -> ServerFrame.ChatCommands(obj.str("paneId"), obj.commandsOrNull("commands") ?: emptyList())
         "chat_state" -> ServerFrame.ChatState(
             obj["paneId"]?.jsonPrimitive?.content ?: "",
             obj["state"]?.jsonPrimitive?.contentOrNull ?: "idle")

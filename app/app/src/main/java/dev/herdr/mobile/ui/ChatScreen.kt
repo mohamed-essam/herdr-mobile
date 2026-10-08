@@ -17,9 +17,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.herdr.mobile.data.slashMatches
 import dev.herdr.mobile.net.Pane
+import dev.herdr.mobile.net.SlashCommand
 import dev.herdr.mobile.ui.theme.Herdr
 import dev.herdr.mobile.ui.theme.HerdrRadius
 import dev.herdr.mobile.ui.theme.HerdrType
@@ -46,7 +52,14 @@ fun ChatScreen(
     val limits by vm.limits.collectAsState()
     val now = rememberNow()
     val repoTree by vm.repoTree.collectAsState()
-    var draft by rememberSaveable(pane.paneId) { mutableStateOf("") }
+    // Backed by the view model, so leaving the pane (or flipping to the
+    // terminal) keeps it; the field's own state keeps the cursor.
+    var field by remember(pane.paneId) { vm.drafts[pane.paneId].let { mutableStateOf(TextFieldValue(it, TextRange(it.length))) } }
+    fun setField(v: TextFieldValue) {
+        field = v
+        vm.drafts[pane.paneId] = v.text
+    }
+    val draft = field.text
     val snackbarHostState = remember { SnackbarHostState() }
     var showTasks by rememberSaveable(pane.paneId) { mutableStateOf(false) }
     var scrollToToolUse by remember { mutableStateOf<String?>(null) }
@@ -64,6 +77,14 @@ fun ChatScreen(
     val agent = pane.agent?.takeIf { it.isNotBlank() } ?: "claude"
     val working = view.state == "working"
     val asking = remember(view.entries, view.answered) { pendingQuestion(view.entries, view.answered) }
+    // Minimized, the sheet folds to a bar so the chat can be read at full size;
+    // the picks made so far wait for it. A new question opens expanded.
+    var askMinimized by rememberSaveable(asking?.toolUseId) { mutableStateOf(false) }
+    var askInputs by remember(asking?.toolUseId, asking?.questions?.size) {
+        mutableStateOf(List(asking?.questions?.size ?: 0) { QuestionInput() })
+    }
+    val sheetOpen = asking != null && !askMinimized
+    val matches = remember(draft, view.commands) { slashMatches(draft, view.commands) }
     val status = chatStatus(connected, view.state, asking != null && asking.toolUseId !in view.answering)
     val statusColor = when (status.kind) {
         ChatStatusKind.Waiting -> c.red
@@ -99,25 +120,41 @@ fun ChatScreen(
                         listState = listState,
                         readOnly = false,
                         onOpenThread = onOpenThread,
-                        modifier = Modifier.weight(1f).fillMaxWidth().alpha(if (asking != null) 0.45f else 1f),
+                        modifier = Modifier.weight(1f).fillMaxWidth().alpha(if (sheetOpen) 0.45f else 1f),
                         scrollToToolUse = scrollToToolUse,
                         onScrolledToToolUse = { scrollToToolUse = null },
                     )
-                    if (asking != null) {
+                    if (asking != null && !askMinimized) {
                         QuestionSheet(
                             asking,
                             agent = agent,
                             enabled = connected && pane.chat,
                             sending = asking.toolUseId in view.answering,
+                            inputs = askInputs,
+                            onInputs = { askInputs = it },
+                            onMinimize = { askMinimized = true },
                             modifier = Modifier.heightIn(max = sheetMax),
                         ) { vm.answerChat(pane.paneId, asking.toolUseId, it) }
+                    } else if (asking != null) {
+                        QuestionBar(
+                            agent = agent,
+                            count = asking.questions.size,
+                            sending = asking.toolUseId in view.answering,
+                            onExpand = { askMinimized = false },
+                        )
                     } else {
+                        if (!matches.isNullOrEmpty() && pane.chat) {
+                            SlashPicker(matches, Modifier.heightIn(max = sheetMax * 0.5f)) {
+                                val text = "/${it.name} "
+                                setField(TextFieldValue(text, TextRange(text.length)))
+                            }
+                        }
                         Composer(
-                            draft = draft,
-                            onDraft = { draft = it },
+                            field = field,
+                            onField = ::setField,
                             placeholder = if (working) "Queue a message…" else "Message $agent…",
                             canSend = connected && pane.chat && draft.isNotBlank(),
-                            onSend = { vm.sendChat(pane.paneId, draft); draft = "" },
+                            onSend = { vm.sendChat(pane.paneId, draft); setField(TextFieldValue()) },
                             interrupt = if (working) ({ vm.interruptChat(pane.paneId) }) else null,
                             interruptEnabled = connected,
                         )
@@ -165,10 +202,59 @@ private fun UnavailableBanner(onTerminal: () -> Unit) {
  * Interrupt (esc to the pane) while the agent works. With a draft, Interrupt
  * shrinks to its keycap to leave the field room.
  */
+/**
+ * The session's slash commands matching what's typed after "/", above the
+ * composer: a tap fills in `/name ` for the arguments.
+ */
+@Composable
+private fun SlashPicker(commands: List<SlashCommand>, modifier: Modifier = Modifier, onPick: (SlashCommand) -> Unit) {
+    val c = Herdr.colors
+    LazyColumn(
+        modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 8.dp).clip(HerdrRadius.tile).background(c.base),
+    ) {
+        items(commands, key = { it.name }) { cmd ->
+            Column(
+                Modifier.fillMaxWidth().clickable { onPick(cmd) }.padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("/${cmd.name}", style = HerdrType.code, color = c.mauve, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    if (cmd.source.isNotEmpty() && cmd.source != "builtin") {
+                        Spacer(Modifier.width(8.dp))
+                        Text(cmd.source, style = HerdrType.meta, color = c.overlay2)
+                    }
+                }
+                if (cmd.description.isNotEmpty()) {
+                    Text(cmd.description, style = HerdrType.small, color = c.overlay2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+/** A minimized question: one bar where the composer was; a tap brings the sheet back. */
+@Composable
+private fun QuestionBar(agent: String, count: Int, sending: Boolean, onExpand: () -> Unit) {
+    val c = Herdr.colors
+    Row(
+        Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 12.dp)
+            .clip(HerdrRadius.tile).background(c.red.copy(alpha = 0.12f)).clickable(onClick = onExpand)
+            .heightIn(min = 48.dp).padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            if (sending) "● sending answer…" else "● $agent asks" + if (count > 1) " · $count questions" else "",
+            style = HerdrType.button, color = c.red, modifier = Modifier.weight(1f),
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+        Text("Answer ▴", style = HerdrType.button, color = c.mauve)
+    }
+}
+
 @Composable
 private fun Composer(
-    draft: String,
-    onDraft: (String) -> Unit,
+    field: TextFieldValue,
+    onField: (TextFieldValue) -> Unit,
     placeholder: String,
     canSend: Boolean,
     onSend: () -> Unit,
@@ -176,14 +262,15 @@ private fun Composer(
     interruptEnabled: Boolean,
 ) {
     val c = Herdr.colors
+    val draft = field.text
     Row(
         Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         BasicTextField(
-            value = draft,
-            onValueChange = onDraft,
+            value = field,
+            onValueChange = onField,
             maxLines = 5,
             textStyle = HerdrType.body.copy(color = c.text),
             cursorBrush = SolidColor(c.mauve),
