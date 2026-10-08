@@ -36,11 +36,13 @@ class SlashCommandsTest {
         assertEquals(cmds.take(1), v.commands)
     }
 
-    @Test fun commandOutputConfirmsThePendingSlashMessage() {
+    @Test fun theEnginesEchoConfirmsThePendingSlashMessageNotItsOutput() {
         var v = ChatReducer.onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", emptyList()), 0)
         v = ChatReducer.addPending(v, "m1", "/compact   keep the plan ", 0)
-        v = ChatReducer.onFrame(v, ServerFrame.ChatEventFrame("p", 1, ChatEntry(1, ChatEvent.CommandOutput("cmd-m1", "/compact keep the plan", ""))), 0)
-        assertTrue(v.pending.isEmpty())
+        v = ChatReducer.addPending(v, "m2", "/compact keep the plan", 0)
+        v = ChatReducer.onFrame(v, ServerFrame.ChatEventFrame("p", 1, ChatEntry(1, ChatEvent.UserText("u1", "/compact keep the plan"))), 0)
+        v = ChatReducer.onFrame(v, ServerFrame.ChatEventFrame("p", 1, ChatEntry(2, ChatEvent.CommandOutput("cmd-m1", "/compact keep the plan", "Compacted"))), 0)
+        assertEquals(listOf("m2"), v.pending.map { it.id })
     }
 
     @Test fun pickerOpensOnlyWhileTypingTheName() {

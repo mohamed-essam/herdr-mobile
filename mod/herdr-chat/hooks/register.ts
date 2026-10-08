@@ -598,15 +598,16 @@ async function refreshCommands($: EngineInterface, s: State) {
   s.pending.push({ type: 'commands', commands: list })
 }
 
-// Runs a phone message naming a command as that command; its output (or an
-// empty row, for one that prints nothing as text) goes into the chat; so does
-// the reason the engine refused a run (the command went away meanwhile).
+// Runs a phone message naming a command as that command. The engine records
+// the command itself as a user row (the chat's echo); what it printed, if
+// anything, goes into the chat after it, and so does the reason the engine
+// refused a run (the command went away meanwhile).
 async function runCommand($: EngineInterface, s: State, m: { id: string; text: string }, slash: { command: string; args: string }) {
   const command = slash.args ? `/${slash.command} ${slash.args}` : `/${slash.command}`
   const row = { type: 'command_output' as const, uuid: `cmd-${m.id}`, command }
   try {
     const text = (await $.command.run({ command: slash.command, args: slash.args })).text ?? ''
-    s.pending.push({ ...row, text: cap(text), ts: Date.now() })
+    if (text.trim()) s.pending.push({ ...row, text: cap(text), ts: Date.now() })
   } catch (err) {
     s.pending.push({ ...row, text: cap(err instanceof Error ? err.message : String(err)), isError: true, ts: Date.now() })
   }

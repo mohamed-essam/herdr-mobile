@@ -229,12 +229,7 @@ object ChatReducer {
         if (v.loaded && f.epoch == v.epoch) f.entries.filter { it.seq > v.lastSeq }.mapNotNull { userText(it) }
         else f.entries.mapNotNull { userText(it) }.takeLast(v.pending.count { it.status != PendingStatus.Failed })
 
-    // A slash command sent from the phone comes back as its output row.
-    private fun userText(e: ChatEntry): String? = when (val ev = e.event) {
-        is ChatEvent.UserText -> ev.text.trim()
-        is ChatEvent.CommandOutput -> ev.command.trim()
-        else -> null
-    }
+    private fun userText(e: ChatEntry): String? = (e.event as? ChatEvent.UserText)?.text?.trim()
 
     // A command comes back as `/name args`, however the space after its name was typed.
     private fun sameText(a: String, b: String): Boolean =

@@ -1516,7 +1516,7 @@ describe('slash commands', () => {
     expect(out).toEqual([{ type: 'command_output', uuid: 'cmd-m1', command: '/compact keep the plan', text: 'done', ts: expect.any(Number) }])
   })
 
-  test('a command that prints nothing still shows its row', async ($, on) => {
+  test('a command that prints nothing adds no row (the engine echoes the command itself)', async ($, on) => {
     const w = world(on, { commands: COMMANDS })
     w.cmd.output = undefined
     await start($)
@@ -1525,8 +1525,8 @@ describe('slash commands', () => {
     await w.clock.advance(1000)
     await w.clock.settle()
     await w.clock.advance(1000)
-    const out = w.all().filter(e => e.type === 'command_output')
-    expect(out).toEqual([{ type: 'command_output', uuid: 'cmd-m1', command: '/brainstorming', text: '', ts: expect.any(Number) }])
+    expect(w.ran).toEqual([{ command: 'brainstorming', args: '' }])
+    expect(w.all().filter(e => e.type === 'command_output')).toEqual([])
   })
 
   test('an unknown name is submitted as typed, not run', async ($, on) => {

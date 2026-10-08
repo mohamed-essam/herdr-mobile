@@ -12,9 +12,8 @@ export type ChatEvent =
   | { type: 'tool_use'; uuid: string; toolUseId: string; tool: string; summary: string; ts?: number; agentId?: string }
   | { type: 'tool_result'; toolUseId: string; isError: boolean; preview: string; images?: string[]; imageSizes?: ImageSizes; ts?: number; agentId?: string }
   | { type: 'task_notice'; uuid: string; taskId?: string; toolUseId?: string; status: string; summary: string; ts?: number; agentId?: string }
-  // A slash command the phone ran (`command`: as typed, `/name args`) and
-  // what it printed (empty when it printed nothing as text), or why the
-  // engine refused it (`isError`).
+  // What a slash command the phone ran (`command`: `/name args`) printed,
+  // or why the engine refused it (`isError`).
   | { type: 'command_output'; uuid: string; command: string; text: string; isError?: true; ts?: number; agentId?: string }
 
 export type ChatImage = { mediaType: string; data: string }
