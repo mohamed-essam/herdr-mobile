@@ -2,8 +2,9 @@ import type { EngineInterface, Register } from 'claude-code'
 import { agentControls, forgetWorkflow, linkFromMeta, linkJournal, linkSpawn, newAgentsState, recordWorkflow, referencedImages, releaseHeld, resetAgents, routeAgentEvents, setStatus, settleUnlisted, type AgentControl, type AgentsState, type Workflow } from './agents'
 import { listStatus, newestAgents, parseListing, resyncTasks, THREAD_EVENTS, type AgentFile } from './resync'
 import { expireTasks, noticeStatus, taskFromLaunch, taskFromNotice, taskFromStop, tasksControl, type TasksControl, type TasksState } from './tasks'
-import { normalizeBlocks, normalizeSnapshot, shouldForward, taskNotices, utf8Bytes, type ChatEvent, type ChatImage, type Normalized } from './normalize'
+import { cap, normalizeBlocks, normalizeSnapshot, shouldForward, taskNotices, utf8Bytes, type ChatEvent, type ChatImage, type Normalized } from './normalize'
 import { toUsage, type Usage } from './usage'
+import { parseSlash, toCommands, type SlashCommand } from './commands'
 import { addTranscriptLine, finishTranscriptHistory, HISTORY_IMAGES, newTranscriptHistory, splitPiece, type FinishedHistory, type TranscriptOpts } from './transcript'
 
 // History goes out as begin (`total`: its event count), chunks, end; an
@@ -20,6 +21,8 @@ type Control =
   | AgentControl
   // The background tasks as they stand (the newest replaces any earlier one).
   | TasksControl
+  // The session's slash commands (the newest replaces any earlier one).
+  | { type: 'commands'; commands: SlashCommand[] }
 type Outgoing = ChatEvent | Control
 
 // A chunk's events serialize to at most CHUNK_BYTES; a /sync body, images
@@ -95,6 +98,11 @@ export type State = {
   // Bumped by every session.measure and /clear or /resume reset: a seed
   // whose read spans a bump is stale and is dropped.
   usageGen: number
+  // The slash commands as last listed (null before the first listing, or on
+  // an engine without the op), re-listed every COMMANDS_MS; `commandsAt`
+  // when that last listing ran (clock ms).
+  commands: SlashCommand[] | null
+  commandsAt: number
 }
 
 export type QueuedImage = { id: string; img: ChatImage; bytes: number }
@@ -104,6 +112,8 @@ function queued(id: string, img: ChatImage): QueuedImage {
 }
 
 const SYNC_MS = 1000
+// Commands come and go with plugin reloads; re-listed this often.
+const COMMANDS_MS = 30_000
 
 function isV2(ev: Outgoing): boolean {
   return ev.type === 'agent' || ev.type === 'tasks' || ('agentId' in ev && ev.agentId !== undefined)
@@ -321,6 +331,7 @@ async function buildHistory($: EngineInterface, s: State) {
     const head: Outgoing[] = [{ type: 'hello', sessionId, cwd: s.cwd }, ...snapshot(events)]
     if (s.lastState) head.push({ type: 'state', state: s.lastState })
     head.push(...s.openQuestions.values())
+    if (s.commands) head.push({ type: 'commands', commands: s.commands })
     // The agents and their threads, from the session's files beside the
     // transcript (only a history read from one has them). Never fails the
     // main snapshot.
@@ -349,7 +360,7 @@ async function buildHistory($: EngineInterface, s: State) {
     // A question queued during the build is in both: send it once, here; the
     // same for a tasks control.
     // A row for an agent whose thread snapshot is now queued goes after it.
-    const queued = s.pending.filter(ev => !(ev.type === 'tasks' && s.threads && sendTasks) && !(ev.type === 'question' && s.openQuestions.has(ev.toolUseId)))
+    const queued = s.pending.filter(ev => !(ev.type === 'tasks' && s.threads && sendTasks) && !(ev.type === 'question' && s.openQuestions.has(ev.toolUseId)) && ev.type !== 'commands')
     s.pending = head
     placeRows(s, queued)
     // Thread images get what room the history's own leave (see historyImages).
@@ -568,6 +579,39 @@ export async function linkWorkflowAgents($: EngineInterface, s: State) {
   if (queueV2(s, [...controls, ...released])) queueImages(s, released, images)
 }
 
+// Lists the session's commands once COMMANDS_MS has passed since the last
+// listing, queueing the list when it changed. An engine without the op (or a
+// failed listing) leaves what was listed.
+async function refreshCommands($: EngineInterface, s: State) {
+  const now = await $.clock.now()
+  if (s.commandsAt && now - s.commandsAt < COMMANDS_MS) return
+  s.commandsAt = now
+  let list: SlashCommand[]
+  try {
+    list = toCommands(await $.command.list())
+  } catch {
+    return
+  }
+  if (s.commands && JSON.stringify(s.commands) === JSON.stringify(list)) return
+  s.commands = list
+  s.pending = s.pending.filter(ev => ev.type !== 'commands')
+  s.pending.push({ type: 'commands', commands: list })
+}
+
+// Runs a phone message naming a command as that command; its output (or an
+// empty row, for one that prints nothing as text) goes into the chat; so does
+// the reason the engine refused a run (the command went away meanwhile).
+async function runCommand($: EngineInterface, s: State, m: { id: string; text: string }, slash: { command: string; args: string }) {
+  const command = slash.args ? `/${slash.command} ${slash.args}` : `/${slash.command}`
+  const row = { type: 'command_output' as const, uuid: `cmd-${m.id}`, command }
+  try {
+    const text = (await $.command.run({ command: slash.command, args: slash.args })).text ?? ''
+    s.pending.push({ ...row, text: cap(text), ts: Date.now() })
+  } catch (err) {
+    s.pending.push({ ...row, text: cap(err instanceof Error ? err.message : String(err)), isError: true, ts: Date.now() })
+  }
+}
+
 async function tick($: EngineInterface, s: State) {
   if (s.inFlight || !s.paneId) return
   s.inFlight = true
@@ -578,6 +622,7 @@ async function tick($: EngineInterface, s: State) {
     const held = s.offline || s.building
     if (!held && s.agents.held.size) await linkWorkflowAgents($, s)
     if (expireTasks(s.tasks, Date.now())) queueTasks(s)
+    if (!held) await refreshCommands($, s)
     const { events, images } = held ? { events: [], images: {} } : takeBody(s)
     const res = await $.http.fetch('http://chat/sync', {
       method: 'POST',
@@ -620,10 +665,14 @@ async function tick($: EngineInterface, s: State) {
     // history was being built is expected to get this answer; its hello is
     // already on the way.
     if (again === true && !held) s.needResync = true
+    const names = new Set((s.commands ?? []).map(c => c.name))
     for (const m of messages) {
       // Not awaited: submit resolves only when Claude goes idle, and this
       // loop is the heartbeat that keeps the pane chat-capable meanwhile.
-      s.submitChain = s.submitChain.then(() => $.prompt.submit({ text: m.text, asUser: true })).catch(() => {})
+      const slash = parseSlash(m.text, names)
+      s.submitChain = s.submitChain
+        .then((): Promise<unknown> => (slash ? runCommand($, s, m, slash) : $.prompt.submit({ text: m.text, asUser: true })))
+        .catch(() => {})
     }
   } catch {
     s.offline = true
@@ -783,6 +832,8 @@ export const register: Register = on => {
     threadsMissed: false,
     usage: null,
     usageGen: 0,
+    commands: null,
+    commandsAt: 0,
   }
 
   // Only remembers the path; the read happens at the next resync.

@@ -5,7 +5,7 @@ import { eventsFromTranscript } from '../hooks/transcript'
 import { linkSpawn, newAgentsState, recordWorkflow } from '../hooks/agents'
 import { taskFromLaunch } from '../hooks/tasks'
 
-const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], imageQueue: [], offline: false, inFlight: false, building: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined, historyLacksPath: false, openQuestions: new Map(), agents: newAgentsState(), tasks: new Map(), tasksQueued: false, threadQueue: [], threads: true, threadsMissed: false, usage: null, usageGen: 0 })
+const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], imageQueue: [], offline: false, inFlight: false, building: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined, historyLacksPath: false, openQuestions: new Map(), agents: newAgentsState(), tasks: new Map(), tasksQueued: false, threadQueue: [], threads: true, threadsMissed: false, usage: null, usageGen: 0, commands: null, commandsAt: 0 })
 
 const MB = 1024 * 1024
 const FETCH_BODY_LIMIT = 4 * MB
@@ -37,7 +37,7 @@ const RESYNC = ['hello', 'snapshot_begin', 'snapshot_chunk', 'snapshot_end']
 
 // Wires the world beneath the plugin: env, clock, session reads, and a fake
 // companion that records each /sync body and answers with queued messages.
-function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boolean; xdg?: string; env?: Record<string, string>; threads?: boolean; usage?: unknown } = {}) {
+function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boolean; xdg?: string; env?: Record<string, string>; threads?: boolean; usage?: unknown; commands?: { name: string; description: string; source: string }[] } = {}) {
   if (opts.xdg) mock.env(on, { HERDR_PANE_ID: 'w1:p1', XDG_RUNTIME_DIR: opts.xdg })
   else if (opts.nosock) mock.env(on, { HERDR_PANE_ID: 'w1:p1' })
   else mock.env(on, opts.pane === undefined ? { HERDR_PANE_ID: 'w1:p1', HERDR_MOBILE_CHAT_SOCK: '/s/chat.sock', ...opts.env } : opts.pane ? { HERDR_PANE_ID: opts.pane, HERDR_MOBILE_CHAT_SOCK: '/s/chat.sock' } : {})
@@ -146,13 +146,23 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
     answer.resync = false
     return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(body) } }
   })
+  // `commands`: what command.list answers (unanswered without it, as an
+  // engine without the op); each command.run is kept in `ran`.
+  const ran: { command: string; args: string }[] = []
+  const cmd = { output: 'done' as string | undefined, fail: false }
+  if (opts.commands) on('command.list', () => ({ value: opts.commands as never }))
+  on('command.run', ($, e) => {
+    ran.push({ command: e.command, args: e.args })
+    if (cmd.fail) throw new Error('unknown command')
+    return cmd.output === undefined ? {} : { text: cmd.output }
+  })
   on('prompt.submit', async ($, e) => {
     await submitGate
     submitted.push(e.text)
     return { text: e.text }
   })
   return {
-    clock, syncs, sizes, outbox, submitted, current, answer, files, reads, finds, runs, seds, tail, counts, scans, mtimes, scan, agentList,
+    clock, syncs, sizes, outbox, submitted, ran, cmd, current, answer, files, reads, finds, runs, seds, tail, counts, scans, mtimes, scan, agentList,
     hold() { let release!: () => void; submitGate = new Promise(r => (release = r)); return release },
     holdReads() { let release!: () => void; readGate = new Promise(r => (release = r)); return release },
     all: () => syncs.flatMap(s => s.events),
@@ -1452,5 +1462,99 @@ describe('herdr-chat', () => {
     const sent = w.syncs.flatMap(s => Object.keys(s.images ?? {}))
     expect(sent).toEqual(['small#0'])
     for (const n of w.sizes) expect(n).toBeLessThanOrEqual(BODY_BYTES)
+  })
+})
+
+describe('slash commands', () => {
+  const COMMANDS = [
+    { name: 'compact', description: 'Clear history but keep a summary', source: 'builtin' },
+    { name: 'brainstorming', description: 'Explore intent', source: 'plugin' },
+  ]
+  const lists = (w: ReturnType<typeof world>) => w.all().filter(e => e.type === 'commands')
+
+  test('the list goes out after the first resync, and again only when it changes', async ($, on) => {
+    const list = [...COMMANDS]
+    const w = world(on, { commands: list })
+    await start($)
+    await w.clock.advance(3000)
+    expect(lists(w)).toEqual([{ type: 'commands', commands: COMMANDS }])
+    await w.clock.advance(60_000)
+    expect(lists(w).length).toBe(1)
+    list.push({ name: 'review', description: 'Review a PR', source: 'user' })
+    await w.clock.advance(31_000)
+    expect(lists(w).length).toBe(2)
+    expect((lists(w)[1] as any).commands.map((c: any) => c.name)).toEqual(['compact', 'brainstorming', 'review'])
+  })
+
+  test('a resync sends the list again', async ($, on) => {
+    const w = world(on, { commands: COMMANDS })
+    await start($)
+    await w.clock.advance(3000)
+    w.answer.resync = true
+    await w.clock.advance(3000)
+    expect(lists(w).length).toBe(2)
+  })
+
+  test('an engine without command.list sends no list', async ($, on) => {
+    const w = world(on)
+    await start($)
+    await w.clock.advance(3000)
+    expect(lists(w)).toEqual([])
+  })
+
+  test('a known command runs as one, its output rows into the chat', async ($, on) => {
+    const w = world(on, { commands: COMMANDS })
+    await start($)
+    await w.clock.advance(3000)
+    w.outbox.push({ id: 'm1', text: '/compact keep the plan' })
+    await w.clock.advance(1000)
+    await w.clock.settle()
+    expect(w.ran).toEqual([{ command: 'compact', args: 'keep the plan' }])
+    expect(w.submitted).toEqual([])
+    await w.clock.advance(1000)
+    const out = w.all().filter(e => e.type === 'command_output')
+    expect(out).toEqual([{ type: 'command_output', uuid: 'cmd-m1', command: '/compact keep the plan', text: 'done', ts: expect.any(Number) }])
+  })
+
+  test('a command that prints nothing still shows its row', async ($, on) => {
+    const w = world(on, { commands: COMMANDS })
+    w.cmd.output = undefined
+    await start($)
+    await w.clock.advance(3000)
+    w.outbox.push({ id: 'm1', text: '/brainstorming' })
+    await w.clock.advance(1000)
+    await w.clock.settle()
+    await w.clock.advance(1000)
+    const out = w.all().filter(e => e.type === 'command_output')
+    expect(out).toEqual([{ type: 'command_output', uuid: 'cmd-m1', command: '/brainstorming', text: '', ts: expect.any(Number) }])
+  })
+
+  test('an unknown name is submitted as typed, not run', async ($, on) => {
+    const w = world(on, { commands: COMMANDS })
+    await start($)
+    await w.clock.advance(3000)
+    w.outbox.push({ id: 'm1', text: '/nope here' }, { id: 'm2', text: 'plain' })
+    await w.clock.advance(1000)
+    await w.clock.settle()
+    expect(w.ran).toEqual([])
+    // The engine takes a slash-led prompt as a command of its own (the kit
+    // drops this one); a plain one reaches the model.
+    expect(w.submitted).toEqual(['plain'])
+    expect(w.all().filter(e => e.type === 'command_output')).toEqual([])
+  })
+
+  test('a run the engine refuses shows its error in the chat', async ($, on) => {
+    const w = world(on, { commands: COMMANDS })
+    w.cmd.fail = true
+    await start($)
+    await w.clock.advance(3000)
+    w.outbox.push({ id: 'm1', text: '/compact' })
+    await w.clock.advance(1000)
+    await w.clock.settle()
+    await w.clock.advance(1000)
+    expect(w.ran).toEqual([{ command: 'compact', args: '' }])
+    expect(w.all().filter(e => e.type === 'command_output')).toEqual([
+      { type: 'command_output', uuid: 'cmd-m1', command: '/compact', text: expect.any(String), isError: true, ts: expect.any(Number) },
+    ])
   })
 })
