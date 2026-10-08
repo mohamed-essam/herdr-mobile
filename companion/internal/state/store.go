@@ -32,6 +32,10 @@ type Pane struct {
 	// BgRunning counts the pane's running background tasks (dashboard badge);
 	// omitted at 0.
 	BgRunning int `json:"bgRunning,omitempty"`
+	// Context is the Claude session's context-window fill, from the
+	// herdr-chat mod (nil while no mod is live). omitempty keeps older apps
+	// unaffected.
+	Context *Context `json:"context,omitempty"`
 }
 
 // Activity is a one-line summary of a pane's latest chat event. Kind is
@@ -51,11 +55,23 @@ type Ask struct {
 	Questions json.RawMessage `json:"questions"`
 }
 
-type summary struct {
-	activity  *Activity
-	ask       *Ask
-	bgRunning int
+// Context is a session's context-window fill: Percent of Window tokens used
+// (Tokens when the engine reported them).
+type Context struct {
+	Percent int `json:"percent"`
+	Tokens  int `json:"tokens,omitempty"`
+	Window  int `json:"window"`
 }
+
+// Summary is what the herdr-chat mod reports for a pane's dashboard row.
+type Summary struct {
+	Activity  *Activity
+	Ask       *Ask
+	BgRunning int
+	Context   *Context
+}
+
+func sameContext(a, b *Context) bool { return a == b || (a != nil && b != nil && *a == *b) }
 
 func sameActivity(a, b *Activity) bool {
 	return a == b || (a != nil && b != nil && *a == *b)
@@ -108,7 +124,7 @@ type Store struct {
 	chat  map[string]bool
 	// summary holds each pane's Activity/Ask, set by SetSummary; the pointers
 	// are never mutated, so Pane values stay comparable across polls.
-	summary map[string]summary
+	summary map[string]Summary
 
 	workspaces   []Workspace
 	tabs         []Tab
@@ -120,7 +136,7 @@ func NewStore() *Store {
 	return &Store{
 		panes:        map[string]Pane{},
 		chat:         map[string]bool{},
-		summary:      map[string]summary{},
+		summary:      map[string]Summary{},
 		lastActivity: map[string]int64{},
 		now:          func() int64 { return time.Now().UnixMilli() },
 	}
@@ -142,7 +158,7 @@ func (s *Store) Apply(infos []herdr.PaneInfo) ([]Change, []Transition) {
 		np := toPane(i)
 		np.Chat = s.chat[np.PaneID]
 		sum := s.summary[np.PaneID]
-		np.Activity, np.Ask, np.BgRunning = sum.activity, sum.ask, sum.bgRunning
+		np.Activity, np.Ask, np.BgRunning, np.Context = sum.Activity, sum.Ask, sum.BgRunning, sum.Context
 		seen[np.PaneID] = true
 		old, existed := s.panes[np.PaneID]
 		if !existed {
@@ -195,32 +211,35 @@ func (s *Store) SetChat(paneID string, on bool) (Pane, bool) {
 	return p, true
 }
 
-// SetSummary records the pane's latest activity, running background-task count and pending question (nil
-// clears). Like SetChat it reports the updated pane and true only when a
-// known pane's summary actually changed, and keeps a summary set before herdr
-// reports the pane.
-func (s *Store) SetSummary(paneID string, activity *Activity, ask *Ask, bgRunning int) (Pane, bool) {
+// SetSummary records the pane's latest summary (zero fields clear). Like
+// SetChat it reports the updated pane and true only when a known pane's
+// summary actually changed, and keeps a summary set before herdr reports
+// the pane.
+func (s *Store) SetSummary(paneID string, sum Summary) (Pane, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Keep the stored pointers when the value is unchanged, so Apply's pane
 	// comparison sees no change.
 	old := s.summary[paneID]
-	if sameActivity(old.activity, activity) {
-		activity = old.activity
+	if sameActivity(old.Activity, sum.Activity) {
+		sum.Activity = old.Activity
 	}
-	if sameAsk(old.ask, ask) {
-		ask = old.ask
+	if sameAsk(old.Ask, sum.Ask) {
+		sum.Ask = old.Ask
 	}
-	if activity == nil && ask == nil && bgRunning == 0 {
+	if sameContext(old.Context, sum.Context) {
+		sum.Context = old.Context
+	}
+	if sum.Activity == nil && sum.Ask == nil && sum.BgRunning == 0 && sum.Context == nil {
 		delete(s.summary, paneID)
 	} else {
-		s.summary[paneID] = summary{activity: activity, ask: ask, bgRunning: bgRunning}
+		s.summary[paneID] = sum
 	}
 	p, ok := s.panes[paneID]
-	if !ok || (sameActivity(p.Activity, activity) && sameAsk(p.Ask, ask) && p.BgRunning == bgRunning) {
+	if !ok || (sameActivity(p.Activity, sum.Activity) && sameAsk(p.Ask, sum.Ask) && p.BgRunning == sum.BgRunning && sameContext(p.Context, sum.Context)) {
 		return Pane{}, false
 	}
-	p.Activity, p.Ask, p.BgRunning = activity, ask, bgRunning
+	p.Activity, p.Ask, p.BgRunning, p.Context = sum.Activity, sum.Ask, sum.BgRunning, sum.Context
 	s.panes[paneID] = p
 	return p, true
 }

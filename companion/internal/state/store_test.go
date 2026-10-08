@@ -223,18 +223,18 @@ func TestSetSummaryFlagsKnownPaneAndSurvivesPoll(t *testing.T) {
 	s.Apply(infos(herdr.PaneInfo{PaneID: "w1:p1", WorkspaceID: "w1", Agent: "claude"}))
 	act := &Activity{Kind: "tool", Tool: "Bash", Text: "npm run build", TS: 5}
 	ask := &Ask{ToolUseID: "t1", Questions: json.RawMessage(`[{"question":"Q?"}]`)}
-	p, changed := s.SetSummary("w1:p1", act, ask, 0)
+	p, changed := s.SetSummary("w1:p1", Summary{Activity: act, Ask: ask})
 	if !changed || p.Activity == nil || p.Activity.Tool != "Bash" || p.Ask == nil || p.Ask.ToolUseID != "t1" {
 		t.Fatalf("SetSummary: changed=%v pane=%+v", changed, p)
 	}
-	if _, again := s.SetSummary("w1:p1", &Activity{Kind: "tool", Tool: "Bash", Text: "npm run build", TS: 5}, &Ask{ToolUseID: "t1", Questions: json.RawMessage(`[{"question":"Q?"}]`)}, 0); again {
+	if _, again := s.SetSummary("w1:p1", Summary{Activity: &Activity{Kind: "tool", Tool: "Bash", Text: "npm run build", TS: 5}, Ask: &Ask{ToolUseID: "t1", Questions: json.RawMessage(`[{"question":"Q?"}]`)}}); again {
 		t.Fatal("an equal summary should report no change")
 	}
 	ch, _ := s.Apply(infos(herdr.PaneInfo{PaneID: "w1:p1", WorkspaceID: "w1", Agent: "claude"}))
 	if len(ch) != 0 || s.Snapshot()[0].Activity == nil || s.Snapshot()[0].Ask == nil {
 		t.Fatalf("poll lost summary: changes=%+v snap=%+v", ch, s.Snapshot())
 	}
-	if p, changed := s.SetSummary("w1:p1", nil, nil, 0); !changed || p.Activity != nil || p.Ask != nil {
+	if p, changed := s.SetSummary("w1:p1", Summary{}); !changed || p.Activity != nil || p.Ask != nil {
 		t.Fatalf("clear: %v %+v", changed, p)
 	}
 }
@@ -254,7 +254,7 @@ func TestSummaryJSONOmittedWhenEmpty(t *testing.T) {
 
 func TestSetSummaryBeforePaneAppearsAndRemovedForgets(t *testing.T) {
 	s := NewStore()
-	if _, changed := s.SetSummary("w2:p1", &Activity{Kind: "text", Text: "hi"}, nil, 0); changed {
+	if _, changed := s.SetSummary("w2:p1", Summary{Activity: &Activity{Kind: "text", Text: "hi"}}); changed {
 		t.Fatal("unknown pane: nothing to broadcast yet")
 	}
 	ch, _ := s.Apply(infos(herdr.PaneInfo{PaneID: "w2:p1", WorkspaceID: "w2"}))
@@ -271,17 +271,17 @@ func TestSetSummaryBeforePaneAppearsAndRemovedForgets(t *testing.T) {
 func TestSetSummaryBgRunning(t *testing.T) {
 	s := NewStore()
 	s.Apply(infos(herdr.PaneInfo{PaneID: "w1:p1", WorkspaceID: "w1"}))
-	p, changed := s.SetSummary("w1:p1", nil, nil, 2)
+	p, changed := s.SetSummary("w1:p1", Summary{BgRunning: 2})
 	if !changed || p.BgRunning != 2 {
 		t.Fatalf("bgRunning 2: changed=%v pane=%+v", changed, p)
 	}
-	if _, again := s.SetSummary("w1:p1", nil, nil, 2); again {
+	if _, again := s.SetSummary("w1:p1", Summary{BgRunning: 2}); again {
 		t.Fatal("same bgRunning should report no change")
 	}
 	if ch, _ := s.Apply(infos(herdr.PaneInfo{PaneID: "w1:p1", WorkspaceID: "w1"})); len(ch) != 0 || s.Snapshot()[0].BgRunning != 2 {
 		t.Fatalf("poll lost bgRunning: %+v", ch)
 	}
-	if p, changed := s.SetSummary("w1:p1", nil, nil, 0); !changed || p.BgRunning != 0 {
+	if p, changed := s.SetSummary("w1:p1", Summary{}); !changed || p.BgRunning != 0 {
 		t.Fatalf("clear: %v %+v", changed, p)
 	}
 	b, _ := json.Marshal(Pane{PaneID: "p"})
@@ -291,5 +291,28 @@ func TestSetSummaryBgRunning(t *testing.T) {
 	b, _ = json.Marshal(Pane{PaneID: "p", BgRunning: 3})
 	if !strings.Contains(string(b), `"bgRunning":3`) {
 		t.Fatalf("json = %s", b)
+	}
+}
+
+func TestSetSummaryContext(t *testing.T) {
+	s := NewStore()
+	s.Apply(infos(herdr.PaneInfo{PaneID: "w1:p1", WorkspaceID: "w1", Agent: "claude"}))
+	p, changed := s.SetSummary("w1:p1", Summary{Context: &Context{Percent: 61, Tokens: 122000, Window: 200000}})
+	if !changed || p.Context == nil || p.Context.Percent != 61 {
+		t.Fatalf("set: changed=%v pane=%+v", changed, p)
+	}
+	if _, again := s.SetSummary("w1:p1", Summary{Context: &Context{Percent: 61, Tokens: 122000, Window: 200000}}); again {
+		t.Fatal("an equal context should report no change")
+	}
+	if ch, _ := s.Apply(infos(herdr.PaneInfo{PaneID: "w1:p1", WorkspaceID: "w1", Agent: "claude"})); len(ch) != 0 || s.Snapshot()[0].Context == nil {
+		t.Fatalf("poll lost context: %+v", s.Snapshot())
+	}
+	p, changed = s.SetSummary("w1:p1", Summary{})
+	if !changed || p.Context != nil {
+		t.Fatalf("clear: %v %+v", changed, p)
+	}
+	b, _ := json.Marshal(p)
+	if strings.Contains(string(b), `"context"`) {
+		t.Fatalf("nil context must be omitted: %s", b)
 	}
 }
