@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/chatbridge"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/limits"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
 )
 
@@ -78,11 +79,11 @@ func TestTermFrames(t *testing.T) {
 	}
 }
 
-func TestWelcomeAdvertisesProtocol10(t *testing.T) {
+func TestWelcomeAdvertisesProtocol11(t *testing.T) {
 	var got map[string]any
 	json.Unmarshal(Welcome("0.7.1", 14), &got)
-	if got["companionProtocol"].(float64) != 10 {
-		t.Fatalf("want companionProtocol 10, got %v", got["companionProtocol"])
+	if got["companionProtocol"].(float64) != 11 {
+		t.Fatalf("want companionProtocol 11, got %v", got["companionProtocol"])
 	}
 }
 
@@ -244,5 +245,14 @@ func TestParseClientAgentID(t *testing.T) {
 	m, err := ParseClient([]byte(`{"t":"chat_open","paneId":"p","agentId":"aa1"}`))
 	if err != nil || m.AgentID != "aa1" {
 		t.Fatalf("%+v %v", m, err)
+	}
+}
+
+func TestLimitsFrame(t *testing.T) {
+	var got map[string]any
+	_ = json.Unmarshal(Limits(limits.Limits{Windows: []limits.Window{{Kind: "five_hour", PercentUsed: 42, ResetsAt: "2026-10-08T19:40:00Z"}}, ObservedAt: 77}), &got)
+	ws := got["limits"].([]any)
+	if got["t"] != "limits" || got["observedAt"].(float64) != 77 || len(ws) != 1 || ws[0].(map[string]any)["kind"] != "five_hour" {
+		t.Fatalf("frame: %+v", got)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/chatbridge"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/limits"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
 )
 
@@ -53,7 +54,7 @@ func ParseClient(b []byte) (ClientMsg, error) {
 func must(v any) []byte { b, _ := json.Marshal(v); return b }
 
 func Welcome(version string, protocol int) []byte {
-	return must(map[string]any{"t": "welcome", "herdrVersion": version, "herdrProtocol": protocol, "companionProtocol": 10})
+	return must(map[string]any{"t": "welcome", "herdrVersion": version, "herdrProtocol": protocol, "companionProtocol": 11})
 }
 func PanesSnapshot(p []state.Pane) []byte {
 	return must(map[string]any{"t": "panes", "panes": p})
@@ -224,4 +225,10 @@ func ChatAnswerResult(reqID string, ok bool, errCode string) []byte {
 		m["error"] = errCode
 	}
 	return must(m)
+}
+
+// Limits is the account's rate-limit reading (5h/7d windows) and when a mod
+// last reported it.
+func Limits(l limits.Limits) []byte {
+	return must(map[string]any{"t": "limits", "limits": l.Windows, "observedAt": l.ObservedAt})
 }

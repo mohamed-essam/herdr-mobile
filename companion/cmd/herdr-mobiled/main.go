@@ -40,6 +40,19 @@ func isNonLoopbackBind(addr string) bool {
 	}
 }
 
+// defaultStateDir is $XDG_STATE_HOME/herdr-mobile, else
+// ~/.local/state/herdr-mobile.
+func defaultStateDir() string {
+	if d := os.Getenv("XDG_STATE_HOME"); d != "" {
+		return filepath.Join(d, "herdr-mobile")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".local", "state", "herdr-mobile")
+}
+
 func main() {
 	socket := flag.String("socket", defaultSocket(), "path to herdr.sock")
 	// Default to loopback: v1 has NO API auth and the API can inject terminal
@@ -49,9 +62,10 @@ func main() {
 	listen := flag.String("listen", "127.0.0.1:8787", "WS listen address (bind to your tailnet IP, e.g. `tailscale ip -4`, to reach it from the phone)")
 	poll := flag.Duration("poll", 1500*time.Millisecond, "pane.list poll interval")
 	chatSock := flag.String("chat-socket", chatbridge.SocketPath(), "Unix socket for the herdr-chat Claude Code mod (empty disables the chat view)")
+	stateDir := flag.String("state-dir", defaultStateDir(), "directory for state kept across restarts (the last rate-limit reading)")
 	flag.Parse()
 
-	e := engine.New(engine.Config{SocketPath: *socket, ListenAddr: *listen, PollInterval: *poll, ChatSocket: *chatSock})
+	e := engine.New(engine.Config{SocketPath: *socket, ListenAddr: *listen, PollInterval: *poll, ChatSocket: *chatSock, StateDir: *stateDir})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -59,7 +73,7 @@ func main() {
 	if isNonLoopbackBind(*listen) {
 		log.Printf("WARNING: listening on %s — the v1 API has no authentication and can send input to your terminals. Only bind to a private (e.g. Tailscale) address, never a public one.", *listen)
 	}
-	log.Printf("herdr-mobiled: socket=%s listen=%s chat=%s", *socket, *listen, *chatSock)
+	log.Printf("herdr-mobiled: socket=%s listen=%s chat=%s state=%s", *socket, *listen, *chatSock, *stateDir)
 	if err := e.Run(ctx); err != nil {
 		log.Fatal(err)
 	}

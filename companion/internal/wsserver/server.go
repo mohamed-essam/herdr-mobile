@@ -47,16 +47,17 @@ type ChatHub interface {
 }
 
 type Server struct {
-	auth        Authorizer
-	rpc         HerdrRPC
-	snapshot    func() []state.Pane
-	wsSnapshot  func() []state.Workspace
-	tabSnapshot func() []state.Tab
-	onPush      func(endpoint string)
-	herdrVer    string
-	herdrProt   int
-	poke        func()
-	chat        ChatHub
+	auth           Authorizer
+	rpc            HerdrRPC
+	snapshot       func() []state.Pane
+	wsSnapshot     func() []state.Workspace
+	tabSnapshot    func() []state.Tab
+	limitsSnapshot func() []byte
+	onPush         func(endpoint string)
+	herdrVer       string
+	herdrProt      int
+	poke           func()
+	chat           ChatHub
 
 	termSeq    atomic.Uint64
 	attachArgv func(target string) []string
@@ -85,7 +86,7 @@ type termSession struct {
 func NewServer(auth Authorizer, rpc HerdrRPC) *Server {
 	srv := &Server{auth: auth, rpc: rpc, clients: map[*client]struct{}{},
 		snapshot: func() []state.Pane { return nil }, onPush: func(string) {},
-		wsSnapshot: func() []state.Workspace { return nil }, tabSnapshot: func() []state.Tab { return nil },
+		wsSnapshot: func() []state.Workspace { return nil }, tabSnapshot: func() []state.Tab { return nil }, limitsSnapshot: func() []byte { return nil },
 		herdrVer: "unknown", herdrProt: 0, poke: func() {}}
 	// --takeover: the phone seizes the pane's attachment even if a client (e.g. the
 	// desktop herdr TUI or a stale attach) already holds it. --takeover is a fixed
@@ -101,6 +102,7 @@ func NewServer(auth Authorizer, rpc HerdrRPC) *Server {
 func (s *Server) SetInitialSnapshot(fn func() []state.Pane)        { s.snapshot = fn }
 func (s *Server) SetWorkspaceSnapshot(fn func() []state.Workspace) { s.wsSnapshot = fn }
 func (s *Server) SetTabSnapshot(fn func() []state.Tab)             { s.tabSnapshot = fn }
+func (s *Server) SetLimitsSnapshot(fn func() []byte)               { s.limitsSnapshot = fn }
 func (s *Server) SetPushEndpoint(fn func(string))                  { s.onPush = fn }
 func (s *Server) SetHerdrInfo(ver string, prot int)                { s.herdrVer, s.herdrProt = ver, prot }
 func (s *Server) SetPoke(fn func())                                { s.poke = fn }
@@ -137,6 +139,9 @@ func (s *Server) Handler() http.Handler {
 		c.send <- proto.PanesSnapshot(s.snapshot())
 		c.send <- proto.WorkspacesSnapshot(s.wsSnapshot())
 		c.send <- proto.TabsSnapshot(s.tabSnapshot())
+		if f := s.limitsSnapshot(); f != nil {
+			c.send <- f
+		}
 		s.add(c)
 		defer func() { c.closeAll(); s.remove(c) }()
 
