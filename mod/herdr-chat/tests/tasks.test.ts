@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { expireTasks, LABEL_MAX, taskFromLaunch, taskFromNotice, tasksControl, TASK_TTL_MS, type TasksState } from '../hooks/tasks'
+import { expireTasks, LABEL_MAX, taskFromLaunch, taskFromNotice, taskFromStop, tasksControl, TASK_TTL_MS, type TasksState } from '../hooks/tasks'
 
 // The spike's launch results.
 const BASH = { backgroundTaskId: 'b4prbe90d', stdout: '', stderr: '' }
@@ -74,11 +74,18 @@ describe('taskFromNotice', () => {
     expect(t.size).toBe(4)
   })
   test('failed, killed, stopped and anything else set failed', () => {
-    for (const status of ['failed', 'killed', 'stopped', 'weird', '']) {
+    for (const status of ['failed', 'killed', 'stopped', 'weird']) {
       const t = launched()
       taskFromNotice(t, { taskId: 'm1', status, summary: 's' }, 5)
       expect(t.get('m1')!.status).toBe('failed')
     }
+  })
+  test('a notice without a status (a monitor event) ends nothing and adds nothing', () => {
+    const t = launched()
+    expect(taskFromNotice(t, { taskId: 'm1', status: '', summary: 'Monitor event: "x"' }, 5)).toBe(false)
+    expect(t.get('m1')!.status).toBe('running')
+    expect(taskFromNotice(t, { taskId: 'zz', status: '', summary: 'Monitor event: "y"' }, 5)).toBe(false)
+    expect(t.has('zz')).toBe(false)
   })
   test('a repeat notice updates in place', () => {
     const t: TasksState = new Map()
@@ -124,5 +131,22 @@ describe('tasksControl', () => {
     const c = tasksControl(t)
     taskFromNotice(t, { taskId: 'm1', status: 'completed', summary: 's' }, 5)
     expect(c.tasks.find(x => x.id === 'm1')!.status).toBe('running')
+  })
+})
+
+describe('taskFromStop', () => {
+  test('a TaskStop result ends the task it names as failed', () => {
+    const t = launched()
+    expect(taskFromStop(t, { message: 'Successfully stopped task: m1 (tail -f x)', task_id: 'm1' }, 70)).toBe(true)
+    expect(t.get('m1')).toMatchObject({ status: 'failed', endedAt: 70 })
+  })
+  test('an unknown, already ended or missing task id changes nothing', () => {
+    const t = launched()
+    expect(taskFromStop(t, { task_id: 'nope' }, 70)).toBe(false)
+    expect(taskFromStop(t, { message: 'x' }, 70)).toBe(false)
+    expect(taskFromStop(t, 'Error', 70)).toBe(false)
+    taskFromNotice(t, { taskId: 'm1', status: 'completed', summary: 's' }, 60)
+    expect(taskFromStop(t, { task_id: 'm1' }, 70)).toBe(false)
+    expect(t.get('m1')).toMatchObject({ status: 'done', endedAt: 60 })
   })
 })

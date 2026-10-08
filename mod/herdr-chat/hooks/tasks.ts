@@ -56,8 +56,10 @@ export function taskFromLaunch(t: TasksState, tool: string, toolUseId: string, i
 }
 
 // Ends the task the notice names (by task id, else by tool-use id), or lists
-// an unknown one as already finished. A repeat updates in place.
+// an unknown one as already finished. A repeat updates in place. A notice
+// without a status is a running monitor's event, not an end: it changes nothing.
 export function taskFromNotice(t: TasksState, n: { taskId?: string; toolUseId?: string; status: string; summary: string }, now: number): boolean {
+  if (!n.status) return false
   const status = noticeStatus(n.status)
   const known = (n.taskId ? t.get(n.taskId) : undefined) ?? (n.toolUseId ? [...t.values()].find(k => k.toolUseId === n.toolUseId) : undefined)
   if (known) {
@@ -68,6 +70,17 @@ export function taskFromNotice(t: TasksState, n: { taskId?: string; toolUseId?: 
   const id = n.taskId ?? n.toolUseId ?? `notice-${now}`
   const kind: TaskKind = n.summary.startsWith('Agent "') ? 'subagent' : n.summary.startsWith('Workflow') ? 'workflow' : 'shell'
   t.set(id, { id, kind, label: label(n.summary), toolUseId: n.toolUseId ?? '', status, startedAt: now, endedAt: now })
+  return true
+}
+
+// A TaskStop result ends the running task it names: a stopped task often gets
+// no notice at all.
+export function taskFromStop(t: TasksState, result: unknown, now: number): boolean {
+  if (!result || typeof result !== 'object') return false
+  const k = t.get(str((result as Record<string, unknown>).task_id))
+  if (!k || k.status !== 'running') return false
+  k.status = 'failed'
+  k.endedAt = now
   return true
 }
 

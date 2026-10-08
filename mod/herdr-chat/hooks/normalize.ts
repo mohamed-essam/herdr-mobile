@@ -79,6 +79,30 @@ function tag(doc: string, name: string): string {
   return m?.[1]?.trim() ?? ''
 }
 
+type TaskNotice = { taskId?: string; toolUseId?: string; status: string; summary: string }
+
+// One `<task-notification>` body's fields.
+function noticeOf(doc: string): TaskNotice {
+  return {
+    ...(tag(doc, 'task-id') ? { taskId: tag(doc, 'task-id') } : {}),
+    ...(tag(doc, 'tool-use-id') ? { toolUseId: tag(doc, 'tool-use-id') } : {}),
+    status: tag(doc, 'status'),
+    summary: cap(tag(doc, 'summary')),
+  }
+}
+
+// Every task notice in a row's text blocks, wherever it sits: one delivered
+// mid-turn comes inside a reminder, which normalizeBlocks strips.
+export function taskNotices(content: unknown): TaskNotice[] {
+  if (!Array.isArray(content)) return []
+  const out: TaskNotice[] = []
+  for (const b of content as Block[]) {
+    if (!b || b.type !== 'text' || typeof b.text !== 'string') continue
+    for (const m of b.text.matchAll(TASK_NOTIFICATION)) out.push(noticeOf(m[1]!))
+  }
+  return out
+}
+
 // A base64 image block's payload (as stored); undefined for anything else.
 function imageOf(b: Block): ChatImage | undefined {
   if (!b || b.type !== 'image' || !b.source || typeof b.source !== 'object') return undefined
@@ -120,14 +144,7 @@ export function normalizeBlocks(role: 'user' | 'assistant', content: unknown, uu
       if (role === 'user') {
         let k = 0
         const rest = b.text.replace(SYSTEM_REMINDER, '').replace(LOCAL_COMMAND, '').replace(TASK_NOTIFICATION, (_, doc: string) => {
-          out.push({
-            type: 'task_notice',
-            uuid: k === 0 ? `${uuid}#${i}` : `${uuid}#${i}.${k}`,
-            ...(tag(doc, 'task-id') ? { taskId: tag(doc, 'task-id') } : {}),
-            ...(tag(doc, 'tool-use-id') ? { toolUseId: tag(doc, 'tool-use-id') } : {}),
-            status: tag(doc, 'status'),
-            summary: cap(tag(doc, 'summary')),
-          })
+          out.push({ type: 'task_notice', uuid: k === 0 ? `${uuid}#${i}` : `${uuid}#${i}.${k}`, ...noticeOf(doc) })
           k++
           return ''
         })

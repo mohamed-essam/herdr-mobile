@@ -266,6 +266,35 @@ describe('herdr-chat', () => {
     expect(s.pending).toEqual([{ type: 'assistant_text', uuid: 's1#0', text: 'subagent', agentId: 'aa1', ts: expect.any(Number) }])
   })
 
+  // Claude Code 2.1.294 delivers a notice that lands mid-turn as a
+  // queued_command row (door `delivery`), the notice inside a reminder (as
+  // seen live), not as a plain user row; it still ends its task.
+  const notice = (id: string, status: string) =>
+    `<task-notification>\n<task-id>${id}</task-id>\n<tool-use-id>toolu_${id}</tool-use-id>\n<status>${status}</status>\n<summary>Background command "x" completed (exit code 0)</summary>\n</task-notification>`
+  const midTurn = (uuid: string, id: string, status: string, door = 'delivery', agentId?: string) =>
+    ({ door, uuid, ...(agentId ? { agentId } : {}), message: { type: 'attachment', name: 'queued_command', role: 'user', content: [{ type: 'text', text: `<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\n\n${notice(id, status)}\n</system-reminder>` }] } }) as never
+
+  test('a task notice delivered mid-turn (inside a reminder) ends its task; no chat row is queued', () => {
+    const s = state('w1:p1')
+    taskFromLaunch(s.tasks, 'Bash', 'toolu_b1', { command: 'sleep 9' }, { backgroundTaskId: 'b1' }, 1)
+    taskFromLaunch(s.tasks, 'Bash', 'toolu_b2', { command: 'sleep 9' }, { backgroundTaskId: 'b2' }, 1)
+    queueAppended(s, midTurn('x1', 'b1', 'completed'), undefined)
+    queueAppended(s, midTurn('x2', 'b2', 'failed', 'attachment'), undefined)
+    expect(s.tasks.get('b1')).toMatchObject({ status: 'done' })
+    expect(s.tasks.get('b2')).toMatchObject({ status: 'failed' })
+    expect(s.pending.map(e => e.type)).toEqual(['tasks'])
+    expect((s.pending[0] as any).tasks.map((t: any) => [t.id, t.status])).toEqual([['b1', 'done'], ['b2', 'failed']])
+  })
+
+  test('a subagent’s mid-turn notice leaves the pane’s tasks alone', () => {
+    const s = state('w1:p1')
+    linkSpawn(s.agents, { tool_use_id: 'toolu_1', description: 'd', subagentType: 'general-purpose' }, 'aa1', 1)
+    taskFromLaunch(s.tasks, 'Bash', 'toolu_b1', { command: 'sleep 9' }, { backgroundTaskId: 'b1' }, 1)
+    queueAppended(s, midTurn('x1', 'b1', 'completed', 'delivery', 'aa1'), undefined)
+    expect(s.tasks.get('b1')).toMatchObject({ status: 'running' })
+    expect(s.pending).toEqual([])
+  })
+
   test('a row from an unknown agent is held, not queued', () => {
     const s = state('w1:p1')
     queueAppended(s, { door: 'response', uuid: 's1', agentId: 'zz9', message: { role: 'assistant', content: [{ type: 'text', text: 'early' }] } }, undefined)
@@ -454,6 +483,21 @@ describe('herdr-chat', () => {
     await w.clock.advance(1000)
     const last = tasksOf(w.all() as never).at(-1)!
     expect(last.tasks.map(t => t.id)).toEqual(['b4prbe90d'])
+  })
+
+  test('a TaskStop that stops a running task ends it', async ($, on) => {
+    const w = world(on)
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { backgroundTaskId: 'b4prbe90d' }, text: '' }) as never)
+    on('tool.call', { tool: 'TaskStop' }, () => ({ result: { message: 'Successfully stopped task: b4prbe90d (sleep 25)', task_id: 'b4prbe90d' }, text: '' }) as never)
+    sessionFiles(w)
+    await startAt($)
+    await w.clock.advance(6000)
+    await $.tool.call({ tool: 'Bash', command: 'sleep 25', run_in_background: true } as never)
+    await w.clock.advance(1000)
+    expect(tasksOf(w.all() as never).at(-1)!.tasks).toMatchObject([{ id: 'b4prbe90d', status: 'running' }])
+    await $.tool.call({ tool: 'TaskStop', task_id: 'b4prbe90d' } as never)
+    await w.clock.advance(1000)
+    expect(tasksOf(w.all() as never).at(-1)!.tasks).toMatchObject([{ id: 'b4prbe90d', status: 'failed' }])
   })
 
   // C1: a thread part that starts a body already holding images is size-checked too.

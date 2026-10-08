@@ -1,8 +1,8 @@
 import type { EngineInterface, Register } from 'claude-code'
 import { agentControls, forgetWorkflow, linkFromMeta, linkJournal, linkSpawn, newAgentsState, recordWorkflow, referencedImages, releaseHeld, resetAgents, routeAgentEvents, setStatus, settleUnlisted, type AgentControl, type AgentsState, type Workflow } from './agents'
 import { listStatus, newestAgents, parseListing, resyncTasks, THREAD_EVENTS, type AgentFile } from './resync'
-import { expireTasks, noticeStatus, taskFromLaunch, taskFromNotice, tasksControl, type TasksControl, type TasksState } from './tasks'
-import { normalizeBlocks, normalizeSnapshot, shouldForward, utf8Bytes, type ChatEvent, type ChatImage, type Normalized } from './normalize'
+import { expireTasks, noticeStatus, taskFromLaunch, taskFromNotice, taskFromStop, tasksControl, type TasksControl, type TasksState } from './tasks'
+import { normalizeBlocks, normalizeSnapshot, shouldForward, taskNotices, utf8Bytes, type ChatEvent, type ChatImage, type Normalized } from './normalize'
 import { addTranscriptLine, finishTranscriptHistory, HISTORY_IMAGES, newTranscriptHistory, splitPiece, type FinishedHistory, type TranscriptOpts } from './transcript'
 
 // History goes out as begin (`total`: its event count), chunks, end; an
@@ -691,9 +691,16 @@ type Appended = {
 // rewritten) content over the incoming one. Exported so tests can drive it
 // directly: the test kit cannot answer session.append end-to-end.
 export function queueAppended(s: State, e: Appended, stored: { content?: unknown } | undefined): void {
-  if (!s.paneId || !shouldForward(e)) return
+  if (!s.paneId) return
+  // A main-loop task notice ends its task whichever row carries it: one
+  // delivered mid-turn comes as a queued_command row (door `delivery`) inside
+  // a reminder, which normalizeBlocks strips.
+  const notices = e.agentId ? [] : taskNotices(stored?.content ?? e.message.content)
   const role = e.message.role
-  if (role !== 'user' && role !== 'assistant') return
+  if (!shouldForward(e) || (role !== 'user' && role !== 'assistant')) {
+    endTasks(s, notices)
+    return
+  }
   const n = normalizeBlocks(role, stored?.content ?? e.message.content, e.uuid, Date.now())
   if (e.agentId) {
     // Its row: the agent is running (again), and its control goes first.
@@ -704,19 +711,25 @@ export function queueAppended(s: State, e: Appended, stored: { content?: unknown
   } else {
     s.pending.push(...n.events)
     queueImages(s, n.events, n.images)
-    let changed = false
-    for (const ev of n.events) {
-      if (ev.type !== 'task_notice') continue
-      const now = Date.now()
-      changed = taskFromNotice(s.tasks, ev, now) || changed
-      // A workflow's notice ends its journal reads.
-      forgetWorkflow(s.agents, ev.toolUseId ?? (ev.taskId ? s.tasks.get(ev.taskId)?.toolUseId : undefined) ?? '')
-      // A subagent's notice ends that agent too, when its task id is a linked one.
-      const ended = ev.taskId ? setStatus(s.agents, ev.taskId, noticeStatus(ev.status), now) : null
-      if (ended) queueV2(s, [ended])
-    }
-    if (changed) queueTasks(s)
+    endTasks(s, notices)
   }
+}
+
+// Main-loop task notices end their tasks (and a subagent's, its agent). One
+// without a status is a monitor's event: nothing has ended.
+function endTasks(s: State, notices: readonly { taskId?: string; toolUseId?: string; status: string; summary: string }[]) {
+  let changed = false
+  for (const ev of notices) {
+    if (!ev.status) continue
+    const now = Date.now()
+    changed = taskFromNotice(s.tasks, ev, now) || changed
+    // A workflow's notice ends its journal reads.
+    forgetWorkflow(s.agents, ev.toolUseId ?? (ev.taskId ? s.tasks.get(ev.taskId)?.toolUseId : undefined) ?? '')
+    // A subagent's notice ends that agent too, when its task id is a linked one.
+    const ended = ev.taskId ? setStatus(s.agents, ev.taskId, noticeStatus(ev.status), now) : null
+    if (ended) queueV2(s, [ended])
+  }
+  if (changed) queueTasks(s)
 }
 
 export const register: Register = on => {
@@ -868,6 +881,12 @@ export const register: Register = on => {
   on('tool.call', { tool: 'Monitor' }, async ($, e, next) => {
     const r = await next(e)
     if (s.paneId && !e.agentId && 'result' in r && taskFromLaunch(s.tasks, 'Monitor', e.tool_use_id, e, r.result, Date.now())) queueTasks(s)
+    return r
+  })
+  // A stopped task often gets no notice: the stop's own result ends it.
+  on('tool.call', { tool: 'TaskStop' }, async ($, e, next) => {
+    const r = await next(e)
+    if (s.paneId && !e.agentId && 'result' in r && taskFromStop(s.tasks, r.result, Date.now())) queueTasks(s)
     return r
   })
 
