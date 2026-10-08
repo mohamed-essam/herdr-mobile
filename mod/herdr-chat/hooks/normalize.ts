@@ -151,6 +151,12 @@ export function normalizeBlocks(role: 'user' | 'assistant', content: unknown, uu
         if (rest.trim()) userTexts.push(rest)
       }
       else if (b.text.trim()) out.push({ type: 'assistant_text', uuid: `${uuid}#${i}`, text: cap(b.text) })
+    } else if (b.type === 'thinking' && role === 'assistant' && typeof b.thinking === 'string' && b.thinking.trim()) {
+      // Newer models (Opus 4.7+) wrap user-facing preamble that leads into a
+      // tool call — the sentence shown right before e.g. an AskUserQuestion —
+      // in a thinking block rather than a text one. Surface those as plain
+      // assistant text; empty/whitespace thinking stays dropped.
+      out.push({ type: 'assistant_text', uuid: `${uuid}#${i}`, text: cap(b.thinking) })
     } else if (b.type === 'tool_use' && role === 'assistant') {
       const tool = String(b.name)
       const input = (b.input && typeof b.input === 'object' ? b.input : {}) as Record<string, unknown>
