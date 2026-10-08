@@ -548,6 +548,8 @@ func (s *Server) openChat(ctx context.Context, c *client, paneID, agentID string
 				f = proto.ChatAgentRemoved(paneID, u.AgentID)
 			case "tasks":
 				f = proto.ChatTasks(paneID, u.Tasks)
+			case "commands":
+				f = proto.ChatCommands(paneID, u.Commands)
 			default:
 				continue
 			}

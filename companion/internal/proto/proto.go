@@ -54,7 +54,7 @@ func ParseClient(b []byte) (ClientMsg, error) {
 func must(v any) []byte { b, _ := json.Marshal(v); return b }
 
 func Welcome(version string, protocol int) []byte {
-	return must(map[string]any{"t": "welcome", "herdrVersion": version, "herdrProtocol": protocol, "companionProtocol": 11})
+	return must(map[string]any{"t": "welcome", "herdrVersion": version, "herdrProtocol": protocol, "companionProtocol": 12})
 }
 func PanesSnapshot(p []state.Pane) []byte {
 	return must(map[string]any{"t": "panes", "panes": p})
@@ -155,6 +155,9 @@ func ChatSnapshot(s chatbridge.Snapshot) []byte {
 			tasks = json.RawMessage(`[]`)
 		}
 		m["tasks"] = tasks
+		if s.Commands != nil {
+			m["commands"] = s.Commands
+		}
 	}
 	return must(m)
 }
@@ -180,6 +183,11 @@ func ChatAgentRemoved(paneID, agentID string) []byte {
 // ChatTasks carries the pane's whole background-task list.
 func ChatTasks(paneID string, tasks json.RawMessage) []byte {
 	return must(map[string]any{"t": "chat_tasks", "paneId": paneID, "tasks": tasks})
+}
+
+// ChatCommands carries the pane's whole slash-command list.
+func ChatCommands(paneID string, commands json.RawMessage) []byte {
+	return must(map[string]any{"t": "chat_commands", "paneId": paneID, "commands": commands})
 }
 
 func ChatState(paneID, st string) []byte {

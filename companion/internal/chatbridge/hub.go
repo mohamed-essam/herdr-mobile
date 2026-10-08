@@ -68,11 +68,15 @@ type Snapshot struct {
 	Missing bool
 	Agents  []json.RawMessage
 	Tasks   json.RawMessage
+	// Commands is the session's slash commands (main snapshots only); nil
+	// when the mod sent no list.
+	Commands json.RawMessage
 }
 
 // Update is one change fanned out to a pane's subscribers. Main-stream
 // subscribers get "event" | "state" | "snapshot" | "agent" (Agent is the
-// merged summary) | "agent_removed" | "tasks" (Tasks is the list); a
+// merged summary) | "agent_removed" | "tasks" (Tasks is the list) |
+// "commands" (Commands is the list); a
 // thread's subscribers get only its "event" and "snapshot". AgentID names
 // the thread or agent concerned.
 type Update struct {
@@ -84,6 +88,7 @@ type Update struct {
 	Snapshot Snapshot
 	Agent    json.RawMessage
 	Tasks    json.RawMessage
+	Commands json.RawMessage
 }
 
 type OutMsg struct {
@@ -194,6 +199,10 @@ type pane struct {
 	agents    map[string]json.RawMessage
 	tasks     json.RawMessage
 	bgRunning int
+
+	// commands is the session's latest slash-command list (nil = none). It
+	// belongs to the pane: a new epoch keeps it.
+	commands json.RawMessage
 }
 
 type Hub struct {
@@ -294,7 +303,7 @@ func (h *Hub) SyncBody(paneID, sessionID string, events []json.RawMessage, image
 
 func isChatEvent(t string) bool {
 	switch t {
-	case "user_text", "assistant_text", "tool_use", "tool_result", "task_notice", "question":
+	case "user_text", "assistant_text", "tool_use", "tool_result", "task_notice", "question", "command_output":
 		return true
 	}
 	return false
@@ -312,6 +321,7 @@ func (p *pane) apply(paneID, sessionID string, raw json.RawMessage, now time.Tim
 		AgentID   string            `json:"agentId"`
 		Agent     json.RawMessage   `json:"agent"`
 		Tasks     json.RawMessage   `json:"tasks"`
+		Commands  json.RawMessage   `json:"commands"`
 	}
 	if json.Unmarshal(raw, &head) != nil {
 		return false
@@ -335,6 +345,8 @@ func (p *pane) apply(paneID, sessionID string, raw json.RawMessage, now time.Tim
 		p.applyAgent(head.Agent)
 	case head.Type == "tasks":
 		p.applyTasks(head.Tasks)
+	case head.Type == "commands":
+		p.applyCommands(head.Commands)
 	case isChatEvent(head.Type) && head.AgentID != "":
 		p.applyThreadEvent(head.AgentID, head.Type, raw, now)
 	case head.Type == "snapshot" && head.AgentID != "":
@@ -413,6 +425,7 @@ func activityOf(typ string, raw json.RawMessage, now time.Time) *Activity {
 		Tool      string  `json:"tool"`
 		Summary   string  `json:"summary"`
 		Text      string  `json:"text"`
+		Command   string  `json:"command"`
 		TS        float64 `json:"ts"`
 		Questions []struct {
 			Question string `json:"question"`
@@ -434,6 +447,8 @@ func activityOf(typ string, raw json.RawMessage, now time.Time) *Activity {
 		a.Kind, a.Text = "user", oneLine(ev.Text)
 	case "task_notice":
 		a.Kind, a.Text = "notice", oneLine(ev.Summary)
+	case "command_output":
+		a.Kind, a.Text = "user", oneLine(ev.Command)
 	case "question":
 		a.Kind = "question"
 		if len(ev.Questions) > 0 {
@@ -564,7 +579,7 @@ func (p *pane) snapshot(paneID string) Snapshot {
 	start := max(0, len(p.events)-SnapshotTail)
 	ev := make([]Entry, len(p.events)-start)
 	copy(ev, p.events[start:])
-	return Snapshot{PaneID: paneID, Epoch: p.epoch, State: p.state, Events: ev, HasMore: start > 0, Agents: p.agentList(), Tasks: p.tasks}
+	return Snapshot{PaneID: paneID, Epoch: p.epoch, State: p.state, Events: ev, HasMore: start > 0, Agents: p.agentList(), Tasks: p.tasks, Commands: p.commands}
 }
 
 // fan delivers u to every main-stream subscriber without blocking.

@@ -79,11 +79,11 @@ func TestTermFrames(t *testing.T) {
 	}
 }
 
-func TestWelcomeAdvertisesProtocol11(t *testing.T) {
+func TestWelcomeAdvertisesProtocol12(t *testing.T) {
 	var got map[string]any
 	json.Unmarshal(Welcome("0.7.1", 14), &got)
-	if got["companionProtocol"].(float64) != 11 {
-		t.Fatalf("want companionProtocol 11, got %v", got["companionProtocol"])
+	if got["companionProtocol"].(float64) != 12 {
+		t.Fatalf("want companionProtocol 12, got %v", got["companionProtocol"])
 	}
 }
 
@@ -254,5 +254,28 @@ func TestLimitsFrame(t *testing.T) {
 	ws := got["limits"].([]any)
 	if got["t"] != "limits" || got["observedAt"].(float64) != 77 || len(ws) != 1 || ws[0].(map[string]any)["kind"] != "five_hour" {
 		t.Fatalf("frame: %+v", got)
+	}
+}
+
+func TestChatCommandsFrameAndSnapshotField(t *testing.T) {
+	var m map[string]any
+	json.Unmarshal(ChatCommands("p", json.RawMessage(`[{"name":"compact"}]`)), &m)
+	if m["t"] != "chat_commands" || m["paneId"] != "p" || len(m["commands"].([]any)) != 1 {
+		t.Fatalf("chat_commands: %v", m)
+	}
+	m = nil
+	json.Unmarshal(ChatSnapshot(chatbridge.Snapshot{PaneID: "p"}), &m)
+	if _, has := m["commands"]; has {
+		t.Fatalf("no list from the mod: no commands field: %v", m)
+	}
+	m = nil
+	json.Unmarshal(ChatSnapshot(chatbridge.Snapshot{PaneID: "p", Commands: json.RawMessage(`[{"name":"compact"}]`)}), &m)
+	if len(m["commands"].([]any)) != 1 {
+		t.Fatalf("main snapshot commands: %v", m)
+	}
+	m = nil
+	json.Unmarshal(ChatSnapshot(chatbridge.Snapshot{PaneID: "p", AgentID: "aa1", Commands: json.RawMessage(`[{"name":"compact"}]`)}), &m)
+	if _, has := m["commands"]; has {
+		t.Fatalf("thread snapshot has no commands: %v", m)
 	}
 }
