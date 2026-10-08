@@ -355,3 +355,26 @@ func TestPollOncePopulatesWorkspacesAndTabs(t *testing.T) {
 		t.Fatalf("tabs not populated: %+v", tabs)
 	}
 }
+
+func TestDisplayNamePrefersWorkspaceLabel(t *testing.T) {
+	f := newFakeHerdr(t)
+	f.SetPanes([]herdr.PaneInfo{
+		{PaneID: "w7:p1", WorkspaceID: "w7", CWD: "/home/me/work/herdr-mobile"},
+		{PaneID: "w8:p1", WorkspaceID: "w8", CWD: "/home/me/work/omega3"},
+		{PaneID: "w9:p1", WorkspaceID: "w9"},
+	})
+	f.SetWorkspaces([]herdr.WorkspaceInfo{{WorkspaceID: "w7", Label: "mobile chat"}})
+
+	e := New(Config{SocketPath: f.SocketPath(), ListenAddr: "127.0.0.1:0"})
+	e.pollOnce(context.Background())
+
+	for pane, want := range map[string]string{
+		"w7:p1": "mobile chat", // the workspace label, not the repo folder
+		"w8:p1": "omega3",      // no label: the cwd basename
+		"w9:p1": "w9",          // neither: the raw id
+	} {
+		if got := e.displayName(pane); got != want {
+			t.Errorf("displayName(%s) = %q, want %q", pane, got, want)
+		}
+	}
+}

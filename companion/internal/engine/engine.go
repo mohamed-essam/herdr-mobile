@@ -235,14 +235,15 @@ func (e *Engine) pollOnce(ctx context.Context) {
 			e.srv.Broadcast(proto.PaneUpdate(ch.Pane))
 		}
 	}
-	for _, tr := range transitions {
-		e.handleTransition(ctx, tr)
-	}
-
+	// Workspaces before transitions, so a notification title uses this poll's
+	// workspace label.
 	if ws, err := e.client.ListWorkspaces(ctx); err == nil {
 		if e.store.ApplyWorkspaces(ws) {
 			e.srv.Broadcast(proto.WorkspacesSnapshot(e.store.Workspaces()))
 		}
+	}
+	for _, tr := range transitions {
+		e.handleTransition(ctx, tr)
 	}
 	if tabs, err := e.client.ListTabs(ctx); err == nil {
 		if e.store.ApplyTabs(tabs) {
@@ -281,12 +282,18 @@ func (e *Engine) handleTransition(ctx context.Context, tr state.Transition) {
 	e.fire(ctx, push)
 }
 
-// displayName returns the friendly pane name for notification titles: the cwd
-// basename (the project folder, e.g. "omega3") if present, else the workspace
-// id. Read from the store snapshot since a Transition carries only the id.
+// displayName returns the friendly pane name for notification titles: the
+// pane's workspace label, else the cwd basename (the project folder, e.g.
+// "omega3"), else the workspace id. Read from the store since a Transition
+// carries only the ids.
 func (e *Engine) displayName(paneID string) string {
 	for _, p := range e.store.Snapshot() {
 		if p.PaneID == paneID {
+			for _, w := range e.store.Workspaces() {
+				if w.WorkspaceID == p.WorkspaceID && w.Label != "" {
+					return w.Label
+				}
+			}
 			if b := filepath.Base(p.CWD); b != "" && b != "." && b != string(filepath.Separator) {
 				return b
 			}

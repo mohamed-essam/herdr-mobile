@@ -23,7 +23,7 @@ type Notifier interface {
 }
 
 // ShouldNotify encodes the two v1 triggers. displayName is the friendly pane
-// name shown in the title (the project/cwd basename); it falls back to the
+// name shown in the title (the workspace label); it falls back to the
 // workspace id when empty. lastBody is the last non-empty output line for the
 // pane (used as the blocked notification body).
 func ShouldNotify(tr state.Transition, displayName, lastBody string) (Push, bool) {
