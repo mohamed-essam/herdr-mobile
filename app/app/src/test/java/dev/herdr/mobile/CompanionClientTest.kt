@@ -171,4 +171,27 @@ class CompanionClientTest {
         val result = withTimeout(3000) { client.closeImpact("w1") }
         assertTrue(result.isEmpty())
     }
+
+    @Test fun keepsRetryingWhenAnAttemptFailsBeforeTheReconnectJobEnds() {
+        // A dispatcher that runs calls inline makes each attempt fail inside the
+        // reconnect job that started it — the window a throttled, backgrounded
+        // phone hits when a blocked network refuses the connect instantly.
+        val inline = object : java.util.concurrent.AbstractExecutorService() {
+            override fun execute(command: Runnable) = command.run()
+            override fun shutdown() {}
+            override fun shutdownNow(): MutableList<Runnable> = mutableListOf()
+            override fun isShutdown() = false
+            override fun isTerminated() = false
+            override fun awaitTermination(timeout: Long, unit: java.util.concurrent.TimeUnit) = true
+        }
+        val attempts = java.util.concurrent.atomic.AtomicInteger()
+        val failing = OkHttpClient.Builder()
+            .dispatcher(okhttp3.Dispatcher(inline))
+            .addInterceptor { attempts.incrementAndGet(); throw java.io.IOException("network blocked") }
+            .build()
+        client = CompanionClient(failing)
+        client.connect("ws://127.0.0.1:1/")
+        Thread.sleep(3500) // attempts at 0s, 1s and 3s
+        assertTrue("only ${attempts.get()} attempt(s)", attempts.get() >= 3)
+    }
 }

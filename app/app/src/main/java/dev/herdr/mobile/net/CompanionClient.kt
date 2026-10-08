@@ -99,12 +99,16 @@ class CompanionClient(private val http: OkHttpClient = OkHttpClient()) {
         })
     }
 
-    private fun scheduleReconnect() {
+    @Synchronized private fun scheduleReconnect() {
         if (manualClose) return
-        if (reconnectJob?.isActive == true) return
+        if (reconnectJob != null) return
         reconnectJob = scope.launch {
             delay(backoffMs)
             backoffMs = (backoffMs * 2).coerceAtMost(15_000L)
+            // Stand down BEFORE opening: an attempt can fail before this job ends
+            // (instantly, on a blocked network), and its scheduleReconnect must not
+            // see a live job and give up — that left the app reconnecting forever.
+            synchronized(this@CompanionClient) { reconnectJob = null }
             if (!manualClose) openSocket()
         }
     }
@@ -241,7 +245,7 @@ class CompanionClient(private val http: OkHttpClient = OkHttpClient()) {
 
     fun close() {
         manualClose = true
-        reconnectJob?.cancel()
+        synchronized(this) { reconnectJob?.cancel(); reconnectJob = null }
         ws?.close(1000, "bye")
         ws = null
     }
