@@ -125,10 +125,23 @@ tasks running. The companion keeps up to 1000 events per thread and 20 threads p
 pane, finished tasks drop off after 10 minutes, and background shells and workflows
 that started before a plugin reload aren't recovered.
 
-Chat view v2 uses companion protocol 10. Update both the companion (rebuild and
-restart it) and the plugin (`/reload-plugins` in running Claude sessions); an older
-app keeps working against a newer companion, and a newer plugin keeps working against
-an older companion.
+The plugin also reports each session's context window and the account's 5-hour and
+7-day rate-limit windows (the figures Claude Code's status line shows). The dashboard
+shows the 5h and 7d meters with their reset times under the stat tiles and a thin
+context bar under each Claude session row; the chat and terminal headers show
+`ctx 61% · 5h 42% ↻2h13m · 7d 18% ↻Thu 14:00`. Only panes running Claude with the
+plugin have a context reading. Rate limits are only reported on a Claude
+subscription, after the first API response. A reading older than 5 minutes is dimmed
+("as of 40m ago"). The companion keeps the last rate-limit reading in
+`limits.json` under its state directory (`--state-dir`, default
+`$XDG_STATE_HOME/herdr-mobile`, falling back to `~/.local/state/herdr-mobile`), so
+the strip survives a restart. If panes on different Claude accounts report
+different readings, the strip follows whichever reported last.
+
+Chat view v2 uses companion protocol 10; context and rate limits use protocol 11.
+Update both the companion (rebuild and restart it) and the plugin (`/reload-plugins`
+in running Claude sessions); an older app keeps working against a newer companion,
+and a newer plugin keeps working against an older companion.
 
 ### App
 
