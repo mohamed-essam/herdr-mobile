@@ -66,7 +66,7 @@ func New(cfg Config) *Engine {
 	// it, never call back into the hub). The hub delivers at most one per mod
 	// sync (about once a second per pane) and only on a change.
 	e.hub.SetOnSummary(func(paneID string, s chatbridge.Summary) {
-		sum := state.Summary{Activity: (*state.Activity)(s.Activity), Ask: (*state.Ask)(s.Ask), BgRunning: s.BgRunning}
+		sum := state.Summary{Activity: (*state.Activity)(s.Activity), Ask: (*state.Ask)(s.Ask), BgRunning: s.BgRunning, Context: (*state.Context)(s.Context)}
 		if p, changed := e.store.SetSummary(paneID, sum); changed {
 			e.srv.Broadcast(proto.PaneUpdate(p))
 		}

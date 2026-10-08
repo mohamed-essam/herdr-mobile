@@ -91,6 +91,7 @@ type syncReq struct {
 	SessionID string            `json:"sessionId"`
 	Events    []json.RawMessage `json:"events"`
 	Images    map[string]Image  `json:"images"`
+	Usage     *Usage            `json:"usage"`
 }
 
 type answerReq struct {
@@ -125,6 +126,7 @@ func (h *Hub) Handler() http.Handler {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
+		h.SetUsage(req.PaneID, req.Usage)
 		msgs, resync := h.SyncBody(req.PaneID, req.SessionID, req.Events, req.Images)
 		w.Header().Set("content-type", "application/json")
 		_ = json.NewEncoder(w).Encode(syncRes{Messages: msgs, Resync: resync, Threads: true})
