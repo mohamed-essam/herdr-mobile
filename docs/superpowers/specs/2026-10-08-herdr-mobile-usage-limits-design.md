@@ -35,18 +35,31 @@ shell pane has no context reading and shows no context bar.
 
 New `hooks/usage.ts`:
 
-- `type Usage = { context?: { percent: number; tokens?: number; window: number };
-  limits: { kind: 'five_hour' | 'seven_day'; percentUsed: number; resetsAt?: string }[] }`.
-- `toUsage(u: SessionUsage | SessionMeasureInput): Usage` keeps `context` only when
-  `percent` is defined, and keeps only the `five_hour` and `seven_day` windows.
+- `type Reading = { context?: { percent: number; tokens?: number; window: number };
+  limits: { kind: 'five_hour' | 'seven_day'; percentUsed: number; resetsAt?: string }[] }`;
+  `type Usage = Reading & { limitsAt: number }`.
+- `limitsAt` is when the limits were measured (epoch ms). Each mod's limits are
+  its own process's last API response, so the companion needs the measurement
+  time to keep the newest reading across panes (see Account limits).
+- `toUsage(u: SessionUsage | SessionMeasureInput): Reading` keeps `context` only when
+  `percent` is defined, rounds `percent`, `tokens` and `window` to integers (the
+  companion decodes them as ints; a fraction would fail the whole `/sync`), and
+  keeps only the `five_hour` and `seven_day` windows. Callers add the stamp.
 
 `register.ts`:
 
-- `State.usage: Usage | null`.
-- `on('session.measure')` sets `s.usage = toUsage(e)`, then `next(e)`.
-- `session.start` and `resync` seed it with `s.usage = toUsage(await $.session.usage())`,
-  so a resumed, idle session has a reading before its next turn. A failure is
+- `State.usage: Usage | null`; `State.usageGen: number`.
+- `on('session.measure')` sets `s.usage = { ...toUsage(e), limitsAt: <now> }`
+  (every measure follows an API response) and bumps `usageGen`, then `next(e)`.
+- `session.start` and `resync` seed it from `$.session.usage()`, so a resumed,
+  idle session has a reading before its next turn. The seed has no stamp of its
+  own: `limitsAt` is the held reading's, else `SessionUsage.startedAt` (a lower
+  bound on the reading's age). It writes only if `usageGen` is unchanged across
+  its read, so a measure or reset that landed meanwhile wins. A failure is
   ignored (the next `session.measure` fills it).
+- `session.end` with `clear`/`resume` keeps the held `limits` and `limitsAt`
+  and drops only `context` (a `usage` without `context` clears the pane's
+  context in the companion), and bumps `usageGen`.
 - `tick` adds `usage: s.usage` to every `/sync` body while it is non-null, also
   on held (offline/building) heartbeats. It is ~200 bytes over a Unix socket
   once a second, so no diffing; the companion deduplicates. Body size
@@ -57,7 +70,8 @@ New `hooks/usage.ts`:
 
 ### Per-pane context
 
-- `chatbridge.syncReq` gains `Usage *Usage` (`context`, `limits`).
+- `chatbridge.syncReq` gains `Usage *Usage` (`context`, `limits`, `limitsAt`
+  — epoch ms, 0 from a mod that sends none).
 - `chatbridge.pane` gains `context *Context` (`Percent int`, `Tokens int`,
   `Window int`), set from each `/sync` that carries `usage.context`.
 - `Summary` gains `Context *Context`; `pane.summary()` includes it, so it is
@@ -69,13 +83,17 @@ New `hooks/usage.ts`:
 
 ### Account limits
 
-- `chatbridge.Hub` keeps `limits Limits{ Windows []Window; ObservedAt int64 }`
-  (`Window{Kind string; PercentUsed float64; ResetsAt string}`), replaced by any
-  `/sync` whose `usage.limits` is non-empty and differs from the stored one.
-  Newest reading wins across panes. ObservedAt is updated on every such `/sync`
-  (even when unchanged) but only broadcast when windows change or ObservedAt
-  advances by ≥ 60 s, so the app's "as of" age stays accurate without a frame
-  per second.
+- `limits.Tracker` keeps `Limits{ Windows []Window; ObservedAt int64 }`
+  (`Window{Kind string; PercentUsed float64; ResetsAt string}`), fed by
+  `Hub.SetOnLimits(func(ws, at))` for every `/sync` whose `usage.limits` is
+  non-empty. The newest *measurement* wins across panes: a reading is taken only
+  when its `usage.limitsAt` is newer than the held `ObservedAt`; an older or
+  equal one is ignored (no state change, broadcast or save), so two panes
+  resending their own last readings every second do not flap. `limitsAt == 0`
+  (an older mod) is taken only when there is no reading, stamped now.
+  `ObservedAt` is the reading's `limitsAt`. A taken reading is broadcast only
+  when the windows change or `ObservedAt` advances by ≥ 60 s since the last
+  broadcast, so the app's "as of" age stays accurate without a frame per second.
 - Persisted to `<state dir>/limits.json` (write temp file + rename) on each
   broadcast, loaded at startup. State dir: new `--state-dir` flag, default
   `$XDG_STATE_HOME/herdr-mobile`, falling back to `~/.local/state/herdr-mobile`;
@@ -86,7 +104,8 @@ New `hooks/usage.ts`:
 - `companionProtocol` 10 → 11. Older apps ignore the frame and the field.
 
 Known limitation: if panes on different Claude accounts report different
-readings, the strip follows whichever reported last.
+readings, the strip follows whichever was measured last (stamped by the mod,
+`usage.limitsAt`), not a per-account reading.
 
 ## 3. App (`app/`)
 
@@ -113,7 +132,10 @@ readings, the strip follows whichever reported last.
 ### Dashboard
 
 - Under `StatTiles`: a strip with the `five_hour` and `seven_day` meters on two
-  lines. Hidden while no reading has ever arrived.
+  lines. Hidden while no reading has ever arrived, and when every shown window
+  has reset and the reading is stale (`limitsWorthShowing`): an old persisted
+  reading would only say `5h — · 7d —`. The header line's limits part follows
+  the same rule.
 - `PaneListRow`: a `ContextBar` across the bottom of the text column when
   `pane.context != null`.
 
@@ -129,10 +151,14 @@ readings, the strip follows whichever reported last.
 ## 4. Testing
 
 - **Mod:** `toUsage` filtering (no percent → no context; `spend_limit`
-  dropped); `/sync` body carries `usage` once set and omits it before; seeded on
-  `session.start`. The test kit stubs `$.session.usage`.
+  dropped) and rounding; `/sync` body carries `usage` once set and omits it
+  before, held heartbeats included; seeded on `session.start` with
+  `limitsAt = startedAt`; `session.measure` stamps `limitsAt`; a seed resolving
+  after a measure does not overwrite it; `/clear` keeps limits, drops context,
+  and the resync seed refills it. The test kit stubs `$.session.usage`.
 - **Companion:** context set from `/sync`, cleared when the mod goes offline;
-  `SetSummary` with the struct; limits newest-wins, persist and reload,
+  `SetSummary` with the struct; limits newest-measurement-wins (alternating
+  panes broadcast once; unstamped only when empty), persist and reload,
   broadcast only on change or ≥ 60 s age advance; `limits` frame in the connect
   burst; welcome says protocol 11.
 - **App (JVM):** frame and field parsing; `formatReset` for both kinds;

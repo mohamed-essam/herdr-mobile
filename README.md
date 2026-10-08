@@ -136,7 +136,7 @@ subscription, after the first API response. A reading older than 5 minutes is di
 `limits.json` under its state directory (`--state-dir`, default
 `$XDG_STATE_HOME/herdr-mobile`, falling back to `~/.local/state/herdr-mobile`), so
 the strip survives a restart. If panes on different Claude accounts report
-different readings, the strip follows whichever reported last.
+different readings, the strip follows whichever was measured last.
 
 Chat view v2 uses companion protocol 10; context and rate limits use protocol 11.
 Update both the companion (rebuild and restart it) and the plugin (`/reload-plugins`

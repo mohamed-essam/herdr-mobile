@@ -10,14 +10,14 @@ All notable changes to this project are documented here. The format is based on
   meters with their reset times in a strip under the stat tiles, and a thin context bar under each Claude session
   row; the chat, terminal and thread headers show `ctx … · 5h … · 7d …` on one line. The herdr-chat plugin reads
   the status-line figures (`session.measure`, seeded from `$.session.usage()`) and adds `usage`
-  (`{context?: {percent, tokens?, window}, limits: [{kind, percentUsed, resetsAt?}]}`, only `five_hour`/`seven_day`)
-  to every `/sync` body. Pane state gains `context` (`{percent, tokens, window}`, omitted while no herdr-chat mod
+  (`{context?: {percent, tokens?, window}, limits: [{kind, percentUsed, resetsAt?}], limitsAt}`, only
+  `five_hour`/`seven_day`; `limitsAt` is when the limits were measured, epoch ms) to every `/sync` body. Pane state gains `context` (`{percent, tokens, window}`, omitted while no herdr-chat mod
   is live). New frame `limits` (`{"t":"limits","limits":[{kind, percentUsed, resetsAt}],"observedAt":ms}`), sent
   when the reading changes (or its age advances by 60 s) and in the connect burst after `workspaces`. The newest
-  reading across panes wins. The companion persists it to `<state dir>/limits.json` (new `--state-dir` flag,
+  measurement across panes wins (by `limitsAt`), so idle panes resending older readings don't flap it. The companion persists it to `<state dir>/limits.json` (new `--state-dir` flag,
   default `$XDG_STATE_HOME/herdr-mobile`, else `~/.local/state/herdr-mobile`, created 0700) so the strip survives
   a restart; the app dims a reading older than 5 minutes ("as of … ago") and shows `—` for a window whose reset
-  time has passed. Update both the companion and the herdr-chat plugin; older apps ignore the new frame and field.
+  time has passed (and hides the strip once every window has reset on a stale reading). Update both the companion and the herdr-chat plugin; older apps ignore the new frame and field.
 
 - Chat view v2 (companion protocol 10): subagents and workflow agents show as cards under the Agent/Workflow call
   that started them, with live status and activity; tapping one opens a read-only thread (nested subagents stack,
