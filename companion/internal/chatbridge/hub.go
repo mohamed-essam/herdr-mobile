@@ -126,6 +126,8 @@ type Context struct {
 type Usage struct {
 	Context *Context        `json:"context"`
 	Limits  []limits.Window `json:"limits"`
+	// LimitsAt is when the mod measured Limits (epoch ms; 0 from an older mod).
+	LimitsAt int64 `json:"limitsAt"`
 }
 
 // Summary is what the dashboard shows for a pane: its latest activity,
@@ -200,7 +202,7 @@ type Hub struct {
 	now        func() time.Time
 	onLiveness func(paneID string, live bool)
 	onSummary  func(paneID string, s Summary)
-	onLimits   func([]limits.Window)
+	onLimits   func([]limits.Window, int64)
 	nextSub    int
 	nextMsg    int
 	answerWait time.Duration // the /answer hold; tests shorten it
@@ -217,7 +219,7 @@ func NewHub(now func() time.Time) *Hub {
 	if now == nil {
 		now = time.Now
 	}
-	return &Hub{panes: map[string]*pane{}, now: now, onLiveness: func(string, bool) {}, onSummary: func(string, Summary) {}, onLimits: func([]limits.Window) {},
+	return &Hub{panes: map[string]*pane{}, now: now, onLiveness: func(string, bool) {}, onSummary: func(string, Summary) {}, onLimits: func([]limits.Window, int64) {},
 		notified: map[string]bool{}, summaries: map[string]Summary{}, answerWait: AnswerWait}
 }
 
@@ -860,10 +862,10 @@ func (h *Hub) notify(paneID string) {
 	}
 }
 
-// SetOnLimits registers the callback for a /sync's rate-limit windows. It
-// is called without the hub's lock held, once per /sync that carries any.
-// Set it before the hub is used.
-func (h *Hub) SetOnLimits(fn func([]limits.Window)) { h.onLimits = fn }
+// SetOnLimits registers the callback for a /sync's rate-limit windows and
+// their measurement time (Usage.LimitsAt). It is called without the hub's
+// lock held, once per /sync that carries any. Set it before the hub is used.
+func (h *Hub) SetOnLimits(fn func([]limits.Window, int64)) { h.onLimits = fn }
 
 // SetUsage records a /sync body's usage, ahead of SyncBody (whose summary
 // delivery then carries the context). nil (an older mod) changes nothing;
@@ -876,6 +878,6 @@ func (h *Hub) SetUsage(paneID string, u *Usage) {
 	h.get(paneID).context = u.Context
 	h.mu.Unlock()
 	if len(u.Limits) > 0 {
-		h.onLimits(u.Limits)
+		h.onLimits(u.Limits, u.LimitsAt)
 	}
 }

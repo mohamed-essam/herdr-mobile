@@ -122,8 +122,9 @@ type Store struct {
 	mu    sync.Mutex
 	panes map[string]Pane
 	chat  map[string]bool
-	// summary holds each pane's Activity/Ask, set by SetSummary; the pointers
-	// are never mutated, so Pane values stay comparable across polls.
+	// summary holds each pane's Activity/Ask/BgRunning/Context, set by
+	// SetSummary; the pointers are never mutated, so Pane values stay
+	// comparable across polls.
 	summary map[string]Summary
 
 	workspaces   []Workspace

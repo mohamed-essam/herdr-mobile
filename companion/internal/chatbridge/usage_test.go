@@ -66,7 +66,7 @@ func TestUsageLimitsGoToOnLimits(t *testing.T) {
 	h := NewHub(nil)
 	var mu sync.Mutex
 	var got [][]limits.Window
-	h.SetOnLimits(func(ws []limits.Window) { mu.Lock(); got = append(got, ws); mu.Unlock() })
+	h.SetOnLimits(func(ws []limits.Window, _ int64) { mu.Lock(); got = append(got, ws); mu.Unlock() })
 	h.SetUsage("w1:p1", &Usage{})
 	h.SetUsage("w1:p1", &Usage{Limits: []limits.Window{{Kind: "five_hour", PercentUsed: 42}}})
 	mu.Lock()
@@ -81,8 +81,9 @@ func TestSyncHandlerReadsUsage(t *testing.T) {
 	var log summaryLog
 	log.record(h)
 	var limitsSeen []limits.Window
-	h.SetOnLimits(func(ws []limits.Window) { limitsSeen = ws })
-	body := `{"paneId":"w1:p1","sessionId":"s1","events":[],"usage":{"context":{"percent":25,"tokens":50000,"window":200000},"limits":[{"kind":"seven_day","percentUsed":18,"resetsAt":"2026-10-15T14:00:00Z"}]}}`
+	var atSeen int64
+	h.SetOnLimits(func(ws []limits.Window, at int64) { limitsSeen, atSeen = ws, at })
+	body := `{"paneId":"w1:p1","sessionId":"s1","events":[],"usage":{"context":{"percent":25,"tokens":50000,"window":200000},"limits":[{"kind":"seven_day","percentUsed":18,"resetsAt":"2026-10-15T14:00:00Z"}],"limitsAt":1760000000000}}`
 	rec := httptest.NewRecorder()
 	h.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/sync", bytes.NewBufferString(body)))
 	if rec.Code != 200 {
@@ -91,7 +92,7 @@ func TestSyncHandlerReadsUsage(t *testing.T) {
 	if c := log.last(t).Context; c == nil || c.Percent != 25 {
 		t.Fatalf("context: %+v", c)
 	}
-	if len(limitsSeen) != 1 || limitsSeen[0].ResetsAt != "2026-10-15T14:00:00Z" {
-		t.Fatalf("limits: %+v", limitsSeen)
+	if len(limitsSeen) != 1 || limitsSeen[0].ResetsAt != "2026-10-15T14:00:00Z" || atSeen != 1760000000000 {
+		t.Fatalf("limits: %+v at %d", limitsSeen, atSeen)
 	}
 }

@@ -14,15 +14,16 @@ import (
 // before the reading goes out again (it keeps the app's "as of" age true).
 const Rebroadcast = 60 * time.Second
 
-// Limits is the latest reading: its windows and when a mod last reported
-// it (epoch ms).
+// Limits is the latest reading: its windows and when they were measured
+// (epoch ms, the mod's stamp).
 type Limits struct {
 	Windows    []Window `json:"limits"`
 	ObservedAt int64    `json:"observedAt"`
 }
 
-// Tracker keeps the newest reading any pane's mod reported (one account is
-// assumed: readings from several overwrite each other), saved to path.
+// Tracker keeps the newest measurement any pane's mod reported (one account
+// is assumed: a newer reading from any pane replaces an older one), saved to
+// path.
 type Tracker struct {
 	mu       sync.Mutex
 	path     string
@@ -64,21 +65,32 @@ func (t *Tracker) Current() (Limits, bool) {
 	return t.cur, len(t.cur.Windows) > 0
 }
 
-// Observe records a mod's windows as the newest reading, and saves and
-// broadcasts it when they changed or Rebroadcast passed since the last.
-func (t *Tracker) Observe(ws []Window) {
+// Observe records a mod's windows, measured at at (epoch ms), when they are
+// newer than the held reading: every pane's mod resends its own last reading,
+// so the newest measurement wins, not the last one sent. An older-or-equal
+// one is ignored. at == 0 (an older mod sends no stamp) is taken only when
+// there is no reading, stamped now. A taken reading is saved and broadcast
+// when the windows changed or Rebroadcast passed since the last.
+func (t *Tracker) Observe(ws []Window, at int64) {
 	if len(ws) == 0 {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	now := t.now().UnixMilli()
-	changed := !slices.Equal(ws, t.cur.Windows)
-	t.cur = Limits{Windows: slices.Clone(ws), ObservedAt: now}
-	if !changed && now-t.sentAt < Rebroadcast.Milliseconds() {
+	if at == 0 {
+		if len(t.cur.Windows) > 0 {
+			return
+		}
+		at = t.now().UnixMilli()
+	} else if at <= t.cur.ObservedAt {
 		return
 	}
-	t.sentAt = now
+	changed := !slices.Equal(ws, t.cur.Windows)
+	t.cur = Limits{Windows: slices.Clone(ws), ObservedAt: at}
+	if !changed && at-t.sentAt < Rebroadcast.Milliseconds() {
+		return
+	}
+	t.sentAt = at
 	t.save()
 	t.onChange(t.cur)
 }

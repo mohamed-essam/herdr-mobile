@@ -74,6 +74,9 @@ func main() {
 		log.Printf("WARNING: listening on %s — the v1 API has no authentication and can send input to your terminals. Only bind to a private (e.g. Tailscale) address, never a public one.", *listen)
 	}
 	log.Printf("herdr-mobiled: socket=%s listen=%s chat=%s state=%s", *socket, *listen, *chatSock, *stateDir)
+	if *stateDir == "" {
+		log.Printf("herdr-mobiled: no state dir: limits persistence disabled")
+	}
 	if err := e.Run(ctx); err != nil {
 		log.Fatal(err)
 	}
