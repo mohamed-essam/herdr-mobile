@@ -5,7 +5,7 @@ import { eventsFromTranscript } from '../hooks/transcript'
 import { linkSpawn, newAgentsState, recordWorkflow } from '../hooks/agents'
 import { taskFromLaunch } from '../hooks/tasks'
 
-const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], imageQueue: [], offline: false, inFlight: false, building: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined, historyLacksPath: false, openQuestions: new Map(), agents: newAgentsState(), tasks: new Map(), tasksQueued: false, threadQueue: [], threads: true, threadsMissed: false })
+const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], imageQueue: [], offline: false, inFlight: false, building: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined, historyLacksPath: false, openQuestions: new Map(), agents: newAgentsState(), tasks: new Map(), tasksQueued: false, threadQueue: [], threads: true, threadsMissed: false, usage: null })
 
 const MB = 1024 * 1024
 const FETCH_BODY_LIMIT = 4 * MB
@@ -37,7 +37,7 @@ const RESYNC = ['hello', 'snapshot_begin', 'snapshot_chunk', 'snapshot_end']
 
 // Wires the world beneath the plugin: env, clock, session reads, and a fake
 // companion that records each /sync body and answers with queued messages.
-function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boolean; xdg?: string; env?: Record<string, string>; threads?: boolean } = {}) {
+function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boolean; xdg?: string; env?: Record<string, string>; threads?: boolean; usage?: unknown } = {}) {
   if (opts.xdg) mock.env(on, { HERDR_PANE_ID: 'w1:p1', XDG_RUNTIME_DIR: opts.xdg })
   else if (opts.nosock) mock.env(on, { HERDR_PANE_ID: 'w1:p1' })
   else mock.env(on, opts.pane === undefined ? { HERDR_PANE_ID: 'w1:p1', HERDR_MOBILE_CHAT_SOCK: '/s/chat.sock', ...opts.env } : opts.pane ? { HERDR_PANE_ID: opts.pane, HERDR_MOBILE_CHAT_SOCK: '/s/chat.sock' } : {})
@@ -128,6 +128,8 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
   on('classic.UserPromptSubmit', () => ({}))
   on('classic.Stop', () => ({}))
   on('session.id', () => ({ value: current.id }))
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  if (opts.usage !== undefined) on('session.usage', () => ({ value: opts.usage as never }))
   const counts = { messages: 0 }
   on('session.messages', () => { counts.messages++; return { value: current.history as never } })
   on('http.fetch', ($, e) => {
@@ -197,6 +199,45 @@ const imageRow = (uuid: string, data: string) =>
 const start = ($: any) => $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
 
 describe('herdr-chat', () => {
+  const USAGE = {
+    startedAt: 0,
+    context: { tokens: 50000, window: 200000, percent: 25 },
+    rateLimits: [{ kind: 'five_hour', percentUsed: 10, resetsAt: '2026-10-08T19:40:00Z' }],
+  }
+
+  test('the resync seeds usage from session.usage and every sync carries it', async ($, on) => {
+    const w = world(on, { usage: USAGE })
+    await start($)
+    await w.clock.advance(3000)
+    const last = w.syncs[w.syncs.length - 1] as any
+    expect(last.usage).toEqual({
+      context: { percent: 25, tokens: 50000, window: 200000 },
+      limits: [{ kind: 'five_hour', percentUsed: 10, resetsAt: '2026-10-08T19:40:00Z' }],
+    })
+  })
+
+  test('session.measure replaces the reading', async ($, on) => {
+    const w = world(on, { usage: USAGE })
+    await start($)
+    await w.clock.advance(2000)
+    await $.session.measure({
+      context: { tokens: 160000, window: 200000, percent: 80 },
+      rateLimits: [{ kind: 'seven_day', percentUsed: 30 }],
+      changed: ['context', 'rateLimits'],
+    })
+    await w.clock.advance(1000)
+    const last = w.syncs[w.syncs.length - 1] as any
+    expect(last.usage).toEqual({ context: { percent: 80, tokens: 160000, window: 200000 }, limits: [{ kind: 'seven_day', percentUsed: 30 }] })
+  })
+
+  test('no usage hook: syncs carry no usage', async ($, on) => {
+    const w = world(on)
+    await start($)
+    await w.clock.advance(3000)
+    expect(w.syncs.length).toBeGreaterThan(0)
+    for (const s of w.syncs as any[]) expect(s.usage).toBeUndefined()
+  })
+
   test('hello and the chunked history go out once the history is built', async ($, on) => {
     const w = world(on)
     await start($)

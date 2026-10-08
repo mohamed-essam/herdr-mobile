@@ -3,6 +3,7 @@ import { agentControls, forgetWorkflow, linkFromMeta, linkJournal, linkSpawn, ne
 import { listStatus, newestAgents, parseListing, resyncTasks, THREAD_EVENTS, type AgentFile } from './resync'
 import { expireTasks, noticeStatus, taskFromLaunch, taskFromNotice, taskFromStop, tasksControl, type TasksControl, type TasksState } from './tasks'
 import { normalizeBlocks, normalizeSnapshot, shouldForward, taskNotices, utf8Bytes, type ChatEvent, type ChatImage, type Normalized } from './normalize'
+import { toUsage, type Usage } from './usage'
 import { addTranscriptLine, finishTranscriptHistory, HISTORY_IMAGES, newTranscriptHistory, splitPiece, type FinishedHistory, type TranscriptOpts } from './transcript'
 
 // History goes out as begin (`total`: its event count), chunks, end; an
@@ -88,6 +89,9 @@ export type State = {
   // `threadsMissed` asks for a resync once it says so.
   threads: boolean
   threadsMissed: boolean
+  // The latest status-line figures (session.measure, seeded by
+  // $.session.usage() at each resync); sent on every /sync while set.
+  usage: Usage | null
 }
 
 export type QueuedImage = { id: string; img: ChatImage; bytes: number }
@@ -282,7 +286,19 @@ function resync($: EngineInterface, s: State) {
   }
   s.needResync = false
   s.building = true
+  void seedUsage($, s)
   void buildHistory($, s)
+}
+
+// Reads the status line's figures once; a session.measure that landed
+// meanwhile is newer and wins. An engine without the op leaves usage unset.
+async function seedUsage($: EngineInterface, s: State) {
+  try {
+    const u = toUsage(await $.session.usage())
+    if (!s.usage) s.usage = u
+  } catch {
+    // the next session.measure fills it
+  }
 }
 
 // Reads the session fresh (the transcript read can take several ticks) and
@@ -471,7 +487,7 @@ function newestReferenced(events: readonly ChatEvent[], images: Record<string, C
 // has room (the first one goes even alone in a body too small for it, but
 // only in a body that is otherwise empty).
 function takeBody(s: State): { events: Outgoing[]; images: Record<string, ChatImage> } {
-  let bytes = utf8Bytes(JSON.stringify({ paneId: s.paneId, sessionId: s.sessionId, events: [], images: {} }))
+  let bytes = utf8Bytes(JSON.stringify({ paneId: s.paneId, sessionId: s.sessionId, events: [], images: {}, ...(s.usage ? { usage: s.usage } : {}) }))
   let n = 0
   let chunks = 0
   for (; n < s.pending.length; n++) {
@@ -564,6 +580,7 @@ async function tick($: EngineInterface, s: State) {
         sessionId: s.sessionId,
         events,
         ...(Object.keys(images).length ? { images } : {}),
+        ...(s.usage ? { usage: s.usage } : {}),
       }),
     })
     if (!res.ok) throw new Error(`sync ${res.status}`)
@@ -756,6 +773,7 @@ export const register: Register = on => {
     threadQueue: [],
     threads: false,
     threadsMissed: false,
+    usage: null,
   }
 
   // Only remembers the path; the read happens at the next resync.
@@ -808,6 +826,7 @@ export const register: Register = on => {
       s.pending = []
       s.imageQueue = []
       s.threadQueue = []
+      s.usage = null
       s.needResync = true
       // The new session's transcript is found by its new id at the resync, or
       // named by its own classic event (whose arrival upgrades an api-form
@@ -824,6 +843,11 @@ export const register: Register = on => {
     const r = await next(e)
     queueAppended(s, e, r.message)
     return r
+  })
+
+  on('session.measure', async ($, e, next) => {
+    s.usage = toUsage(e)
+    return next(e)
   })
 
   // The terminal dialog races the phone: the question rides the next sync and
