@@ -45,6 +45,21 @@ class SlashCommandsTest {
         assertEquals(listOf("m2"), v.pending.map { it.id })
     }
 
+    @Test fun aClearIsDeliveredByTheNewSessionsSnapshot() {
+        // /clear starts a new session: its echo never arrives, the new epoch does.
+        var v = ChatReducer.onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", emptyList()), 0)
+        v = ChatReducer.addPending(v, "m1", "/clear", 0)
+        v = ChatReducer.addPending(v, "m2", "hello", 0)
+        v = ChatReducer.onFrame(v, ServerFrame.ChatSnapshot("p", 2, "idle", emptyList()), 0)
+        assertEquals(listOf("m2"), v.pending.map { it.id })
+        // Its aliases too; a resync of the same epoch confirms nothing.
+        v = ChatReducer.addPending(v, "m3", "/reset", 0)
+        v = ChatReducer.onFrame(v, ServerFrame.ChatSnapshot("p", 2, "idle", emptyList()), 0)
+        assertEquals(listOf("m2", "m3"), v.pending.map { it.id })
+        v = ChatReducer.onFrame(v, ServerFrame.ChatSnapshot("p", 3, "idle", emptyList()), 0)
+        assertEquals(listOf("m2"), v.pending.map { it.id })
+    }
+
     @Test fun pickerOpensOnlyWhileTypingTheName() {
         assertNotNull(slashMatches("/", cmds))
         assertNotNull(slashMatches("/co", cmds))

@@ -1,11 +1,14 @@
 package dev.herdr.mobile
 
 import dev.herdr.mobile.net.BgTask
+import dev.herdr.mobile.net.parseBgTask
 import dev.herdr.mobile.ui.TaskCounts
 import dev.herdr.mobile.ui.stripLabel
 import dev.herdr.mobile.ui.taskCounts
 import dev.herdr.mobile.ui.taskDuration
+import dev.herdr.mobile.ui.taskFullText
 import dev.herdr.mobile.ui.taskGlyph
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -46,5 +49,22 @@ class TasksModelTest {
         assertEquals("⧉", taskGlyph("workflow"))
         assertEquals("◉", taskGlyph("monitor"))
         assertEquals("•", taskGlyph("other"))
+    }
+
+    @Test fun parsesTheWholeCommandAndDescription() {
+        val t = parseBgTask(Json.parseToJsonElement(
+            """{"id":"b1","kind":"shell","label":"bash /a/b…","toolUseId":"tu","status":"running","startedAt":1,""" +
+                """"detail":"bash /a/b/c.sh\n  --x","description":"Probe it"}"""))!!
+        assertEquals("bash /a/b/c.sh\n  --x", t.detail)
+        assertEquals("Probe it", t.description)
+        // An older mod sends neither.
+        val old = parseBgTask(Json.parseToJsonElement("""{"id":"b1","kind":"shell","label":"ls"}"""))!!
+        assertNull(old.detail)
+        assertNull(old.description)
+    }
+
+    @Test fun fullTextPrefersTheWholeCommand() {
+        assertEquals("bash /a/b/c.sh", taskFullText(task("running").copy(label = "bash /a/…", detail = "bash /a/b/c.sh")))
+        assertEquals("label", taskFullText(task("running")))
     }
 }

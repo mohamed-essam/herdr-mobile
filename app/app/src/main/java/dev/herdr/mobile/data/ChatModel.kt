@@ -87,7 +87,11 @@ object ChatReducer {
                 epoch = f.epoch,
                 entries = entries,
                 lastSeq = maxOf(f.entries.maxOfOrNull { it.seq } ?: 0, f.maxSeq),
-                pending = confirm(v.pending, snapshotCandidates(v, f)),
+                pending = confirm(v.pending, snapshotCandidates(v, f)).let { p ->
+                    // A /clear's echo goes with the old session: the new
+                    // session's epoch is its delivery.
+                    if (v.loaded && f.epoch != v.epoch) p.filterNot { it.status != PendingStatus.Failed && startsNewSession(it.text) } else p
+                },
                 gap = false,
                 hasMore = f.hasMore || entries.size < all.size,
                 loadingOlder = false,
@@ -230,6 +234,9 @@ object ChatReducer {
         else f.entries.mapNotNull { userText(it) }.takeLast(v.pending.count { it.status != PendingStatus.Failed })
 
     private fun userText(e: ChatEntry): String? = (e.event as? ChatEvent.UserText)?.text?.trim()
+
+    private fun startsNewSession(text: String): Boolean =
+        text.substringBefore(' ').substringBefore('\n') in setOf("/clear", "/reset", "/new")
 
     // A command comes back as `/name args`, however the space after its name was typed.
     private fun sameText(a: String, b: String): Boolean =

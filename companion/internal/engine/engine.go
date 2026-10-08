@@ -251,6 +251,8 @@ func (e *Engine) pollOnce(ctx context.Context) {
 		if ch.Kind == "removed" {
 			e.hub.Drop(ch.PaneID)
 			e.srv.Broadcast(proto.PaneRemoved(ch.PaneID))
+			// A closed pane's notification would only lead nowhere.
+			e.fire(ctx, notify.Clear(ch.PaneID, ch.Pane.WorkspaceID))
 		} else {
 			e.srv.Broadcast(proto.PaneUpdate(ch.Pane))
 		}
@@ -290,11 +292,16 @@ func (e *Engine) handleTransition(ctx context.Context, tr state.Transition) {
 			case <-ctx.Done():
 			case <-time.After(e.cfg.DebounceFinished):
 				for _, p := range e.store.Snapshot() {
-					if p.PaneID == tr.PaneID && p.AgentStatus == "working" {
+					if p.PaneID != tr.PaneID {
+						continue
+					}
+					if p.AgentStatus == "working" {
 						return // resumed; suppress
 					}
+					e.fire(ctx, push)
+					return
 				}
-				e.fire(ctx, push)
+				// The pane closed meanwhile: nothing to tell.
 			}
 		}()
 		return

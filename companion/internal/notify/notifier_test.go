@@ -60,6 +60,19 @@ func TestShouldNotifyClearOnResume(t *testing.T) {
 	}
 }
 
+func TestShouldNotifyClearWhenAgentExits(t *testing.T) {
+	// The agent quit (the pane stays, as a shell): its notification goes.
+	p, ok := ShouldNotify(state.Transition{PaneID: "w6:p1", WorkspaceID: "w6", From: "blocked", To: "unknown", AgentGone: true}, "", "")
+	if !ok || p.Kind != "clear" || p.PaneID != "w6:p1" {
+		t.Fatalf("agent exit want clear push, got %+v ok=%v", p, ok)
+	}
+	// Even from working, it is not a "finished".
+	p, ok = ShouldNotify(state.Transition{PaneID: "w6:p1", WorkspaceID: "w6", From: "working", To: "idle", AgentGone: true}, "", "")
+	if !ok || p.Kind != "clear" {
+		t.Fatalf("agent exit from working want clear push, got %+v ok=%v", p, ok)
+	}
+}
+
 func TestHTTPNotifierPostsJSON(t *testing.T) {
 	got := make(chan Push, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

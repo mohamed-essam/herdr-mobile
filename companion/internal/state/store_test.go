@@ -41,6 +41,26 @@ func TestApplyDetectsNewChangedRemoved(t *testing.T) {
 	if len(ch) != 1 || ch[0].Kind != "removed" || ch[0].PaneID != "w6:p1" {
 		t.Fatalf("want removed, got %+v", ch)
 	}
+	// The removal names the workspace the pane was in.
+	if ch[0].Pane.WorkspaceID != "w6" {
+		t.Fatalf("removed change should carry the old pane, got %+v", ch[0])
+	}
+}
+
+func TestApplyReportsAgentExit(t *testing.T) {
+	s := NewStore()
+	s.Apply(infos(herdr.PaneInfo{PaneID: "w6:p1", WorkspaceID: "w6", Agent: "claude", AgentStatus: "blocked"}))
+	_, tr := s.Apply(infos(herdr.PaneInfo{PaneID: "w6:p1", WorkspaceID: "w6", AgentStatus: "blocked"}))
+	if len(tr) != 1 || !tr[0].AgentGone || tr[0].PaneID != "w6:p1" {
+		t.Fatalf("agent leaving the pane should be a transition with AgentGone, got %+v", tr)
+	}
+	// A pane that never had an agent reports nothing.
+	_, tr = s.Apply(infos(herdr.PaneInfo{PaneID: "w6:p1", WorkspaceID: "w6", AgentStatus: "unknown"}))
+	for _, x := range tr {
+		if x.AgentGone {
+			t.Fatalf("no agent to lose, got %+v", tr)
+		}
+	}
 }
 
 func TestToPaneCarriesTerminalID(t *testing.T) {

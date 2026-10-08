@@ -109,13 +109,16 @@ type Tab struct {
 }
 
 type Change struct {
-	Kind   string `json:"-"` // "update" | "removed"
+	Kind string `json:"-"` // "update" | "removed"
+	// Pane is the pane as it is now; for a removal, as it was last seen.
 	Pane   Pane   `json:"pane,omitempty"`
 	PaneID string `json:"paneId,omitempty"`
 }
 
 type Transition struct {
 	PaneID, WorkspaceID, From, To string
+	// AgentGone: the pane's agent exited (the pane stays, e.g. as a shell).
+	AgentGone bool
 }
 
 type Store struct {
@@ -172,19 +175,21 @@ func (s *Store) Apply(infos []herdr.PaneInfo) ([]Change, []Transition) {
 			s.panes[np.PaneID] = np
 			changes = append(changes, Change{Kind: "update", Pane: np})
 		}
-		if old.AgentStatus != np.AgentStatus {
+		gone := old.Agent != "" && np.Agent == ""
+		if old.AgentStatus != np.AgentStatus || gone {
 			transitions = append(transitions, Transition{PaneID: np.PaneID,
-				WorkspaceID: np.WorkspaceID, From: old.AgentStatus, To: np.AgentStatus})
+				WorkspaceID: np.WorkspaceID, From: old.AgentStatus, To: np.AgentStatus, AgentGone: gone})
 			s.lastActivity[np.WorkspaceID] = s.now() // status transition
 		}
 	}
 	for id := range s.panes {
 		if !seen[id] {
-			ws := s.panes[id].WorkspaceID
+			old := s.panes[id]
+			ws := old.WorkspaceID
 			delete(s.panes, id)
 			delete(s.chat, id)
 			delete(s.summary, id)
-			changes = append(changes, Change{Kind: "removed", PaneID: id})
+			changes = append(changes, Change{Kind: "removed", PaneID: id, Pane: old})
 			s.lastActivity[ws] = s.now() // removed
 		}
 	}

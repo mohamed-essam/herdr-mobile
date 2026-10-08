@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { expireTasks, LABEL_MAX, taskFromLaunch, taskFromNotice, taskFromStop, tasksControl, TASK_TTL_MS, type TasksState } from '../hooks/tasks'
+import { DETAIL_MAX, expireTasks, LABEL_MAX, taskFromLaunch, taskFromNotice, taskFromStop, tasksControl, TASK_TTL_MS, type TasksState } from '../hooks/tasks'
 
 // The spike's launch results.
 const BASH = { backgroundTaskId: 'b4prbe90d', stdout: '', stderr: '' }
@@ -23,8 +23,24 @@ describe('taskFromLaunch', () => {
       { id: 'b4prbe90d', kind: 'shell', label: 'sleep 25 && echo hi', toolUseId: 'toolu_b', status: 'running', startedAt: 100 },
       { id: 'a0ab069d9186e35de', kind: 'subagent', label: 'Background echo test', toolUseId: 'toolu_a', status: 'running', startedAt: 200 },
       { id: 'wfu18ne1l', kind: 'workflow', label: 'tiny-two-agents', toolUseId: 'toolu_w', status: 'running', startedAt: 300 },
-      { id: 'm1', kind: 'monitor', label: 'watch logs', toolUseId: 'toolu_m', status: 'running', startedAt: 400 },
+      { id: 'm1', kind: 'monitor', label: 'watch logs', toolUseId: 'toolu_m', status: 'running', startedAt: 400, detail: 'tail -f x' },
     ])
+  })
+  test('a shell keeps its whole command, newlines and all, and its description', () => {
+    const t: TasksState = new Map()
+    const command = `bash ${'/home/u/tmp/scratchpad/'.repeat(8)}probe.sh \\\n  --flag`
+    taskFromLaunch(t, 'Bash', 'b', { command, description: 'Probe the socket' }, BASH, 1)
+    expect(t.get('b4prbe90d')).toMatchObject({ detail: command, description: 'Probe the socket' })
+  })
+  test('a whole command is clipped at DETAIL_MAX', () => {
+    const t: TasksState = new Map()
+    taskFromLaunch(t, 'Bash', 'b', { command: 'a'.repeat(DETAIL_MAX + 50) }, BASH, 1)
+    expect(t.get('b4prbe90d')!.detail).toBe('a'.repeat(DETAIL_MAX - 1) + '…')
+  })
+  test('no detail when the label already says it all', () => {
+    const t: TasksState = new Map()
+    taskFromLaunch(t, 'Monitor', 'm', { command: 'tail -f x' }, { taskId: 'm2' }, 1)
+    expect(t.get('m2')!.detail).toBeUndefined()
   })
   test('returns true when the list changed, false otherwise', () => {
     const t: TasksState = new Map()

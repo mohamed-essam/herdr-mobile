@@ -220,6 +220,10 @@ data class BgTask(
     val status: String,
     val startedAt: Long,
     val endedAt: Long? = null,
+    /** The whole command, when [label] (one clipped line) doesn't show all of it. */
+    val detail: String? = null,
+    /** What the launch said the task does. */
+    val description: String? = null,
 )
 
 /** Null for an element without an agentId (skipped, not an error). */
@@ -247,7 +251,8 @@ internal fun parseAgentSummary(el: JsonElement): AgentSummary? {
 internal fun parseBgTask(el: JsonElement): BgTask? {
     val o = el as? JsonObject ?: return null
     val id = o.strOrNull("id")?.takeIf { it.isNotEmpty() } ?: return null
-    return BgTask(id, o.str("kind"), o.str("label"), o.str("toolUseId"), o.str("status"), o.long("startedAt") ?: 0, o.long("endedAt"))
+    return BgTask(id, o.str("kind"), o.str("label"), o.str("toolUseId"), o.str("status"), o.long("startedAt") ?: 0, o.long("endedAt"),
+        o.strOrNull("detail")?.takeIf { it.isNotBlank() }, o.strOrNull("description")?.takeIf { it.isNotBlank() })
 }
 
 /** Null when [k] isn't an array, so "not sent" stays distinct from empty. */
