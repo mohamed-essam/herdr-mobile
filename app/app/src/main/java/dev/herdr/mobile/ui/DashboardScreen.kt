@@ -194,7 +194,7 @@ fun DashboardScreen(
                     }
                     item(key = "stats") { StatTiles(counts, dim) }
                     limits?.let { l ->
-                        if (limitWindows(l).isNotEmpty()) item(key = "limits") {
+                        if (limitsWorthShowing(l, now)) item(key = "limits") {
                             LimitsStrip(l, now, dim.padding(bottom = 16.dp))
                         }
                     }

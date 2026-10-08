@@ -74,6 +74,16 @@ fun limitLabel(kind: String): String = when (kind) {
 fun limitWindows(limits: Limits?): List<LimitWindow> =
     listOf("five_hour", "seven_day").mapNotNull { k -> limits?.windows?.firstOrNull { it.kind == k } }
 
+/**
+ * Whether there are windows to show: not when every one has reset and no mod
+ * has reported for a while (an old persisted reading would only say "—").
+ */
+fun limitsWorthShowing(limits: Limits?, now: Long): Boolean {
+    val windows = limitWindows(limits)
+    if (windows.isEmpty()) return false
+    return !(limitsStale(limits!!.observedAt, now) && windows.all { windowExpired(it.resetsAt, now) })
+}
+
 /** "5h 42% ↻ 2h13m"; "5h —" once the window has reset. */
 fun limitText(w: LimitWindow, now: Long, zone: ZoneId = ZoneId.systemDefault()): String {
     val label = limitLabel(w.kind)
@@ -111,8 +121,8 @@ fun ContextBar(percent: Int, modifier: Modifier = Modifier) {
 /** The dashboard strip: one line per window, dimmed with its age when stale. */
 @Composable
 fun LimitsStrip(limits: Limits, now: Long, modifier: Modifier = Modifier) {
+    if (!limitsWorthShowing(limits, now)) return
     val windows = limitWindows(limits)
-    if (windows.isEmpty()) return
     val stale = limitsStale(limits.observedAt, now)
     Column(modifier.padding(horizontal = 16.dp).fillMaxWidth().alpha(if (stale) 0.5f else 1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         for (w in windows) {
@@ -132,7 +142,7 @@ fun LimitsStrip(limits: Limits, now: Long, modifier: Modifier = Modifier) {
 /** The pane header's line: "ctx ▓ 61% · 5h 42% ↻ 2h13m · 7d 18% ↻ Thu 14:00". */
 @Composable
 fun UsageLine(context: PaneUsage?, limits: Limits?, now: Long) {
-    val windows = limitWindows(limits)
+    val windows = if (limitsWorthShowing(limits, now)) limitWindows(limits) else emptyList()
     if (context == null && windows.isEmpty()) return
     val stale = limits != null && limitsStale(limits.observedAt, now)
     Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {

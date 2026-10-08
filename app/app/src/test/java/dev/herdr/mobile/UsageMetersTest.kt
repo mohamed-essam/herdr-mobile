@@ -63,4 +63,21 @@ class UsageMetersTest {
     @Test fun expiredWindowShowsDash() {
         assertEquals("5h —", limitText(LimitWindow("five_hour", 97.0, "2026-10-08T17:00:00Z"), now, utc))
     }
+
+    @Test fun limitsWorthShowingHidesAnOldFullyExpiredReading() {
+        val past5h = LimitWindow("five_hour", 42.0, "2026-10-08T17:00:00Z")
+        val past7d = LimitWindow("seven_day", 18.0, "2026-10-08T12:00:00Z")
+        val live7d = LimitWindow("seven_day", 18.0, "2026-10-15T14:00:00Z")
+        val old = now - 3 * 24 * 3_600_000L
+        val fresh = now - 60_000L
+        assertFalse(limitsWorthShowing(null, now))
+        assertFalse(limitsWorthShowing(Limits(emptyList(), fresh), now))
+        assertFalse(limitsWorthShowing(Limits(listOf(past5h, past7d), old), now))
+        // Every window expired but the reading is fresh: still shown ("5h —").
+        assertTrue(limitsWorthShowing(Limits(listOf(past5h, past7d), fresh), now))
+        // Stale but one window still running: shown, dimmed.
+        assertTrue(limitsWorthShowing(Limits(listOf(past5h, live7d), old), now))
+        // A window with no reset time never counts as expired.
+        assertTrue(limitsWorthShowing(Limits(listOf(LimitWindow("five_hour", 10.0, null)), old), now))
+    }
 }
