@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format is based on
 
 ## Unreleased
 
+- Slash commands from the chat (companion protocol 12): typing `/` in the composer opens a picker of the session's
+  commands and skills (prefix matches first, then substring); a tap fills in `/name `. A phone message naming a
+  listed command runs it through `$.command.run` instead of being submitted as a prompt; the engine echoes the
+  command as a user row, and any text it prints follows as a `command_output` event
+  (`{uuid, command, text, isError?}`; `isError` carries the engine's refusal). The herdr-chat plugin lists commands
+  with `$.command.list()` (re-checked every 30 s) and queues a `{"type":"commands","commands":[{name, description,
+  source}]}` control after each resync and on change; the companion keeps it per pane (across epochs), adds
+  `commands` to main `chat_snapshot`s (omitted when the mod sent none) and sends a new `chat_commands` frame on
+  change. Older mods send no list and the app shows no picker. Update both the companion and the herdr-chat plugin.
+- The chat composer's unsent text is kept per pane while the app runs: leaving the pane, flipping to the terminal
+  or opening a thread no longer clears it.
+- A pending AskUserQuestion sheet can be minimized ("▾ hide", or the handle) to a one-line bar, so the chat can be
+  read at full size; the bar's "Answer" brings the sheet back with the picks made so far. A new question opens
+  expanded.
+
 - Context window and 5h/7d rate limits (companion protocol 11): the dashboard shows the account's 5-hour and 7-day
   meters with their reset times in a strip under the stat tiles, and a thin context bar under each Claude session
   row; the chat, terminal and thread headers show `ctx … · 5h … · 7d …` on one line. The herdr-chat plugin reads
