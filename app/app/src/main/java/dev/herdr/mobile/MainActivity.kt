@@ -47,8 +47,8 @@ import org.unifiedpush.android.connector.UnifiedPush
 private sealed interface Route {
     data object Loading : Route
     /** [adding]: from the dashboard's server sheet, so Back returns there. */
-    data class Connect(val adding: Boolean = false) : Route
-    data class FirstConnect(val serverId: String, val address: CompanionAddress, val push: Boolean, val adding: Boolean) : Route
+    data class Connect(val adding: Boolean = false, val previousId: String? = null) : Route
+    data class FirstConnect(val serverId: String, val address: CompanionAddress, val push: Boolean, val adding: Boolean, val previousId: String? = null) : Route
     data object Dashboard : Route
 }
 
@@ -212,7 +212,11 @@ class MainActivity : ComponentActivity() {
                         draftPush,
                         showPush = !(r.adding && pushOn),
                         duplicateOf = { a -> servers.savedAt(a.url)?.name },
-                        onBack = if (r.adding) ({ route = Route.Dashboard }) else null,
+                        onBack = if (r.adding) ({
+                            // A failed attempt already replaced the session; put the previous server back.
+                            if (session.serverId != r.previousId) connectTo(servers.firstOrNull { it.id == r.previousId })
+                            route = Route.Dashboard
+                        }) else null,
                     ) { input, address, push ->
                         draftInput = input
                         draftPush = push
@@ -221,15 +225,15 @@ class MainActivity : ComponentActivity() {
                         session = newSession(id)
                         // An unparseable host just never connects; the first-connection screen then offers Back.
                         runCatching { session.vm.start(address.url) }
-                        route = Route.FirstConnect(id, address, push || (r.adding && pushOn), r.adding)
+                        route = Route.FirstConnect(id, address, push || (r.adding && pushOn), r.adding, r.previousId)
                     }
                     is Route.FirstConnect -> {
                         // Drop the failed attempt; a fresh session keeps a stale socket and
                         // its collectors from feeding the next one. Adding a server puts the
                         // previous server's session back behind the connect screen.
                         fun back() {
-                            connectTo(if (r.adding) active else null)
-                            route = Route.Connect(adding = r.adding)
+                            connectTo(if (r.adding) servers.firstOrNull { it.id == r.previousId } else null)
+                            route = Route.Connect(adding = r.adding, previousId = r.previousId)
                         }
                         // Once the server is saved, going back to the connect screen would
                         // reject the same address as a duplicate; leave for the dashboard.
@@ -278,7 +282,7 @@ class MainActivity : ComponentActivity() {
                                 showServers = false
                                 draftInput = ""
                                 draftPush = false
-                                route = Route.Connect(adding = true)
+                                route = Route.Connect(adding = true, previousId = session.serverId)
                             },
                             onDismiss = { showServers = false },
                         )
