@@ -23,13 +23,20 @@ class UnifiedPushReceiver : MessagingReceiver() {
 
     override fun onMessage(context: Context, message: PushMessage, instance: String) {
         val p = parsePush(message.content) ?: return
+        // Keep the process alive until the DataStore read and the post finish; the
+        // broadcast alone would let the process be demoted before the coroutine runs.
+        val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
-            val settings = Settings(context)
-            settings.migrate()   // an upgraded app may not have been opened yet
-            val servers = settings.servers.first()
-            val server = servers.firstOrNull { it.id == instance } ?: return@launch   // removed since
-            if (p.kind == "clear") Notifications.cancel(context, server.id, p.paneId)
-            else Notifications.post(context, server.id, server.name.takeIf { servers.size > 1 }, p)
+            try {
+                val settings = Settings(context)
+                settings.migrate()   // an upgraded app may not have been opened yet
+                val servers = settings.servers.first()
+                val server = servers.firstOrNull { it.id == instance } ?: return@launch   // removed since
+                if (p.kind == "clear") Notifications.cancel(context, server.id, p.paneId)
+                else Notifications.post(context, server.id, server.name.takeIf { servers.size > 1 }, p)
+            } finally {
+                pending.finish()
+            }
         }
     }
 
