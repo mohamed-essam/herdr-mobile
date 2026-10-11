@@ -68,7 +68,7 @@ class Settings(private val context: Context) {
             val m = migrateLegacy(prefs[URL_KEY], prefs[PUSH_ENDPOINT_KEY])
             prefs[SERVERS_KEY] = encodeServers(m.servers)
             m.activeId?.let { prefs[ACTIVE_SERVER_KEY] = it }
-            m.endpoint?.let { prefs[endpointKey(LEGACY_SERVER_ID)] = it }
+            winningEndpoint(prefs[endpointKey(LEGACY_SERVER_ID)], m.endpoint)?.let { prefs[endpointKey(LEGACY_SERVER_ID)] = it }
             prefs.remove(URL_KEY)
             prefs.remove(PUSH_ENDPOINT_KEY)
         }

@@ -31,6 +31,9 @@ fun defaultServerName(url: String): String = hostPort(url)
 /** What the single-companion prefs become: the servers, the active id, and the endpoint to move. */
 data class Migration(val servers: List<Server>, val activeId: String?, val endpoint: String?)
 
+/** Which endpoint the `default` instance keeps: one already stored there is newer than the legacy one. */
+fun winningEndpoint(stored: String?, legacy: String?): String? = stored ?: legacy
+
 fun migrateLegacy(url: String?, endpoint: String?): Migration =
     if (url.isNullOrBlank()) Migration(emptyList(), null, null)
     else Migration(listOf(Server(LEGACY_SERVER_ID, defaultServerName(url), url)), LEGACY_SERVER_ID, endpoint)

@@ -25,6 +25,12 @@ class ServersTest {
         assertEquals("https://up.example/x", m.endpoint)
     }
 
+    @Test fun aStoredEndpointBeatsTheLegacyOne() {
+        assertEquals("new", winningEndpoint("new", "legacy"))
+        assertEquals("legacy", winningEndpoint(null, "legacy"))
+        assertNull(winningEndpoint(null, null))
+    }
+
     @Test fun migratesUrlWithoutEndpoint() {
         val m = migrateLegacy("ws://100.1.1.1:8787", null)
         assertEquals(1, m.servers.size)
