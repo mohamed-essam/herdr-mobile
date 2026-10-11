@@ -37,6 +37,7 @@ import dev.herdr.mobile.ui.FirstConnectionScreen
 import dev.herdr.mobile.ui.ServerSheet
 import dev.herdr.mobile.ui.theme.HerdrTheme
 import java.util.UUID
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -119,7 +120,9 @@ class MainActivity : ComponentActivity() {
             var route by remember { mutableStateOf<Route>(Route.Loading) }
             var pushOn by remember { mutableStateOf(false) }
             val servers by settings.servers.collectAsState(initial = emptyList())
-            val activeId by settings.activeServerId.collectAsState(initial = null)
+            // The live session is the source of truth for which server is active; the
+            // stored id lags behind a switch until DataStore re-emits.
+            val activeId = session.serverId
             val active = servers.firstOrNull { it.id == activeId }
             var showServers by remember { mutableStateOf(false) }
             // A pane id handed to the dashboard (from a notification), on the active server.
@@ -155,7 +158,7 @@ class MainActivity : ComponentActivity() {
                 showServers = false
                 val next = left.servers.firstOrNull { it.id == left.activeId }
                 connectTo(next)
-                if (next == null) { draftInput = ""; draftPush = false; route = Route.Connect() }
+                if (next == null) { draftInput = ""; draftPush = false; pushOn = false; route = Route.Connect() }
             }
 
             LaunchedEffect(Unit) {
@@ -177,12 +180,14 @@ class MainActivity : ComponentActivity() {
             }
 
             // Forward the session's own server's endpoint to its companion, so it
-            // knows where to deliver notifications. Keyed on the session: a switch
-            // never sends one server's endpoint to another.
+            // knows where to deliver notifications. The session is captured once: a
+            // switch reassigns `session` before this effect is cancelled, and reading
+            // the live value would send one server's endpoint to another's companion.
             LaunchedEffect(session, pushOn) {
-                val id = session.serverId ?: return@LaunchedEffect
+                val s = session
+                val id = s.serverId ?: return@LaunchedEffect
                 if (!pushOn) return@LaunchedEffect
-                settings.pushEndpoint(id).filterNotNull().collect { endpoint -> session.vm.registerPush(endpoint) }
+                settings.pushEndpoint(id).filterNotNull().distinctUntilChanged().collect { s.vm.registerPush(it) }
             }
 
             // A tapped notification: switch to its server if needed, then open the pane.
@@ -226,13 +231,18 @@ class MainActivity : ComponentActivity() {
                             connectTo(if (r.adding) active else null)
                             route = Route.Connect(adding = r.adding)
                         }
+                        // Once the server is saved, going back to the connect screen would
+                        // reject the same address as a duplicate; leave for the dashboard.
+                        var saved by remember(r) { mutableStateOf(false) }
+                        fun leave() { if (saved) route = Route.Dashboard else back() }
                         val connected by session.vm.connected.collectAsState()
-                        BackHandler(enabled = !connected) { back() }
+                        BackHandler(enabled = !connected) { leave() }
                         FirstConnectionScreen(
                             session.vm,
                             r.address.hostPort,
                             onConnected = {
                                 // Only now is the address worth keeping: it joins the list as the active server.
+                                saved = true
                                 val server = Server(r.serverId, defaultServerName(r.address.url), r.address.url)
                                 lifecycleScope.launch {
                                     settings.addServer(server)
@@ -240,11 +250,12 @@ class MainActivity : ComponentActivity() {
                                 }
                                 if (r.push) {
                                     enablePush(if (pushOn) listOf(server.id) else servers.map { it.id } + server.id)
-                                    pushOn = true
                                 }
+                                // Adding keeps push on if it was; first-time setup follows the choice made.
+                                pushOn = if (r.adding) pushOn || r.push else r.push
                             },
                             onContinue = { route = Route.Dashboard },
-                            onBack = ::back,
+                            onBack = ::leave,
                         )
                     }
                     Route.Dashboard -> {
