@@ -22,7 +22,7 @@ private fun endpointKey(serverId: String) = stringPreferencesKey("push_endpoint:
 /**
  * Whether UnifiedPush should be registered. Installs from before the opt-in
  * toggle never stored a choice: they keep push if they already had a
- * companion, so an upgrade doesn't silently stop notifications.
+ * companion (now: any saved server), so an upgrade doesn't silently stop notifications.
  */
 fun pushEnabled(stored: Boolean?, hasCompanionUrl: Boolean): Boolean = stored ?: hasCompanionUrl
 
@@ -31,12 +31,6 @@ fun updatedMru(current: List<String>, picked: String, cap: Int = 5): List<String
     (listOf(picked) + current.filterNot { it == picked }).take(cap)
 
 class Settings(private val context: Context) {
-    val companionUrl: Flow<String?> = context.dataStore.data.map { it[URL_KEY] }
-    suspend fun setCompanionUrl(url: String) { context.dataStore.edit { it[URL_KEY] = url } }
-
-    val pushEndpoint: Flow<String?> = context.dataStore.data.map { it[PUSH_ENDPOINT_KEY] }
-    suspend fun setPushEndpoint(endpoint: String) { context.dataStore.edit { it[PUSH_ENDPOINT_KEY] = endpoint } }
-
     val servers: Flow<List<Server>> = context.dataStore.data.map { decodeServers(it[SERVERS_KEY]) }
     val activeServerId: Flow<String?> = context.dataStore.data.map { it[ACTIVE_SERVER_KEY] }
 
