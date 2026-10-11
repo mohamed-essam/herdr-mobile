@@ -9,7 +9,7 @@ All notable changes to this project are documented here. The format is based on
 - Server switcher: save more than one companion and switch between them from the dashboard header's server chip
   (a sheet lists them, with Rename, Remove and "+ Add server"). One server is connected at a time; notifications
   keep arriving from every saved server, prefixed with its name when more than one is saved, and tapping one
-  switches to its server. Each server is its own UnifiedPush instance; an existing install's companion moves over
+  switches to its server and opens the pane. Each server is its own UnifiedPush instance; an existing install's companion moves over
   as the `default` instance, keeping its registration. The companion now keeps the phone's push endpoint in
   `<state dir>/push-endpoint.json` (0600), so a restarted companion still notifies. No protocol change; update the
   companion for notifications after a restart.
