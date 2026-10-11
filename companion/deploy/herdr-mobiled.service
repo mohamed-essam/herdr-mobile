@@ -6,6 +6,10 @@ After=network-online.target
 # Bind to your Tailscale IP so the API is reachable only on your tailnet.
 # Find it with: tailscale ip -4
 ExecStart=%h/.local/bin/herdr-mobiled --listen %i:8787
+# Opening a pane's terminal runs `herdr terminal attach`, so herdr must be on
+# PATH. The systemd user manager's default PATH lacks ~/.local/bin, where herdr
+# usually lives; add herdr's directory here if it is installed elsewhere.
+Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Restart=on-failure
 RestartSec=2
 
