@@ -62,7 +62,7 @@ func main() {
 	listen := flag.String("listen", "127.0.0.1:8787", "WS listen address (bind to your tailnet IP, e.g. `tailscale ip -4`, to reach it from the phone)")
 	poll := flag.Duration("poll", 1500*time.Millisecond, "pane.list poll interval")
 	chatSock := flag.String("chat-socket", chatbridge.SocketPath(), "Unix socket for the herdr-chat Claude Code mod (empty disables the chat view)")
-	stateDir := flag.String("state-dir", defaultStateDir(), "directory for state kept across restarts (the last rate-limit reading)")
+	stateDir := flag.String("state-dir", defaultStateDir(), "directory for state kept across restarts (the last rate-limit reading, the phone's push endpoint)")
 	flag.Parse()
 
 	e := engine.New(engine.Config{SocketPath: *socket, ListenAddr: *listen, PollInterval: *poll, ChatSocket: *chatSock, StateDir: *stateDir})

@@ -41,8 +41,9 @@ type Engine struct {
 	hub    *chatbridge.Hub
 	limits *limits.Tracker
 
-	mu       sync.Mutex
-	endpoint string
+	mu           sync.Mutex
+	endpoint     string
+	endpointPath string // where endpoint is kept across restarts; "" = memory only
 
 	trigger chan struct{}
 	subs    map[string]context.CancelFunc
@@ -64,6 +65,10 @@ func New(cfg Config) *Engine {
 		path = filepath.Join(cfg.StateDir, "limits.json")
 	}
 	e.limits = limits.New(path, nil)
+	if cfg.StateDir != "" {
+		e.endpointPath = filepath.Join(cfg.StateDir, "push-endpoint.json")
+	}
+	e.endpoint = loadEndpoint(e.endpointPath)
 	// Runs under the tracker's lock: Broadcast is non-blocking.
 	e.limits.SetOnChange(func(l limits.Limits) { e.srv.Broadcast(proto.Limits(l)) })
 	e.hub.SetOnLimits(e.limits.Observe)
@@ -103,8 +108,12 @@ func New(cfg Config) *Engine {
 
 func (e *Engine) setEndpoint(ep string) {
 	e.mu.Lock()
+	changed := ep != e.endpoint
 	e.endpoint = ep
 	e.mu.Unlock()
+	if changed {
+		saveEndpoint(e.endpointPath, ep)
+	}
 }
 
 // Poke requests an immediate poll (coalesced with the ticker). Used by the
