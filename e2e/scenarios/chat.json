@@ -1,0 +1,1118 @@
+{
+ "workspaces": [
+  {
+   "workspaceId": "w1",
+   "label": "app",
+   "number": 1,
+   "focused": true,
+   "paneCount": 2,
+   "tabCount": 1,
+   "lastActivity": 1791279000000
+  },
+  {
+   "workspaceId": "w2",
+   "label": "ask",
+   "number": 2,
+   "focused": false,
+   "paneCount": 1,
+   "tabCount": 1,
+   "lastActivity": 1791279000000
+  },
+  {
+   "workspaceId": "w3",
+   "label": "busy",
+   "number": 3,
+   "focused": false,
+   "paneCount": 1,
+   "tabCount": 1,
+   "lastActivity": 1791279000000
+  },
+  {
+   "workspaceId": "w4",
+   "label": "notes",
+   "number": 4,
+   "focused": false,
+   "paneCount": 1,
+   "tabCount": 1,
+   "lastActivity": 1791279000000
+  },
+  {
+   "workspaceId": "w5",
+   "label": "pick",
+   "number": 5,
+   "focused": false,
+   "paneCount": 1,
+   "tabCount": 1,
+   "lastActivity": 1791279000000
+  }
+ ],
+ "tabs": [
+  {
+   "tabId": "w1:t1",
+   "label": "1",
+   "number": 1,
+   "workspaceId": "w1",
+   "focused": true,
+   "paneCount": 2
+  },
+  {
+   "tabId": "w2:t1",
+   "label": "1",
+   "number": 1,
+   "workspaceId": "w2",
+   "focused": false,
+   "paneCount": 1
+  },
+  {
+   "tabId": "w3:t1",
+   "label": "1",
+   "number": 1,
+   "workspaceId": "w3",
+   "focused": false,
+   "paneCount": 1
+  },
+  {
+   "tabId": "w4:t1",
+   "label": "1",
+   "number": 1,
+   "workspaceId": "w4",
+   "focused": false,
+   "paneCount": 1
+  },
+  {
+   "tabId": "w5:t1",
+   "label": "1",
+   "number": 1,
+   "workspaceId": "w5",
+   "focused": false,
+   "paneCount": 1
+  }
+ ],
+ "panes": [
+  {
+   "paneId": "w1:p1",
+   "workspaceId": "w1",
+   "tabId": "w1:t1",
+   "terminalId": "term_1",
+   "cwd": "/Users/dev/shop",
+   "focused": false,
+   "agent": "claude",
+   "agentStatus": "idle",
+   "chat": true,
+   "activity": {
+    "kind": "text",
+    "text": "Two agents are on it.",
+    "ts": 1791279120000
+   },
+   "bgRunning": 2
+  },
+  {
+   "paneId": "w1:p2",
+   "workspaceId": "w1",
+   "tabId": "w1:t1",
+   "terminalId": "term_2",
+   "cwd": "/Users/dev/shop",
+   "focused": false
+  },
+  {
+   "paneId": "w2:p1",
+   "workspaceId": "w2",
+   "tabId": "w2:t1",
+   "terminalId": "term_3",
+   "cwd": "/Users/dev/db",
+   "focused": false,
+   "agent": "claude",
+   "agentStatus": "blocked",
+   "chat": true,
+   "activity": {
+    "kind": "question",
+    "text": "Which database?",
+    "ts": 1791278700000
+   },
+   "ask": {
+    "toolUseId": "toolu_ask",
+    "questions": [
+     {
+      "question": "Which database?",
+      "header": "DB",
+      "multiSelect": false,
+      "options": [
+       {
+        "label": "Postgres"
+       },
+       {
+        "label": "SQLite"
+       }
+      ]
+     },
+     {
+      "question": "Any constraints?",
+      "header": "Limits",
+      "multiSelect": false,
+      "kind": "text"
+     }
+    ]
+   }
+  },
+  {
+   "paneId": "w3:p1",
+   "workspaceId": "w3",
+   "tabId": "w3:t1",
+   "terminalId": "term_4",
+   "cwd": "/Users/dev/tests",
+   "focused": false,
+   "agent": "claude",
+   "agentStatus": "working",
+   "chat": true,
+   "activity": {
+    "kind": "tool",
+    "tool": "Bash",
+    "text": "Bash: npm test",
+    "ts": 1791279180000
+   }
+  },
+  {
+   "paneId": "w4:p1",
+   "workspaceId": "w4",
+   "tabId": "w4:t1",
+   "terminalId": "term_5",
+   "cwd": "/Users/dev/notes",
+   "focused": false,
+   "agent": "claude",
+   "agentStatus": "blocked",
+   "chat": true,
+   "activity": {
+    "kind": "text",
+    "text": "Should I continue?",
+    "ts": 1791278640000
+   }
+  },
+  {
+   "paneId": "w5:p1",
+   "workspaceId": "w5",
+   "tabId": "w5:t1",
+   "terminalId": "term_6",
+   "cwd": "/Users/dev/cache",
+   "focused": false,
+   "agent": "claude",
+   "agentStatus": "blocked",
+   "chat": true,
+   "activity": {
+    "kind": "question",
+    "text": "Which cache?",
+    "ts": 1791278760000
+   },
+   "ask": {
+    "toolUseId": "toolu_pick",
+    "questions": [
+     {
+      "question": "Which cache?",
+      "header": "Cache",
+      "multiSelect": false,
+      "options": [
+       {
+        "label": "In-memory"
+       },
+       {
+        "label": "Memcached"
+       }
+      ]
+     }
+    ]
+   }
+  }
+ ],
+ "chats": {
+  "w1:p1": {
+   "older": [
+    {
+     "seq": 1,
+     "event": {
+      "type": "user_text",
+      "uuid": "u1",
+      "text": "Start with a schema audit",
+      "ts": 1791278400000
+     }
+    },
+    {
+     "seq": 2,
+     "event": {
+      "type": "tool_use",
+      "uuid": "t2",
+      "toolUseId": "toolu_old",
+      "tool": "Agent",
+      "summary": "Agent: audit the schema",
+      "ts": 1791278460000
+     }
+    },
+    {
+     "seq": 3,
+     "event": {
+      "type": "tool_result",
+      "toolUseId": "toolu_old",
+      "isError": false,
+      "preview": "Audit complete",
+      "ts": 1791278520000
+     }
+    },
+    {
+     "seq": 4,
+     "event": {
+      "type": "assistant_text",
+      "uuid": "a4",
+      "text": "Earlier: the schema audit is done.",
+      "ts": 1791278520000
+     }
+    }
+   ],
+   "events": [
+    {
+     "seq": 5,
+     "event": {
+      "type": "user_text",
+      "uuid": "u5",
+      "text": "Add a cache to the API. Here is the error I saw:",
+      "ts": 1791278580000,
+      "images": [
+       "img-user"
+      ],
+      "imageSizes": {
+       "img-user": [
+        600,
+        400
+       ]
+      }
+     }
+    },
+    {
+     "seq": 6,
+     "event": {
+      "type": "assistant_text",
+      "uuid": "a6",
+      "text": "I'll look at the **API** first.\n\n[the docs](https://example.com/docs)\n\n[call me](tel:5551234)\n\n```go\nfunc cache() {}\n```",
+      "ts": 1791278640000
+     }
+    },
+    {
+     "seq": 7,
+     "event": {
+      "type": "tool_use",
+      "uuid": "t7",
+      "toolUseId": "toolu_r1",
+      "tool": "Read",
+      "summary": "Read: /Users/dev/shop/api/handler.go",
+      "ts": 1791278700000
+     }
+    },
+    {
+     "seq": 8,
+     "event": {
+      "type": "tool_result",
+      "toolUseId": "toolu_r1",
+      "isError": false,
+      "preview": "package api // handler",
+      "ts": 1791278700000
+     }
+    },
+    {
+     "seq": 9,
+     "event": {
+      "type": "tool_use",
+      "uuid": "t9",
+      "toolUseId": "toolu_b1",
+      "tool": "Bash",
+      "summary": "Bash: go test ./...",
+      "ts": 1791278760000
+     }
+    },
+    {
+     "seq": 10,
+     "event": {
+      "type": "tool_result",
+      "toolUseId": "toolu_b1",
+      "isError": false,
+      "preview": "ok  shop/api",
+      "ts": 1791278760000,
+      "images": [
+       "img-tool"
+      ],
+      "imageSizes": {
+       "img-tool": [
+        300,
+        500
+       ]
+      }
+     }
+    },
+    {
+     "seq": 11,
+     "event": {
+      "type": "tool_use",
+      "uuid": "t11",
+      "toolUseId": "toolu_a1",
+      "tool": "Agent",
+      "summary": "Agent: explore the cache options",
+      "ts": 1791278820000
+     }
+    },
+    {
+     "seq": 12,
+     "event": {
+      "type": "tool_use",
+      "uuid": "t12",
+      "toolUseId": "toolu_w1",
+      "tool": "Workflow",
+      "summary": "Workflow: review",
+      "ts": 1791278880000
+     }
+    },
+    {
+     "seq": 13,
+     "event": {
+      "type": "task_notice",
+      "uuid": "n13",
+      "status": "completed",
+      "summary": "Background build finished",
+      "ts": 1791279060000
+     }
+    },
+    {
+     "seq": 14,
+     "event": {
+      "type": "assistant_text",
+      "uuid": "a14",
+      "text": "Two agents are on it.",
+      "ts": 1791279120000
+     }
+    }
+   ],
+   "agents": [
+    {
+     "agentId": "agOld",
+     "parentToolUseId": "toolu_old",
+     "kind": "subagent",
+     "label": "schema audit",
+     "status": "done",
+     "ts": 1791278520000,
+     "type": "Plan"
+    },
+    {
+     "agentId": "ag1",
+     "parentToolUseId": "toolu_a1",
+     "kind": "subagent",
+     "label": "explore cache",
+     "status": "running",
+     "ts": 1791278820000,
+     "type": "Explore",
+     "activity": {
+      "kind": "tool",
+      "tool": "Grep",
+      "text": "Grep: redis",
+      "ts": 1791279180000
+     }
+    },
+    {
+     "agentId": "ag2",
+     "parentToolUseId": "toolu_a2",
+     "kind": "subagent",
+     "label": "read docs",
+     "status": "done",
+     "ts": 1791278940000,
+     "type": "general-purpose",
+     "parentAgentId": "ag1"
+    },
+    {
+     "agentId": "wa1",
+     "parentToolUseId": "toolu_w1",
+     "kind": "workflow",
+     "label": "check A",
+     "status": "done",
+     "ts": 1791278940000,
+     "phase": "review"
+    },
+    {
+     "agentId": "wa2",
+     "parentToolUseId": "toolu_w1",
+     "kind": "workflow",
+     "label": "check B",
+     "status": "running",
+     "ts": 1791279000000,
+     "phase": "review"
+    },
+    {
+     "agentId": "wa3",
+     "parentToolUseId": "toolu_w1",
+     "kind": "workflow",
+     "label": "check C",
+     "status": "done",
+     "ts": 1791279060000,
+     "phase": "review"
+    },
+    {
+     "agentId": "wa4",
+     "parentToolUseId": "toolu_w1",
+     "kind": "workflow",
+     "label": "check D",
+     "status": "done",
+     "ts": 1791279120000,
+     "phase": "review"
+    },
+    {
+     "agentId": "wa5",
+     "parentToolUseId": "toolu_w1",
+     "kind": "workflow",
+     "label": "check E",
+     "status": "done",
+     "ts": 1791279180000,
+     "phase": "fix"
+    },
+    {
+     "agentId": "wa6",
+     "parentToolUseId": "toolu_w1",
+     "kind": "workflow",
+     "label": "check F",
+     "status": "running",
+     "ts": 1791279240000,
+     "phase": "fix"
+    },
+    {
+     "agentId": "wa7",
+     "parentToolUseId": "toolu_w1",
+     "kind": "workflow",
+     "label": "check G",
+     "status": "done",
+     "ts": 1791279300000,
+     "phase": "fix"
+    }
+   ],
+   "tasks": [
+    {
+     "id": "b1",
+     "kind": "shell",
+     "label": "npm run dev",
+     "toolUseId": "toolu_b2",
+     "status": "running",
+     "startedAt": 1791278700000
+    },
+    {
+     "id": "ag1",
+     "kind": "subagent",
+     "label": "explore cache",
+     "toolUseId": "toolu_a1",
+     "status": "running",
+     "startedAt": 1791278820000
+    },
+    {
+     "id": "wf1",
+     "kind": "workflow",
+     "label": "review",
+     "toolUseId": "toolu_w1",
+     "status": "done",
+     "startedAt": 1791278880000,
+     "endedAt": 1791279060000
+    }
+   ]
+  },
+  "w1:p1/ag1": {
+   "events": [
+    {
+     "seq": 1,
+     "event": {
+      "type": "user_text",
+      "uuid": "u1",
+      "text": "Explore the cache options",
+      "ts": 1791278820000
+     }
+    },
+    {
+     "seq": 2,
+     "event": {
+      "type": "assistant_text",
+      "uuid": "a2",
+      "text": "Redis or in-memory? Reading the docs.",
+      "ts": 1791278880000
+     }
+    },
+    {
+     "seq": 3,
+     "event": {
+      "type": "tool_use",
+      "uuid": "t3",
+      "toolUseId": "toolu_a2",
+      "tool": "Agent",
+      "summary": "Agent: read docs",
+      "ts": 1791278880000
+     }
+    },
+    {
+     "seq": 4,
+     "event": {
+      "type": "tool_use",
+      "uuid": "t4",
+      "toolUseId": "toolu_g1",
+      "tool": "Grep",
+      "summary": "Grep: redis",
+      "ts": 1791278940000
+     }
+    }
+   ]
+  },
+  "w1:p1/wa1": {
+   "events": [
+    {
+     "seq": 1,
+     "event": {
+      "type": "assistant_text",
+      "uuid": "a1",
+      "text": "Checking A: no issues.",
+      "ts": 1791278940000
+     }
+    }
+   ]
+  },
+  "w2:p1": {
+   "events": [
+    {
+     "seq": 1,
+     "event": {
+      "type": "user_text",
+      "uuid": "u1",
+      "text": "Set up storage",
+      "ts": 1791278640000
+     }
+    },
+    {
+     "seq": 2,
+     "event": {
+      "type": "question",
+      "uuid": "q2",
+      "toolUseId": "toolu_ask",
+      "questions": [
+       {
+        "question": "Which database?",
+        "header": "DB",
+        "multiSelect": false,
+        "options": [
+         {
+          "label": "Postgres"
+         },
+         {
+          "label": "SQLite"
+         }
+        ]
+       },
+       {
+        "question": "Any constraints?",
+        "header": "Limits",
+        "multiSelect": false,
+        "kind": "text"
+       }
+      ],
+      "ts": 1791278700000
+     }
+    }
+   ]
+  },
+  "w3:p1": {
+   "state": "working",
+   "events": [
+    {
+     "seq": 1,
+     "event": {
+      "type": "user_text",
+      "uuid": "u1",
+      "text": "Run the tests",
+      "ts": 1791279120000
+     }
+    },
+    {
+     "seq": 2,
+     "event": {
+      "type": "tool_use",
+      "uuid": "t2",
+      "toolUseId": "toolu_t1",
+      "tool": "Bash",
+      "summary": "Bash: npm test",
+      "ts": 1791279180000
+     }
+    }
+   ]
+  },
+  "w4:p1": {
+   "sendError": "outbox_full",
+   "events": [
+    {
+     "seq": 1,
+     "event": {
+      "type": "assistant_text",
+      "uuid": "a1",
+      "text": "Should I continue?",
+      "ts": 1791278640000
+     }
+    }
+   ]
+  },
+  "w5:p1": {
+   "events": [
+    {
+     "seq": 1,
+     "event": {
+      "type": "user_text",
+      "uuid": "u1",
+      "text": "Speed up reads",
+      "ts": 1791278700000
+     }
+    },
+    {
+     "seq": 2,
+     "event": {
+      "type": "question",
+      "uuid": "q2",
+      "toolUseId": "toolu_pick",
+      "questions": [
+       {
+        "question": "Which cache?",
+        "header": "Cache",
+        "multiSelect": false,
+        "options": [
+         {
+          "label": "In-memory"
+         },
+         {
+          "label": "Memcached"
+         }
+        ]
+       }
+      ],
+      "ts": 1791278760000
+     }
+    }
+   ]
+  }
+ },
+ "images": {
+  "img-user": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAlgAAAGQCAIAAAD9V4nPAAAE0klEQVR42u3VMQ0AAAgEsfcvBDMIYsUEG02q4JZL1wDAW5EAACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEwAhVAMAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIATBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCAIxQBQCMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBMAIJQDACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAHACAEwQhUAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAMEIAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAALiygjWAxW5v3agAAAABJRU5ErkJggg=="
+  },
+  "img-tool": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAASwAAAH0CAIAAAAIcodgAAAEC0lEQVR42u3TMQ0AAAgEsbePH9QxIQOGJlVwyaV6gEORAEwIJgRMCCYETAgmBEwIJgRMCCYETAgmBEwIJgRMCCYETAgmBEwIJgRMCCYETAgmBEwIJgRMCCYETAgmBEwIJgRMCCYETAgmBEwIJgRMCCYETAgmBEwIJgRMCCYETAgmBEwIJgRMCCYETAgmBEwIJgRMCCYETAgmBEwIJgRMCCYEE6oAJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEE4IJVQATggkBE4IJAROCCQETggkBE4IJAROCCQETggkBE4IJAROCCQETggkBE4IJAROCCQETggkBE4IJAROCCQETggkBE4IJAROCCQETggkBE4IJAROCCQETggkBE4IJAROCCQETggkBE4IJAROCCQETggkBE4IJAROCCQETggkBE4IJwYSACcGEgAnBhIAJwYSACcGEgAnBhIAJwYSACcGEgAnBhIAJwYSACcGEgAnBhIAJwYSACcGEgAnBhIAJwYSACcGEgAnBhIAJwYSACcGEgAnBhIAJwYSACcGEgAnBhIAJwYSACcGEgAnBhIAJwYSACcGEgAnBhIAJwYSACcGEYEIJwIRgQsCEYELAhGBCwIRgQsCEYELAhGBCwIRgQsCEYELAhGBCwIRgQsCEYELAhGBCwIRgQsCEYELAhGBCwIRgQsCEYELAhGBCwIRgQsCEYELAhGBCwIRgQsCEYELAhGBCwIRgQsCEYELAhGBCwIRgQsCEYELAhGBCwIRgQsCEYEIwoQpgQjAhYEIwIWBCMCFgQjAhYEIwIWBCMCFgQjAhYEIwIWBCMCFgQjAhYEIwIWBCMCFgQjAhYEIwIWBCMCFgQjAhYEIwIWBCMCFgQjAhYEIwIWBCMCFgQjAhYEIwIWBCMCFgQjAhYEIwIWBCMCFgQjAhYEIwIWBCMCFgQjAhYEIwIZhQBTAhmBAwIZgQMCGYEDAhmBAwIZgQMCGYEDAhmBAwIZgQMCGYEDAhmBAwIZgQMCGYEDAhmBAwIZgQMCGYEDAhmBAwIZgQMCGYEDAhmBAwIZgQMCGYEDAhmBAwIZgQMCGYEDAhmBAwIZgQMCGYEDAhmBAwIZgQMCGYEDAhmBAwIZgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBD+W4lMDp+wjjAeAAAAAElFTkSuQmCC"
+  },
+  "img-px1": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px2": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px3": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px4": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px5": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px6": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px7": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px8": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px9": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px10": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px11": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px12": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px13": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px14": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px15": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px16": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px17": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px18": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px19": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px20": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px21": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px22": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px23": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px24": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px25": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px26": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px27": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px28": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px29": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  },
+  "img-px30": {
+   "mediaType": "image/png",
+   "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4vew7AASoAmmt0XelAAAAAElFTkSuQmCC"
+  }
+ },
+ "frames": {
+  "live": [
+   {
+    "t": "chat_event",
+    "paneId": "w1:p1",
+    "epoch": 1,
+    "seq": 15,
+    "event": {
+     "type": "assistant_text",
+     "uuid": "a15",
+     "text": "Live reply arrived.",
+     "ts": 1791279240000
+    }
+   }
+  ],
+  "tasks-done": [
+   {
+    "t": "chat_tasks",
+    "paneId": "w1:p1",
+    "tasks": [
+     {
+      "id": "b1",
+      "kind": "shell",
+      "label": "npm run dev",
+      "toolUseId": "toolu_b2",
+      "status": "failed",
+      "startedAt": 1791278700000,
+      "endedAt": 1791279240000
+     }
+    ]
+   }
+  ],
+  "chat-off": [
+   {
+    "t": "pane_update",
+    "pane": {
+     "paneId": "w1:p1",
+     "workspaceId": "w1",
+     "tabId": "w1:t1",
+     "terminalId": "term_1",
+     "cwd": "/Users/dev/shop",
+     "focused": false,
+     "agent": "claude",
+     "agentStatus": "idle",
+     "activity": {
+      "kind": "text",
+      "text": "Two agents are on it.",
+      "ts": 1791279120000
+     },
+     "bgRunning": 2
+    }
+   }
+  ],
+  "app-removed": [
+   {
+    "t": "pane_removed",
+    "paneId": "w1:p1"
+   }
+  ],
+  "delivered": [
+   {
+    "t": "chat_event",
+    "paneId": "w3:p1",
+    "epoch": 1,
+    "seq": 3,
+    "event": {
+     "type": "user_text",
+     "uuid": "u3",
+     "text": "Add a test",
+     "ts": 1791279240000
+    }
+   }
+  ],
+  "pick-answered": [
+   {
+    "t": "chat_event",
+    "paneId": "w5:p1",
+    "epoch": 1,
+    "seq": 3,
+    "event": {
+     "type": "tool_result",
+     "toolUseId": "toolu_pick",
+     "isError": false,
+     "preview": "Redis",
+     "ts": 1791279240000
+    }
+   }
+  ],
+  "ag1-done": [
+   {
+    "t": "chat_agent",
+    "paneId": "w1:p1",
+    "agent": {
+     "agentId": "ag1",
+     "parentToolUseId": "toolu_a1",
+     "kind": "subagent",
+     "label": "explore cache",
+     "status": "done",
+     "ts": 1791278820000,
+     "type": "Explore"
+    }
+   }
+  ],
+  "w4-image": [
+   {
+    "t": "chat_event",
+    "paneId": "w4:p1",
+    "epoch": 1,
+    "seq": 2,
+    "event": {
+     "type": "user_text",
+     "uuid": "u2",
+     "text": "Here it is",
+     "ts": 1791279240000,
+     "images": [
+      "img-user"
+     ],
+     "imageSizes": {
+      "img-user": [
+       600,
+       400
+      ]
+     }
+    }
+   }
+  ],
+  "w4-flood": [
+   {
+    "t": "chat_event",
+    "paneId": "w4:p1",
+    "epoch": 1,
+    "seq": 3,
+    "event": {
+     "type": "user_text",
+     "uuid": "u3",
+     "text": "",
+     "ts": 1791279250000,
+     "images": [
+      "img-px1",
+      "img-px2",
+      "img-px3",
+      "img-px4",
+      "img-px5",
+      "img-px6",
+      "img-px7",
+      "img-px8",
+      "img-px9",
+      "img-px10",
+      "img-px11",
+      "img-px12",
+      "img-px13",
+      "img-px14",
+      "img-px15",
+      "img-px16",
+      "img-px17",
+      "img-px18",
+      "img-px19",
+      "img-px20",
+      "img-px21",
+      "img-px22",
+      "img-px23",
+      "img-px24",
+      "img-px25",
+      "img-px26",
+      "img-px27",
+      "img-px28",
+      "img-px29",
+      "img-px30"
+     ],
+     "imageSizes": {
+      "img-px1": [
+       3,
+       3
+      ],
+      "img-px2": [
+       3,
+       3
+      ],
+      "img-px3": [
+       3,
+       3
+      ],
+      "img-px4": [
+       3,
+       3
+      ],
+      "img-px5": [
+       3,
+       3
+      ],
+      "img-px6": [
+       3,
+       3
+      ],
+      "img-px7": [
+       3,
+       3
+      ],
+      "img-px8": [
+       3,
+       3
+      ],
+      "img-px9": [
+       3,
+       3
+      ],
+      "img-px10": [
+       3,
+       3
+      ],
+      "img-px11": [
+       3,
+       3
+      ],
+      "img-px12": [
+       3,
+       3
+      ],
+      "img-px13": [
+       3,
+       3
+      ],
+      "img-px14": [
+       3,
+       3
+      ],
+      "img-px15": [
+       3,
+       3
+      ],
+      "img-px16": [
+       3,
+       3
+      ],
+      "img-px17": [
+       3,
+       3
+      ],
+      "img-px18": [
+       3,
+       3
+      ],
+      "img-px19": [
+       3,
+       3
+      ],
+      "img-px20": [
+       3,
+       3
+      ],
+      "img-px21": [
+       3,
+       3
+      ],
+      "img-px22": [
+       3,
+       3
+      ],
+      "img-px23": [
+       3,
+       3
+      ],
+      "img-px24": [
+       3,
+       3
+      ],
+      "img-px25": [
+       3,
+       3
+      ],
+      "img-px26": [
+       3,
+       3
+      ],
+      "img-px27": [
+       3,
+       3
+      ],
+      "img-px28": [
+       3,
+       3
+      ],
+      "img-px29": [
+       3,
+       3
+      ],
+      "img-px30": [
+       3,
+       3
+      ]
+     }
+    }
+   }
+  ]
+ }
+}

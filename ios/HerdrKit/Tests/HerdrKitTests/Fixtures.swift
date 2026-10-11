@@ -42,3 +42,57 @@ func question(_ text: String = "Which DB?", options: [String] = ["Postgres", "SQ
 func ask(_ toolUseId: String = "toolu_ask", _ questions: [QuestionItem] = [question()]) -> PaneAsk {
     PaneAsk(toolUseId: toolUseId, questions: questions)
 }
+
+// Chat builders: one entry each, seq first.
+
+func user(_ seq: Int, _ text: String, ts: Int? = nil, images: [String] = [], sizes: [String: PixelSize] = [:]) -> ChatEntry {
+    ChatEntry(seq: seq, event: .userText(uuid: "u\(seq)", text: text, ts: ts, images: images, imageSizes: sizes))
+}
+
+func said(_ seq: Int, _ text: String, ts: Int? = nil) -> ChatEntry {
+    ChatEntry(seq: seq, event: .assistantText(uuid: "a\(seq)", text: text, ts: ts))
+}
+
+func call(_ seq: Int, _ id: String, _ tool: String = "Bash", summary: String = "", ts: Int? = nil) -> ChatEntry {
+    ChatEntry(seq: seq, event: .toolUse(uuid: "t\(seq)", toolUseId: id, tool: tool, summary: summary, ts: ts))
+}
+
+func result(_ seq: Int, _ id: String, error: Bool = false, preview: String = "", images: [String] = [], ts: Int? = nil) -> ChatEntry {
+    ChatEntry(seq: seq, event: .toolResult(toolUseId: id, isError: error, preview: preview, images: images, ts: ts, imageSizes: [:]))
+}
+
+func asked(_ seq: Int, _ id: String, _ questions: [QuestionItem] = [question()], ts: Int? = nil) -> ChatEntry {
+    ChatEntry(seq: seq, event: .question(uuid: "q\(seq)", toolUseId: id, questions: questions, ts: ts))
+}
+
+func notice(_ seq: Int, status: String = "completed", summary: String = "") -> ChatEntry {
+    ChatEntry(seq: seq, event: .taskNotice(uuid: "n\(seq)", status: status, summary: summary, ts: nil))
+}
+
+func agentSummary(_ id: String, parent: String, kind: AgentKind = .subagent, label: String = "", type: String? = nil,
+                  phase: String? = nil, status: RunStatus = .running, activity: PaneActivity? = nil, ts: Int = 0) -> AgentSummary {
+    AgentSummary(agentId: id, parentToolUseId: parent, parentAgentId: nil, kind: kind, label: label, type: type, phase: phase,
+                 status: status, activity: activity, ts: ts)
+}
+
+func bgTask(_ id: String, kind: TaskKind = .shell, status: RunStatus = .running, label: String = "", toolUseId: String = "",
+            startedAt: Int = 0, endedAt: Int? = nil) -> BgTask {
+    BgTask(id: id, kind: kind, label: label, toolUseId: toolUseId, status: status, startedAt: startedAt, endedAt: endedAt)
+}
+
+func snapshot(_ entries: [ChatEntry], pane: String = "p", agentId: String? = nil, epoch: Int = 1, state: ChatState = .idle,
+              hasMore: Bool = false, maxSeq: Int? = nil, missing: Bool = false, agents: [AgentSummary]? = nil,
+              tasks: [BgTask]? = nil) -> ServerFrame {
+    .chatSnapshot(ChatSnapshot(paneId: pane, epoch: epoch, state: state, entries: entries, hasMore: hasMore,
+                               maxSeq: maxSeq ?? entries.map(\.seq).max() ?? 0, agentId: agentId, missing: missing,
+                               agents: agents, tasks: tasks))
+}
+
+func event(_ entry: ChatEntry?, seq: Int? = nil, pane: String = "p", agentId: String? = nil, epoch: Int = 1) -> ServerFrame {
+    .chatEvent(paneId: pane, epoch: epoch, seq: seq ?? entry?.seq ?? 0, entry: entry, agentId: agentId)
+}
+
+func page(_ entries: [ChatEntry], pane: String = "p", agentId: String? = nil, epoch: Int = 1, hasMore: Bool = false,
+          stale: Bool = false) -> ChatHistoryPage {
+    ChatHistoryPage(reqId: "h1", paneId: pane, epoch: epoch, entries: entries, hasMore: hasMore, stale: stale, agentId: agentId)
+}

@@ -289,3 +289,13 @@ func encodesRequestsWithTheirReqId(_ request: ClientRequest, _ prefix: String, _
     let expected = String(decoding: try JSONSerialization.data(withJSONObject: withReqId), as: UTF8.self)
     #expect(try canonical(request.json(reqId: "\(prefix)7")) == canonical(expected))
 }
+
+@Test func readsEveryEventOfTheScenarioChats() throws {
+    for file in try scenarioFrameFiles() {
+        let raw = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [[String: Any]])
+        for (json, f) in zip(raw, try frames(in: file)) {
+            guard case .chatSnapshot(let s) = f else { continue }
+            #expect(s.entries.count == (json["events"] as? [Any])?.count, "\(file.lastPathComponent) \(s.paneId) \(s.agentId ?? "")")
+        }
+    }
+}

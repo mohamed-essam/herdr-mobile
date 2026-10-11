@@ -229,3 +229,10 @@ private let closeTree = buildTree(
     #expect(pane("p", status: .done).rowStatus == .agent(.done))
     #expect(RowStatus.shell.label == "shell" && RowStatus.agent(.done).label == "done")
 }
+
+@Test func theChatBreadcrumbNamesRepoTabAndAgent() {
+    let ctx = PaneContext(pane: pane("w1:p1"), workspaceLabel: "api", workspaceNumber: 1, repoName: "shop", tabLabel: "1", tabNumber: 2)
+    #expect(ctx.breadcrumb == "shop › tab 2 › claude")
+    let bare = PaneContext(pane: pane("w1:p1", agent: nil), workspaceLabel: "api", workspaceNumber: 0, repoName: "", tabLabel: "", tabNumber: 0)
+    #expect(bare.breadcrumb == "")
+}

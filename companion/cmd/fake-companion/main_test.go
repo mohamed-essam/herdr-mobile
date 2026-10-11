@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"flag"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -160,6 +162,19 @@ func TestScenarioFrames(t *testing.T) {
 				}
 				frames = append(frames, b)
 			}
+			// Then each chat's snapshot, so the app's decoder reads every scenario event.
+			for _, key := range slices.Sorted(maps.Keys(f.current().Chats)) {
+				paneID, agentID, _ := strings.Cut(key, "/")
+				open, _ := json.Marshal(map[string]string{"t": "chat_open", "paneId": paneID, "agentId": agentID})
+				if err := c.Write(ctx, websocket.MessageText, open); err != nil {
+					t.Fatal(err)
+				}
+				_, b, err := c.Read(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				frames = append(frames, b)
+			}
 			got, _ := json.MarshalIndent(frames, "", "  ")
 			golden := strings.TrimSuffix(path, ".json") + ".frames.json"
 			if *update {
@@ -203,6 +218,113 @@ func TestFakeCompanionAnswersFromTheScenario(t *testing.T) {
 		}
 		if string(got) != step.reply {
 			t.Fatalf("%s: got %s, want %s", step.msg, got, step.reply)
+		}
+	}
+}
+
+// Chat flows need real chats: the fake serves each scenario chat's snapshot (main or
+// thread, else a missing thread), its older history, images, a send error, named frames
+// through POST /play, and records chat_close and any GET /fetch/* (a request the app
+// should never make).
+func TestFakeCompanionServesScenarioChats(t *testing.T) {
+	f, err := newFake("../../../e2e/scenarios", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctl := httptest.NewServer(f.controlHandler())
+	defer ctl.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, _ := dial(ctx, t, f)
+	for range 4 { // welcome + panes, workspaces, tabs
+		readType(ctx, t, c)
+	}
+	ask := func(msg string) map[string]any {
+		t.Helper()
+		if err := c.Write(ctx, websocket.MessageText, []byte(msg)); err != nil {
+			t.Fatal(err)
+		}
+		_, b, err := c.Read(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	seqs := func(m map[string]any) []float64 {
+		var out []float64
+		for _, e := range m["events"].([]any) {
+			out = append(out, e.(map[string]any)["seq"].(float64))
+		}
+		return out
+	}
+
+	snap := ask(`{"t":"chat_open","paneId":"w1:p1"}`)
+	if snap["t"] != "chat_snapshot" || snap["hasMore"] != true || len(snap["agents"].([]any)) != 10 || len(snap["tasks"].([]any)) != 3 {
+		t.Fatalf("main snapshot: %v", snap)
+	}
+	if got := seqs(snap); len(got) != 10 || got[0] != 5 {
+		t.Fatalf("main snapshot seqs %v", got)
+	}
+	page := ask(`{"t":"chat_history","reqId":"h1","paneId":"w1:p1","epoch":1,"beforeSeq":5,"limit":2}`)
+	if got := seqs(page); page["hasMore"] != true || len(got) != 2 || got[0] != 3 || got[1] != 4 {
+		t.Fatalf("history page: %v", page)
+	}
+	if stale := ask(`{"t":"chat_history","reqId":"h2","paneId":"w1:p1","epoch":7,"beforeSeq":5,"limit":2}`); stale["stale"] != true {
+		t.Fatalf("other epoch's page: %v", stale)
+	}
+	if th := ask(`{"t":"chat_open","paneId":"w1:p1","agentId":"ag1"}`); th["agentId"] != "ag1" || len(seqs(th)) != 4 || th["missing"] != nil {
+		t.Fatalf("thread snapshot: %v", th)
+	}
+	if gone := ask(`{"t":"chat_open","paneId":"w1:p1","agentId":"ag2"}`); gone["missing"] != true {
+		t.Fatalf("unknown thread: %v", gone)
+	}
+	if img := ask(`{"t":"chat_image","paneId":"w1:p1","id":"img-user"}`); img["mediaType"] != "image/png" || img["data"] == "" {
+		t.Fatalf("image: %v", img)
+	}
+	if img := ask(`{"t":"chat_image","paneId":"w1:p1","id":"nope"}`); img["missing"] != true {
+		t.Fatalf("unknown image: %v", img)
+	}
+	if res := ask(`{"t":"chat_send","reqId":"c1","paneId":"w4:p1","text":"go on"}`); res["ok"] != false || res["error"] != "outbox_full" {
+		t.Fatalf("send to a failing chat: %v", res)
+	}
+	if res := ask(`{"t":"chat_send","reqId":"c2","paneId":"w3:p1","text":"add a test"}`); res["ok"] != true {
+		t.Fatalf("send: %v", res)
+	}
+
+	if code, _ := call(t, "POST", ctl.URL+"/play", `{"name":"live"}`); code != http.StatusNoContent {
+		t.Fatalf("play: %d", code)
+	}
+	if got := readType(ctx, t, c); got != "chat_event" {
+		t.Fatalf("played frame: %q", got)
+	}
+	if code, _ := call(t, "POST", ctl.URL+"/play", `{"name":"nope"}`); code != http.StatusBadRequest {
+		t.Fatalf("play unknown: %d", code)
+	}
+	if code, _ := call(t, "GET", ctl.URL+"/fetch/probe.png", ""); code != http.StatusNotFound {
+		t.Fatalf("fetch: %d", code)
+	}
+	if err := c.Write(ctx, websocket.MessageText, []byte(`{"t":"chat_close","paneId":"w1:p1","agentId":"ag2"}`)); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if _, got = call(t, "GET", ctl.URL+"/received", ""); strings.Contains(got, `"ChatClose","args":["w1:p1","ag2"]`) {
+			break
+		}
+	}
+	for _, want := range []string{
+		`{"call":"ChatSubscribe","args":["w1:p1",""]}`,
+		`{"call":"ChatHistory","args":["w1:p1","",1,5,2]}`,
+		`{"call":"ChatSend","args":["w4:p1","go on"]}`,
+		`{"call":"Fetch","args":["/fetch/probe.png"]}`,
+		`{"call":"ChatClose","args":["w1:p1","ag2"]}`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("received lacks %s: %s", want, got)
 		}
 	}
 }

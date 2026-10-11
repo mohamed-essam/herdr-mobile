@@ -1,0 +1,55 @@
+# A chat opens at its newest message and follows live output. Markdown, timestamps, the
+# tool rail (tap to expand), inline images reserved from imageSizes with a full-screen
+# viewer, task notices, and the link rule (only http(s) and mailto open).
+appId: dev.herdr.mobile
+---
+- runFlow:
+    file: subflows/open-chat.yaml
+    env:
+      ROW: "row-w1:p1"
+- assertVisible: { text: ".*Two agents are on it.*" }
+- assertVisible: { id: chatStatus, text: ".*idle" }
+- runFlow:
+    file: subflows/play.yaml
+    env:
+      NAME: live
+- assertVisible: { text: ".*Live reply arrived.*" }
+- assertVisible: { id: msg-13, text: "⚙ Background build finished" }
+
+- scrollUntilVisible:
+    element: { id: "tool-toolu_r1" }
+    direction: UP
+# Bring it clear of the tasks strip, which Maestro doesn't count as covering it.
+- swipe: { start: "50%,45%", end: "50%,60%", duration: 400 }
+- assertVisible: { id: "tool-toolu_r1", text: "\\$ Read api/handler.go" }
+- tapOn: { id: "tool-toolu_r1" }
+- assertVisible: { id: "toolOutput-toolu_r1", text: "package api // handler" }
+- assertVisible: { id: "image-img-tool" }
+
+- scrollUntilVisible:
+    element: { id: msg-6 }
+    direction: UP
+# Bring it clear of the tasks strip, which Maestro doesn't count as covering it.
+- swipe: { start: "50%,45%", end: "50%,60%", duration: 400 }
+- assertVisible: { text: ".*look at the API first.*" }
+- assertVisible: { text: ".*func cache\\(\\) \\{\\}.*" }
+- tapOn: { text: call me }
+- assertVisible: { id: chatToast, text: link not opened }
+
+- scrollUntilVisible:
+    element: { id: "image-img-user" }
+    direction: UP
+# Bring it clear of the tasks strip, which Maestro doesn't count as covering it.
+- swipe: { start: "50%,45%", end: "50%,60%", duration: 400 }
+- assertVisible: { id: ts-5, text: "\\d\\d:\\d\\d" }
+- assertVisible: { id: msg-5, text: ".*Here is the error I saw.*" }
+- tapOn: { id: "image-img-user" }
+- assertVisible: { id: imageViewer }
+- tapOn: { id: imageViewer }
+- assertNotVisible: { id: imageViewer }
+- runScript:
+    file: ../scripts/received.js
+    env:
+      CALL: ChatImage
+      ARGS: '["w1:p1","img-user"]'
+      COUNT: "1"

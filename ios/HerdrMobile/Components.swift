@@ -179,11 +179,24 @@ extension View {
         modifier(HerdrField(font: font))
     }
 
-    /// herdr's sheet chrome: `color` behind, the grab handle, full height.
-    func herdrSheet(_ color: Color) -> some View {
+    /// herdr's sheet chrome: `color` behind, the grab handle, full height unless `detents` says otherwise.
+    func herdrSheet(_ color: Color, detents: Set<PresentationDetent> = [.large]) -> some View {
         presentationBackground(color)
             .presentationDragIndicator(.visible)
-            .presentationDetents([.large])
+            .presentationDetents(detents)
+    }
+}
+
+/// An error toast: a red capsule. Callers place it and clear it.
+struct Toast: View {
+    let message: String
+    @Environment(\.herdr) private var c
+
+    var body: some View {
+        Text(message)
+            .font(HerdrFont.small).foregroundStyle(c.crust)
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .background(c.red, in: .capsule)
     }
 }
 

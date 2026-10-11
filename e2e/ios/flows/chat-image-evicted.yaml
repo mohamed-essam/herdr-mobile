@@ -1,0 +1,31 @@
+# An image still on screen opens full screen after the 30-image cache evicted it: the
+# viewer shows the bytes the row decoded, not a blank cover with no way out.
+appId: dev.herdr.mobile
+---
+- runFlow:
+    file: subflows/launch.yaml
+    env:
+      SCENARIO: chat
+- tapOn: { id: "open-w4:p1" }
+- extendedWaitUntil:
+    visible: { id: chatTitle }
+    timeout: 5000
+- runFlow:
+    file: subflows/play.yaml
+    env:
+      NAME: w4-image
+- extendedWaitUntil:
+    visible: { id: image-img-user }
+    timeout: 5000
+# 30 more images: loading them evicts img-user from the cache.
+- runFlow:
+    file: subflows/play.yaml
+    env:
+      NAME: w4-flood
+- extendedWaitUntil:
+    visible: { id: image-img-px30 }
+    timeout: 10000
+- tapOn: { id: image-img-user }
+- assertVisible: { id: imageViewer }
+- tapOn: { id: imageViewer }
+- assertVisible: { id: image-img-user }

@@ -1,0 +1,58 @@
+# Subagent and workflow cards: the subagent card shows its summary and opens its thread
+# (read-only), its header following the summary; a nested card stacks another thread; a missing thread says so; back walks up
+# the stack to the chat. The workflow card groups its agents by phase and folds past six.
+appId: dev.herdr.mobile
+---
+- runFlow:
+    file: subflows/open-chat.yaml
+    env:
+      ROW: "row-w1:p1"
+- scrollUntilVisible:
+    element: { id: "card-toolu_w1" }
+    direction: UP
+    centerElement: true
+- assertVisible: { id: "cardTitle-toolu_w1", text: review }
+- assertVisible: { id: "phase-toolu_w1-fix" }
+- assertNotVisible: { id: agentRow-wa7 }
+- tapOn: { id: "more-toolu_w1", text: "\\+1 more" }
+- assertVisible: { id: agentRow-wa7 }
+- scrollUntilVisible:
+    element: { id: "card-toolu_a1" }
+    direction: UP
+    centerElement: true
+- assertVisible: { id: "card-toolu_a1", text: ".*explore cache.*Explore.*Grep redis.*" }
+- tapOn: { id: "card-toolu_a1" }
+- assertVisible: { id: chatStatus, text: "explore cache · Explore · running" }
+- assertVisible: { text: ".*Redis or in-memory.*" }
+- assertNotVisible: { id: composer }
+# The open thread's header follows the agent's summary: it arrives on the main stream.
+- runFlow:
+    file: subflows/play.yaml
+    env:
+      NAME: ag1-done
+- assertVisible: { id: chatStatus, text: "explore cache · Explore · done" }
+- runScript:
+    file: ../scripts/received.js
+    env:
+      CALL: ChatSubscribe
+      ARGS: '["w1:p1","ag1"]'
+- tapOn: { id: "card-toolu_a2", text: ".*read docs.*" }
+- assertVisible: { id: threadMissing, text: This thread is no longer available }
+- tapOn: { id: threadBack }
+- assertVisible: { id: chatStatus, text: "explore cache · Explore · done" }
+- tapOn: { id: chatBack }
+- assertVisible: { id: "card-toolu_a1" }
+- assertVisible: { id: composer }
+- runScript:
+    file: ../scripts/received.js
+    env:
+      CALL: ChatClose
+      ARGS: '["w1:p1","ag1"]'
+- scrollUntilVisible:
+    element: { id: agentRow-wa1 }
+    centerElement: true
+- tapOn: { id: agentRow-wa1 }
+- assertVisible: { id: chatStatus, text: "check A · running|check A · done" }
+- assertVisible: { text: ".*Checking A: no issues.*" }
+- tapOn: { id: chatBack }
+- assertVisible: { id: composer }

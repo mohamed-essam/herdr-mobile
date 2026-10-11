@@ -1,0 +1,44 @@
+# The composer: Interrupt (esc) while the agent works, a message queued while it is busy
+# and confirmed when it is delivered, and a failed send with Retry.
+appId: dev.herdr.mobile
+---
+- runFlow:
+    file: subflows/open-chat.yaml
+    env:
+      ROW: "row-w3:p1"
+- assertVisible: { id: chatStatus, text: ".*working" }
+- tapOn: { id: interruptButton }
+- runScript:
+    file: ../scripts/received.js
+    env:
+      CALL: SendKeys
+      ARGS: '["w3:p1","esc"]'
+- tapOn: { id: composer }
+- inputText: Add a test
+- tapOn: { id: sendButton }
+- assertVisible: { id: pendingLabel, text: queued — Claude is busy }
+- runScript:
+    file: ../scripts/received.js
+    env:
+      CALL: ChatSend
+      ARGS: '["w3:p1","Add a test"]'
+- runFlow:
+    file: subflows/play.yaml
+    env:
+      NAME: delivered
+- assertVisible: { id: msg-3, text: ".*Add a test.*" }
+- assertNotVisible: { id: pendingLabel }
+- tapOn: { id: chatBack }
+
+- tapOn: { id: "open-w4:p1" }
+- tapOn: { id: composer }
+- inputText: Go on
+- tapOn: { id: sendButton }
+- assertVisible: { id: pendingLabel, text: too many queued messages }
+- tapOn: { id: retryButton }
+- runScript:
+    file: ../scripts/received.js
+    env:
+      CALL: ChatSend
+      ARGS: '["w4:p1","Go on"]'
+      COUNT: "2"

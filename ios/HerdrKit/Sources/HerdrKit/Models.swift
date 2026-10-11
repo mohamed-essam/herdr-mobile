@@ -74,6 +74,10 @@ public struct AlsoClose: Equatable, Sendable {
 public struct PixelSize: Equatable, Sendable {
     public let width: Int
     public let height: Int
+
+    public init(width: Int, height: Int) {
+        (self.width, self.height) = (width, height)
+    }
 }
 
 /// One event of a pane's chat. `ts` is epoch ms, nil when the mod sent none. Image

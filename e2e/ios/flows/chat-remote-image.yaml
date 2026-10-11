@@ -1,0 +1,18 @@
+# Agent-written Markdown never loads an image itself (brief override 5): a message with a
+# remote image, inline and as a block, shows its text and makes no request.
+appId: dev.herdr.mobile
+---
+- runFlow:
+    file: subflows/open-chat.yaml
+    env:
+      ROW: "row-w1:p1"
+- runScript:
+    file: ../scripts/remote-image.js
+    env:
+      SEQ: "15"
+- assertVisible: { text: ".*Probe.*sent.*" }
+- runScript:
+    file: ../scripts/never-received.js
+    env:
+      CALL: Fetch
+      WAIT_MS: "3000"

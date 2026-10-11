@@ -6,7 +6,7 @@ appId: dev.herdr.mobile
     env:
       SCENARIO: dashboard
 - assertVisible: { id: "choice-w1:p1-Postgres" }
-- assertVisible: { id: "other-w1:p1", enabled: false }
+- assertVisible: { id: "other-w1:p1", enabled: true }
 - tapOn: { id: "choice-w1:p1-SQLite" }
 - extendedWaitUntil:
     visible: { id: "resumed-w1:p1", text: ".*api resumed.*" }

@@ -1,0 +1,48 @@
+# A pending question pins a sheet where the composer was. "Other…" on the dashboard leads
+# here, where a typed answer is sent with chat_answer; the sheet goes once the question's
+# result arrives, and the history shows the answer. A multi-question ask needs every answer.
+appId: dev.herdr.mobile
+---
+- runFlow:
+    file: subflows/launch.yaml
+    env:
+      SCENARIO: chat
+- scrollUntilVisible:
+    element: { id: "other-w5:p1" }
+- tapOn: { id: "other-w5:p1" }
+- assertVisible: { id: chatStatus, text: ".*waiting on you" }
+- assertVisible: { id: questionSheet }
+- assertVisible: { id: sheetQuestion-0, text: "Which cache\\?" }
+- assertNotVisible: { id: composer }
+- tapOn: { id: sheetOther-0 }
+- inputText: Redis
+- tapOn: { id: sendAnswer }
+- runScript:
+    file: ../scripts/received.js
+    env:
+      CALL: ChatAnswer
+      ARGS: '["w5:p1","toolu_pick",{"Which cache?":"Redis"}]'
+- assertVisible: { id: "answer-toolu_pick", text: sending answer… }
+- runFlow:
+    file: subflows/play.yaml
+    env:
+      NAME: pick-answered
+- assertNotVisible: { id: questionSheet }
+- assertVisible: { id: composer }
+- assertVisible: { id: "answer-toolu_pick", text: → Redis }
+- tapOn: { id: chatBack }
+
+- tapOn: { id: "answerInChat-w2:p1" }
+- assertVisible: { id: sheetQuestion-0, text: "Which database\\?" }
+- assertVisible: { id: sheetQuestion-1, text: "Any constraints\\?" }
+- assertVisible: { id: sendAnswer, enabled: false }
+- tapOn: { id: sheetChoice-SQLite }
+- assertVisible: { id: sendAnswer, enabled: false }
+- tapOn: { id: sheetText-1 }
+- inputText: fast
+- tapOn: { id: sendAnswer }
+- runScript:
+    file: ../scripts/received.js
+    env:
+      CALL: ChatAnswer
+      ARGS: '["w2:p1","toolu_ask",{"Any constraints?":"fast","Which database?":"SQLite"}]'

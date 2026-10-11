@@ -125,25 +125,6 @@ public final class DashboardStore {
     }
 
     private func perform(_ r: ClientRequest) async {
-        do { _ = try await request(r) } catch { self.error = Self.label(error) }
-    }
-
-    private static func label(_ error: any Error) -> String {
-        switch error as? CompanionError {
-        case .rejected(let message): message
-        case .timedOut: "timed out"
-        case .disconnected: "disconnected"
-        case .notConnected: "not connected"
-        case nil: error.localizedDescription
-        }
-    }
-
-    private func answerErrorLabel(_ error: any Error) -> String {
-        switch error as? CompanionError {
-        case .rejected("no_mod"): "Claude isn't connected"
-        case .rejected("no_question"): "the question is no longer waiting"
-        case .rejected("empty"): "empty answer"
-        default: "answer failed: \(Self.label(error))"
-        }
+        do { _ = try await request(r) } catch { self.error = errorLabel(error) }
     }
 }

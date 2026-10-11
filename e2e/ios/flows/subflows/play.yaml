@@ -1,0 +1,8 @@
+# Send the scenario's frames named NAME (POST /play).
+appId: dev.herdr.mobile
+---
+- runScript:
+    file: ../../scripts/control.js
+    env:
+      ENDPOINT: /play
+      NAME: ${NAME}

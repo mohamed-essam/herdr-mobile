@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/chatbridge"
@@ -114,23 +115,43 @@ func (r *recorder) ListWorktrees(_ context.Context, workspaceID string) ([]herdr
 	return r.scenario().Worktrees[workspaceID], nil
 }
 
-// wsserver.ChatHub. A subscription gets an idle, empty snapshot and no updates.
+// wsserver.ChatHub, served from the scenario's chats and images. A subscription
+// gets its snapshot and no updates (flows send those with /emit or /play), and an
+// unknown thread is missing.
 
 func (r *recorder) Subscribe(paneID, agentID string) (chatbridge.Snapshot, <-chan chatbridge.Update, func()) {
 	r.record("ChatSubscribe", paneID, agentID)
-	return chatbridge.Snapshot{PaneID: paneID, AgentID: agentID, State: "idle"}, nil, func() {}
+	snap := chatbridge.Snapshot{PaneID: paneID, AgentID: agentID, State: "idle"}
+	if c, ok := r.scenario().chat(paneID, agentID); ok {
+		snap.Epoch, snap.Events, snap.HasMore, snap.Agents, snap.Tasks = c.epoch(), c.Events, len(c.Older) > 0, c.Agents, c.Tasks
+		if c.State != "" {
+			snap.State = c.State
+		}
+	} else if agentID != "" {
+		snap.Missing = true
+	}
+	return snap, nil, func() { r.record("ChatClose", paneID, agentID) }
 }
 func (r *recorder) Send(paneID, text string) error {
 	r.record("ChatSend", paneID, text)
+	if c, _ := r.scenario().chat(paneID, ""); c.SendError != "" {
+		return errors.New(c.SendError)
+	}
 	return nil
 }
 func (r *recorder) History(paneID, agentID string, epoch, beforeSeq, limit int) ([]chatbridge.Entry, bool, bool) {
 	r.record("ChatHistory", paneID, agentID, epoch, beforeSeq, limit)
-	return nil, false, true
+	c, ok := r.scenario().chat(paneID, agentID)
+	if !ok || epoch != c.epoch() {
+		return nil, false, false
+	}
+	page, more := chatbridge.Page(c.Older, beforeSeq, limit)
+	return page, more, true
 }
 func (r *recorder) Image(paneID, id string) (string, string, bool) {
 	r.record("ChatImage", paneID, id)
-	return "", "", false
+	img, ok := r.scenario().Images[id]
+	return img.MediaType, img.Data, ok
 }
 func (r *recorder) Answer(paneID, toolUseID string, answers map[string]string) error {
 	r.record("ChatAnswer", paneID, toolUseID, answers)

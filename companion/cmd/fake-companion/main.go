@@ -10,7 +10,9 @@
 //	POST /emit     <one JSON frame>          send a frame to every connected app
 //	GET  /received                           JSON array of the companion calls the app caused,
 //	                                         e.g. {"call":"RenamePane","args":["w1:p1","build"]}
+//	POST /play     {"name":"live"}           send the scenario's named frames to every connected app
 //	POST /stop                               drop every app and refuse new WS connections (503)
+//	GET  /fetch/*                            404, recorded as a Fetch call: a request the app should never make
 package main
 
 import (
@@ -26,6 +28,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/chatbridge"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/herdr"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/proto"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
@@ -39,6 +42,36 @@ type scenario struct {
 	// What herdr answers for agent.list and, by workspace id, worktree.list.
 	Agents    []string                         `json:"agents"`
 	Worktrees map[string][]herdr.WorktreeEntry `json:"worktrees"`
+	// Chats by "paneId" (the main stream) or "paneId/agentId" (a thread); images by id;
+	// frames a flow sends with POST /play, by name.
+	Chats  map[string]chatScenario      `json:"chats"`
+	Images map[string]chatbridge.Image  `json:"images"`
+	Frames map[string][]json.RawMessage `json:"frames"`
+}
+
+// chatScenario is one chat stream: Events make its snapshot, Older is reachable
+// through chat_history, and chat_send fails with SendError when it is set.
+type chatScenario struct {
+	Epoch     int                `json:"epoch"`
+	State     string             `json:"state"`
+	Events    []chatbridge.Entry `json:"events"`
+	Older     []chatbridge.Entry `json:"older"`
+	Agents    []json.RawMessage  `json:"agents"`
+	Tasks     json.RawMessage    `json:"tasks"`
+	SendError string             `json:"sendError"`
+}
+
+// epoch is the chat's epoch, 1 unless the scenario says otherwise.
+func (c chatScenario) epoch() int { return max(c.Epoch, 1) }
+
+// chat is the scenario's stream for a pane (agentID "") or one of its threads.
+func (s scenario) chat(paneID, agentID string) (chatScenario, bool) {
+	key := paneID
+	if agentID != "" {
+		key += "/" + agentID
+	}
+	c, ok := s.Chats[key]
+	return c, ok
 }
 
 func loadScenario(dir, name string) (scenario, error) {
@@ -145,6 +178,28 @@ func (f *fake) controlHandler() http.Handler {
 		f.srv.Broadcast(b)
 		log.Printf("emit %s", b)
 		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /play", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Name string }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		frames, ok := f.current().Frames[req.Name]
+		if !ok {
+			http.Error(w, "no frames named "+req.Name, http.StatusBadRequest)
+			return
+		}
+		for _, b := range frames {
+			f.srv.Broadcast(b)
+		}
+		log.Printf("play %s", req.Name)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /fetch/", func(w http.ResponseWriter, r *http.Request) {
+		f.rec.record("Fetch", r.URL.Path)
+		log.Printf("fetch %s", r.URL.Path)
+		http.NotFound(w, r)
 	})
 	mux.HandleFunc("GET /received", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

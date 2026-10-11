@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		4D0000000000000000000010 /* HerdrKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4D0000000000000000000011 /* HerdrKit */; };
+		4D0000000000000000000013 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 4D0000000000000000000014 /* MarkdownUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,6 +29,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				4D0000000000000000000010 /* HerdrKit in Frameworks */,
+				4D0000000000000000000013 /* MarkdownUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -71,6 +73,7 @@
 			name = HerdrMobile;
 			packageProductDependencies = (
 				4D0000000000000000000011 /* HerdrKit */,
+				4D0000000000000000000014 /* MarkdownUI */,
 			);
 			productName = HerdrMobile;
 			productReference = 4D0000000000000000000001 /* HerdrMobile.app */;
@@ -102,6 +105,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				4D0000000000000000000012 /* XCLocalSwiftPackageReference "HerdrKit" */,
+				4D0000000000000000000015 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 4D0000000000000000000005 /* Products */;
@@ -260,10 +264,26 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		4D0000000000000000000015 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.4.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		4D0000000000000000000011 /* HerdrKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = HerdrKit;
+		};
+		4D0000000000000000000014 /* MarkdownUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4D0000000000000000000015 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
+			productName = MarkdownUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -58,9 +58,9 @@ func appendCapped(events []Entry, e Entry, limit int) []Entry {
 	return events
 }
 
-// page returns up to limit entries with seq < beforeSeq, ascending, and
-// whether older ones remain.
-func page(events []Entry, beforeSeq, limit int) ([]Entry, bool) {
+// Page returns up to limit entries of events (ascending by seq) with
+// seq < beforeSeq, ascending, and whether older ones remain.
+func Page(events []Entry, beforeSeq, limit int) ([]Entry, bool) {
 	end := sort.Search(len(events), func(i int) bool { return events[i].Seq >= beforeSeq })
 	start := max(0, end-limit)
 	out := make([]Entry, end-start)

@@ -5,13 +5,17 @@ import SwiftUI
 /// what's done, then the rest, with the workspace switcher and "+" at the bottom.
 /// Ported from Android's DashboardScreen.kt.
 ///
-/// Implementer default (CPE-2094): a pane has nowhere to open until the chat (M5) and the
-/// terminal (M6), so tapping a row does nothing and "Other…" / "Answer in chat ›" are
-/// disabled. A long press opens the pane's actions.
+/// Tapping a pane (its row, a needs-you card's "›", "Answer in chat ›" or "Other…") opens it
+/// in chat; the pane screen replaces the dashboard until back, or until the pane goes away.
+/// Implementer default (CPE-2096): a pane without chat has nowhere to open until the
+/// terminal (M6), so tapping it does nothing. A long press opens the pane's actions.
 struct DashboardScreen: View {
     let client: CompanionClient
     let store: DashboardStore
+    let chat: ChatStore
     @State private var sheet: DashboardSheet?
+    /// The pane shown in place of the dashboard.
+    @State private var openPaneId: String?
     /// When the connection last dropped; nil while connected.
     @State private var disconnectedSince: Date?
     @Environment(\.launchOptions) private var options
@@ -20,9 +24,26 @@ struct DashboardScreen: View {
     private var connected: Bool { client.state == .connected }
 
     var body: some View {
+        let panes = store.panes
+        let open = panes.first { $0.paneId == openPaneId }
+        Group {
+            if let open {
+                PaneScreen(pane: open, context: paneContexts(store.repos)[open.paneId] ?? PaneContext(fallback: open),
+                           connected: connected, chat: chat, onExit: { openPaneId = nil })
+            } else {
+                dashboard(panes)
+            }
+        }
+        // A pane closed here or elsewhere pops back, and doesn't reopen if it comes back.
+        .onChange(of: open == nil) { _, gone in if gone { openPaneId = nil } }
+    }
+
+    /// Opens `p` in chat; a pane without chat waits for the terminal (M6).
+    private func openPane(_ p: Pane) { if p.chat { openPaneId = p.paneId } }
+
+    /// `panes` is `store.panes`, read once per render: the store sorts on each read.
+    private func dashboard(_ panes: [Pane]) -> some View {
         TimelineView(.periodic(from: .now, by: 30)) { _ in
-            // Derived once per render: the store computes these, it doesn't keep them.
-            let panes = store.panes
             let repos = store.repos
             let contexts = paneContexts(repos)
             ZStack(alignment: .bottom) {
@@ -61,7 +82,7 @@ struct DashboardScreen: View {
                         ForEach(sections.needsYou, id: \.paneId) { p in
                             NeedsYouCard(ctx: ctx(p), now: now, sending: store.answers[p.paneId].flatMap { $0.phase == .sending ? $0 : nil },
                                          enabled: connected, onAnswer: { label in Task { await store.answer(p, label: label) } },
-                                         onActions: { actions(p) })
+                                         onOpen: { openPane(p) }, onActions: { actions(p) })
                             .id("needs:\(p.paneId)") // a resumed row of the same pane sits beside it
                         }
                         ForEach(resumed, id: \.paneId) { a in
@@ -70,9 +91,9 @@ struct DashboardScreen: View {
                                 .id("resumed:\(a.paneId)")
                         }
                     }
-                    PaneGroup(name: "working", glyph: nil, color: c.yellow, accentAge: true, ctxs: sections.working.map(ctx), now: now, onActions: actions)
-                    PaneGroup(name: "done", glyph: "✓", color: c.green, accentAge: false, ctxs: sections.done.map(ctx), now: now, onActions: actions)
-                    PaneGroup(name: "idle", glyph: "○", color: c.overlay2, accentAge: false, ctxs: sections.idle.map(ctx), now: now, onActions: actions)
+                    PaneGroup(name: "working", glyph: nil, color: c.yellow, accentAge: true, ctxs: sections.working.map(ctx), now: now, onOpen: openPane, onActions: actions)
+                    PaneGroup(name: "done", glyph: "✓", color: c.green, accentAge: false, ctxs: sections.done.map(ctx), now: now, onOpen: openPane, onActions: actions)
+                    PaneGroup(name: "idle", glyph: "○", color: c.overlay2, accentAge: false, ctxs: sections.idle.map(ctx), now: now, onOpen: openPane, onActions: actions)
                 }
                 .opacity(connected ? 1 : 0.45)
             }
@@ -100,10 +121,7 @@ struct DashboardScreen: View {
 
     @ViewBuilder private var errorToast: some View {
         if let error = store.error {
-            Text(error)
-                .font(HerdrFont.small).foregroundStyle(c.crust)
-                .padding(.horizontal, 16).padding(.vertical, 12)
-                .background(c.red, in: .capsule)
+            Toast(message: error)
                 .padding(.top, 8)
                 .accessibilityIdentifier("actionError")
                 .task(id: error) {
@@ -220,6 +238,7 @@ private struct NeedsYouCard: View {
     let sending: InlineAnswer?
     let enabled: Bool
     let onAnswer: (String) -> Void
+    let onOpen: () -> Void
     let onActions: () -> Void
     @Environment(\.herdr) private var c
 
@@ -247,21 +266,26 @@ private struct NeedsYouCard: View {
                                 .disabled(!enabled)
                                 .accessibilityIdentifier("choice-\(pane.paneId)-\(o.label)")
                         }
-                        Button("Other…") {}
+                        Button("Other…", action: onOpen)
                             .buttonStyle(SecondaryButtonStyle(ghost: true))
-                            .disabled(true)
                             .accessibilityIdentifier("other-\(pane.paneId)")
                     }
                 }
             } else if let ask = pane.ask {
-                question(ask.questions.first.map(\.question).flatMap { $0.isEmpty ? nil : $0 } ?? "Claude has a question")
-                Button("Answer in chat ›") {}
+                question(ask.questions.first?.question.nonEmpty ?? "Claude has a question")
+                Button("Answer in chat ›", action: onOpen)
                     .buttonStyle(SecondaryButtonStyle(ghost: true, height: 40))
-                    .disabled(true)
                     .accessibilityIdentifier("answerInChat-\(pane.paneId)")
             } else {
-                Text(activityLine(pane.activity) ?? "Waiting for you")
-                    .font(HerdrFont.body).foregroundStyle(c.subtext1).lineLimit(3)
+                HStack {
+                    Text(activityLine(pane.activity) ?? "Waiting for you")
+                        .font(HerdrFont.body).foregroundStyle(c.subtext1).lineLimit(3)
+                    Spacer()
+                    Button("›", action: onOpen)
+                        .buttonStyle(SecondaryButtonStyle(ghost: true, height: 40))
+                        .accessibilityLabel("Open pane")
+                        .accessibilityIdentifier("open-\(pane.paneId)")
+                }
             }
             if let badge = pane.bgBadge { BgChip(paneId: pane.paneId, text: badge) }
         }
@@ -270,8 +294,10 @@ private struct NeedsYouCard: View {
         .background(c.base, in: .rect(cornerRadius: HerdrRadius.card))
         .overlay(RoundedRectangle(cornerRadius: HerdrRadius.card).stroke(c.red.opacity(0.22)))
         .contentShape(.rect)
+        .onTapGesture(perform: onOpen)
         .onLongPressGesture(perform: onActions)
         .accessibilityElement(children: .contain)
+        .accessibilityAction(.default, onOpen)
         .accessibilityAction(named: "Actions", onActions)
         .accessibilityIdentifier("needs-\(pane.paneId)")
         .padding(.horizontal, 16).padding(.vertical, 4)
@@ -360,6 +386,7 @@ private struct PaneGroup: View {
     let accentAge: Bool
     let ctxs: [PaneContext]
     let now: Int
+    let onOpen: (Pane) -> Void
     let onActions: (Pane) -> Void
     @Environment(\.herdr) private var c
 
@@ -370,7 +397,8 @@ private struct PaneGroup: View {
                 .padding(.top, 8)
             ListCard(background: c.base, radius: HerdrRadius.card) {
                 ForEach(ctxs, id: \.pane.paneId) { ctx in
-                    PaneRow(ctx: ctx, ageColor: accentAge ? color : c.overlay2, now: now, onActions: { onActions(ctx.pane) })
+                    PaneRow(ctx: ctx, ageColor: accentAge ? color : c.overlay2, now: now,
+                            onOpen: { onOpen(ctx.pane) }, onActions: { onActions(ctx.pane) })
                 }
             }
             .padding(.horizontal, 16)
@@ -382,6 +410,7 @@ private struct PaneRow: View {
     let ctx: PaneContext
     let ageColor: Color
     let now: Int
+    let onOpen: () -> Void
     let onActions: () -> Void
     @Environment(\.herdr) private var c
 
@@ -405,8 +434,10 @@ private struct PaneRow: View {
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
         .contentShape(.rect)
+        .onTapGesture(perform: onOpen)
         .onLongPressGesture(perform: onActions)
         .accessibilityElement(children: .contain)
+        .accessibilityAction(.default, onOpen)
         .accessibilityAction(named: "Actions", onActions)
         .accessibilityIdentifier("row-\(pane.paneId)")
     }

@@ -13,6 +13,27 @@ public enum CompanionError: Error, Equatable {
     case rejected(String)
 }
 
+/// Why a request failed, in words.
+func errorLabel(_ error: any Error) -> String {
+    switch error as? CompanionError {
+    case .rejected(let message): message
+    case .timedOut: "timed out"
+    case .disconnected: "disconnected"
+    case .notConnected: "not connected"
+    case nil: error.localizedDescription
+    }
+}
+
+/// Why an answer to a question failed, in words.
+func answerErrorLabel(_ error: any Error) -> String {
+    switch error as? CompanionError {
+    case .rejected("no_mod"): "Claude isn't connected"
+    case .rejected("no_question"): "the question is no longer waiting"
+    case .rejected("empty"): "empty answer"
+    default: "answer failed: \(errorLabel(error))"
+    }
+}
+
 /// The app's one WebSocket to the companion. `run()` connects, and reconnects with
 /// backoff after every drop; read frames from `frames()`, chat images from `images()`.
 @MainActor @Observable

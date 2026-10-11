@@ -266,6 +266,9 @@ public struct PaneContext: Equatable, Sendable {
     /// "tab 1", else the tab's label, else "".
     public var tabCrumb: String { tabNumber > 0 ? "tab \(tabNumber)" : tabLabel }
 
+    /// The chat header's "shop › tab 1 › claude": repo, tab and agent, the empty ones left out.
+    public var breadcrumb: String { [repoName, tabCrumb, pane.agent ?? ""].filter { !$0.isEmpty }.joined(separator: " › ") }
+
     /// "herdr-mobile · claude".
     public var meta: String { [repoName, pane.displayName].filter { !$0.isEmpty }.joined(separator: " · ") }
 }
@@ -305,7 +308,7 @@ private let fileTools: Set = ["Read", "Edit", "Write", "NotebookEdit", "MultiEdi
 
 /// A tool call as one line: "Read: /home/me/app/ui/X.kt" becomes "Read ui/X.kt"
 /// (file tools keep the last two path segments).
-func toolLine(tool: String, summary: String) -> String {
+public func toolLine(tool: String, summary: String) -> String {
     guard summary.hasPrefix("\(tool):") else { return summary.isEmpty ? tool : summary }
     let detail = summary.dropFirst(tool.count + 1).trimmingCharacters(in: .whitespaces)
     guard fileTools.contains(tool) else { return "\(tool) \(detail)" }

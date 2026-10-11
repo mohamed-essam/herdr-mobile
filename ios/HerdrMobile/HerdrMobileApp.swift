@@ -14,7 +14,7 @@ struct HerdrMobileApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView(savedURL: options.companionURL)
+            RootView(savedURL: options.companionURL, now: { [options] in options.now() })
                 .environment(\.launchOptions, options)
         }
     }
@@ -28,25 +28,37 @@ enum SettingsKey {
     static let recentAgents = "recentAgents"
 }
 
-/// One companion connection and the dashboard state it feeds.
+/// One companion connection and the dashboard and chat state it feeds.
 @MainActor final class Session {
     let client: CompanionClient
     let store: DashboardStore
+    let chat: ChatStore
 
-    init(url: URL) {
+    /// `now` is the app's clock (`-fixedNow` freezes it).
+    init(url: URL, now: @escaping @Sendable () -> Date) {
         let client = CompanionClient(url: url)
         self.client = client
+        chat = ChatStore(send: { client.send($0) }, request: { try await client.request($0) }, now: { now().epochMs })
         store = DashboardStore(
             recentAgents: UserDefaults.standard.stringArray(forKey: SettingsKey.recentAgents) ?? [],
             saveRecentAgents: { UserDefaults.standard.set($0, forKey: SettingsKey.recentAgents) },
             request: { try await client.request($0) })
     }
 
-    /// Connects, and feeds every frame to the store, until cancelled.
+    /// Connects, and feeds every frame to the stores, until cancelled.
     func run() async {
         async let connection: Void = client.run()
-        for await frame in client.frames() { store.apply(frame) } // ends when cancelled
+        async let images: Void = feedImages()
+        for await frame in client.frames() { // ends when cancelled
+            store.apply(frame)
+            chat.apply(frame)
+        }
         await connection
+        await images
+    }
+
+    private func feedImages() async {
+        for await image in client.images() { chat.apply(image: image) }
     }
 }
 
@@ -62,9 +74,12 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.herdr) private var c
 
-    init(savedURL: URL?) {
+    private let now: @Sendable () -> Date
+
+    init(savedURL: URL?, now: @escaping @Sendable () -> Date) {
+        self.now = now
         _route = State(initialValue: savedURL == nil ? .connect : .dashboard)
-        _session = State(initialValue: savedURL.map(Session.init))
+        _session = State(initialValue: savedURL.map { Session(url: $0, now: now) })
     }
 
     var body: some View {
@@ -72,7 +87,7 @@ struct RootView: View {
             switch route {
             case .connect:
                 ConnectScreen(input: $draft) { address in
-                    session = Session(url: address.url)
+                    session = Session(url: address.url, now: now)
                     route = .firstConnect(address)
                 }
             case .firstConnect(let address):
@@ -82,7 +97,7 @@ struct RootView: View {
                     onContinue: { route = .dashboard },
                     onBack: { session = nil; route = .connect })
             case .dashboard:
-                if let session { DashboardScreen(client: session.client, store: session.store) }
+                if let session { DashboardScreen(client: session.client, store: session.store, chat: session.chat) }
             }
         }
         .background(c.crust)
