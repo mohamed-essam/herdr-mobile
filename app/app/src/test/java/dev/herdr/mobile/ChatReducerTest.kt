@@ -528,4 +528,26 @@ class ChatReducerTest {
         v = onFrame(v, ServerFrame.ChatTasks("p", listOf(task("c"))))
         assertEquals(listOf("c"), v.tasks.map { it.id })
     }
+
+    // ---- protocol 13: the reported agent ----
+
+    @Test fun snapshotSetsAgentAndALaterOneWithoutKeepsIt() {
+        var v = onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", emptyList(), agent = "hermes"))
+        assertEquals("hermes", v.agent)
+        v = onFrame(v, snap(1, user(1, "x")))
+        assertEquals("hermes", v.agent)
+    }
+
+    @Test fun threadSnapshotDoesNotChangeAgent() {
+        var v = onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", emptyList(), agent = "hermes"))
+        v = onFrame(v, ServerFrame.ChatSnapshot("p", 1, "idle", emptyList(), agentId = "a", agent = "other"))
+        assertEquals("hermes", v.agent)
+    }
+
+    @Test fun chatAgentLabelPrecedence() {
+        assertEquals("claude", dev.herdr.mobile.ui.chatAgentLabel("", null))
+        assertEquals("claude", dev.herdr.mobile.ui.chatAgentLabel(null, " "))
+        assertEquals("hermes", dev.herdr.mobile.ui.chatAgentLabel(null, "hermes"))
+        assertEquals("codex", dev.herdr.mobile.ui.chatAgentLabel("codex", "hermes"))
+    }
 }

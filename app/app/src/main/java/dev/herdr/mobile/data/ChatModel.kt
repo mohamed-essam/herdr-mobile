@@ -54,6 +54,8 @@ data class ChatView(
     val tasks: List<BgTask> = emptyList(),
     /** The session's slash commands (main view only); empty: no picker. */
     val commands: List<SlashCommand> = emptyList(),
+    /** The agent the mod reports for this pane (main view only); null: claude. */
+    val agent: String? = null,
     /** A thread's snapshot said the companion doesn't know that agent. */
     val missing: Boolean = false,
 )
@@ -102,6 +104,7 @@ object ChatReducer {
                 agents = f.agents?.associateBy { it.agentId } ?: v.agents,
                 tasks = f.tasks ?: v.tasks,
                 commands = f.commands ?: v.commands,
+                agent = if (f.agentId == null) f.agent ?: v.agent else v.agent,
                 missing = f.missing,
                 // A new epoch (companion restart / new session) dropped any held answer.
                 answering = if (v.loaded && f.epoch == v.epoch) v.answering - answeredResults(entries) else emptySet(),
