@@ -1,3 +1,4 @@
+import functools
 import importlib.util
 import inspect
 import logging
@@ -10,6 +11,7 @@ import pytest
 import herdr_hermes
 from herdr_hermes import history
 from herdr_hermes.hooks import HOOKS
+from herdr_hermes.loop import Loop
 
 PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -355,6 +357,66 @@ def test_subagent_pre_llm_call_is_skipped_without_on_session_start():
              parent_session_id="main")
     ctx.call("pre_tool_call", tool_name="t", args={}, session_id="child", tool_call_id="c")
     assert loop.events == [] and loop.sessions == []
+
+
+def test_forked_run_tool_and_interim_payloads_push_nothing():
+    # agent/background_review.py: a persist-disabled fork shares the parent's
+    # session_id; its turn_id (agent/turn_context.py _bind_turn_identity) is
+    # its own, and the tool/interim hooks carry it.
+    ctx, loop, _ = active()
+    ctx.call("on_session_start", session_id="s1")
+    ctx.call("pre_llm_call", session_id="s1", turn_id="T1", user_message="", conversation_history=[])
+    loop.events.clear()
+    ctx.call("pre_tool_call", tool_name="memory", args={"a": "b"}, session_id="s1",
+             tool_call_id="f1", turn_id="F1")
+    ctx.call("post_tool_call", tool_name="memory", result="ok", session_id="s1",
+             tool_call_id="f1", turn_id="F1", status="ok")
+    ctx.call("on_interim_message", session_id="s1", turn_id="F1", text="reviewing")
+    assert loop.events == []
+    ctx.call("pre_tool_call", tool_name="t", args={}, session_id="s1", tool_call_id="c1", turn_id="T1")
+    ctx.call("post_tool_call", tool_name="t", result="r", session_id="s1", tool_call_id="c1",
+             turn_id="T1", status="ok")
+    ctx.call("on_interim_message", session_id="s1", turn_id="T1", text="main")
+    assert [e["type"] for e in loop.events] == ["tool_use", "tool_result", "assistant_text"]
+
+
+def test_payloads_without_a_turn_id_are_kept():
+    # No turn to attribute them to (no main turn seen yet, or an empty
+    # turn_id): kept, as before, rather than dropping the main run's rows.
+    ctx, loop, _ = active()
+    ctx.call("pre_tool_call", tool_name="t", args={}, session_id="s1", tool_call_id="c0", turn_id="X")
+    ctx.call("pre_llm_call", session_id="s1", turn_id="T1", user_message="", conversation_history=[])
+    loop.events.clear()
+    ctx.call("pre_tool_call", tool_name="t", args={}, session_id="s1", tool_call_id="c1", turn_id="")
+    ctx.call("post_tool_call", tool_name="t", result="r", session_id="s1", tool_call_id="c1", status="ok")
+    ctx.call("on_interim_message", session_id="s1", text="x")
+    assert [e["type"] for e in loop.events] == ["tool_use", "tool_result", "assistant_text"]
+
+
+def test_first_turn_of_a_new_session_sends_working_after_the_snapshot(monkeypatch):
+    sent = []
+
+    def fake_sync(path, body, timeout=10.0):
+        sent.append(body)
+        return {}
+
+    class QuietLoop(Loop):
+        def start(self):  # ticks are driven by the test
+            pass
+
+    monkeypatch.setattr(herdr_hermes, "_make_loop", functools.partial(QuietLoop, sync=fake_sync))
+    ctx = FakeCtx()
+    herdr_hermes.register(ctx)
+    lp = sys.modules[herdr_hermes._RUNTIME_MODULE].panes["w1:p1"]._loop
+    ctx.call("on_session_start", session_id="s1")
+    ctx.call("pre_llm_call", session_id="s1", turn_id="T1", user_message="hi",
+             conversation_history=[{"role": "user", "content": "hi"}])
+    lp.tick_once()
+    evs = sent[-1]["events"]
+    assert [e["type"] for e in evs] == [
+        "hello", "snapshot_begin", "snapshot_chunk", "snapshot_end", "state"]
+    assert evs[-1] == {"type": "state", "state": "working"}
+    assert evs[2]["events"] == [{"type": "user_text", "uuid": "h-0", "text": "hi", "ts": 1000}]
 
 
 # -- history snapshot --------------------------------------------------------

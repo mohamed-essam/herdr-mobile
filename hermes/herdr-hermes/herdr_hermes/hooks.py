@@ -16,6 +16,9 @@ can block or rewrite the tool call. Subagent payloads are skipped: their
 on_session_start / post_llm_call / on_session_end carry platform
 "subagent", their pre_llm_call a parent_session_id, and their tool and
 interim payloads only their session_id, remembered from the first two.
+Persist-disabled forks (background review, /btw) share the parent's
+session_id and fire only tool and interim hooks; those carry the fork's own
+turn_id, so they are dropped when it is not the main pre_llm_call's.
 """
 from __future__ import annotations
 
@@ -63,6 +66,7 @@ class Hooks:
         self._session_key: Optional[str] = None
         self._history: List[Any] = []
         self._subagents: Set[str] = set()
+        self._turn_id = ""  # the main agent's current turn (pre_llm_call)
         self._ids = itertools.count(1)
 
     def attach(self, loop: Any, injector: Any) -> None:
@@ -127,6 +131,15 @@ class Hooks:
                 self._session_key = key
         return False
 
+    def _forked(self, kw: Dict[str, Any]) -> bool:
+        """True for a tool or interim payload from another turn than the main
+        agent's: a persist-disabled fork (agent/background_review.py) shares
+        the parent's session_id but fires no pre_llm_call, and its hooks carry
+        its own turn_id. With no main turn yet, or no turn_id, it is kept."""
+        turn = _str(kw.get("turn_id"))
+        with self._lock:
+            return bool(turn) and bool(self._turn_id) and turn != self._turn_id
+
     def _keep_history(self, kw: Dict[str, Any]) -> None:
         msgs = kw.get("conversation_history")
         if isinstance(msgs, list):
@@ -155,6 +168,7 @@ class Hooks:
         sid = _str(kw.get("session_id"))
         with self._lock:
             adopt = bool(sid) and self._session_id is None
+            self._turn_id = _str(kw.get("turn_id"))
         if adopt:  # a resumed session fires no on_session_start
             self._set_session(sid)
         self._keep_history(kw)
@@ -174,7 +188,7 @@ class Hooks:
 
     def _on_interim_message(self, kw: Dict[str, Any]) -> None:
         text = _str(kw.get("text"))
-        if self._skip(kw) or not text.strip():
+        if self._skip(kw) or self._forked(kw) or not text.strip():
             return
         self.push(events.assistant_text(self._uuid(), text, self._ts()))
 
@@ -182,14 +196,14 @@ class Hooks:
         return _str(kw.get("tool_call_id")) or self._uuid()
 
     def _pre_tool_call(self, kw: Dict[str, Any]) -> None:
-        if self._skip(kw):
+        if self._skip(kw) or self._forked(kw):
             return
         args = kw.get("args")
         self.push(events.tool_use(self._tool_id(kw), _str(kw.get("tool_name")),
                                   args if isinstance(args, dict) else {}, self._ts()))
 
     def _post_tool_call(self, kw: Dict[str, Any]) -> None:
-        if self._skip(kw):
+        if self._skip(kw) or self._forked(kw):
             return
         status = kw.get("status", _OK)
         self.push(events.tool_result(self._tool_id(kw), kw.get("result"), status != _OK, self._ts()))
