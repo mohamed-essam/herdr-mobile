@@ -193,17 +193,29 @@ def test_event_that_fits_alone_waits_for_the_next_body():
     assert max(fake.sizes) <= BODY_BYTES
 
 
-def test_messages_delivered_in_order_once():
+def test_messages_delivered_in_order():
     loop, fake, got, _ = started()
     fake.replies = [
         {"messages": [{"id": "m1", "text": "one"}, {"id": "m2", "text": "two"}]},
-        {"messages": [{"id": "m2", "text": "two"}, {"id": "m3", "text": "three"}]},
+        {"messages": [{"id": "m3", "text": "three"}]},
         {},
     ]
     loop.tick_once()
     loop.tick_once()
     loop.tick_once()
     assert got == [("m1", "one"), ("m2", "two"), ("m3", "three")]
+
+
+def test_reused_ids_after_companion_restart_are_delivered():
+    loop, fake, got, _ = started()
+    fake.replies = [
+        {"messages": [{"id": "m1", "text": "one"}, {"id": "m2", "text": "two"}]},
+        # a restarted companion numbers its messages from m1 again
+        {"messages": [{"id": "m1", "text": "again one"}, {"id": "m2", "text": "again two"}]},
+    ]
+    loop.tick_once()
+    loop.tick_once()
+    assert got == [("m1", "one"), ("m2", "two"), ("m1", "again one"), ("m2", "again two")]
 
 
 def test_malformed_messages_are_skipped():

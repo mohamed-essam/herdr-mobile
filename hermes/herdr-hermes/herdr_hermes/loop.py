@@ -16,7 +16,6 @@ from . import events, socket_client
 BODY_BYTES = 4_000_000  # a /sync body's serialized size, at most
 CHUNK_BYTES = 2 * 1024 * 1024  # a snapshot_chunk's serialized size, at most
 HISTORY_EVENTS = 5000  # the newest history events a snapshot carries
-_SEEN_IDS = 256  # recent phone message ids remembered against redelivery
 _SEP = 2  # json.dumps' ", " between list items
 
 
@@ -69,9 +68,8 @@ class Loop:
         self._cwd = ""
         self._offline = False
         self._need_resync = False
-        # Loop-thread only (tick_once is serialized by _ticking).
+        # Serializes tick_once.
         self._ticking = threading.Lock()
-        self._seen: Deque[str] = collections.deque(maxlen=_SEEN_IDS)
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
@@ -198,15 +196,16 @@ class Loop:
             self._queue.clear()
 
     def _deliver(self, messages: object) -> None:
+        # No dedupe by id: the companion drains its outbox once per body, and
+        # its ids (m1, m2, ...) restart with each companion process.
         if not isinstance(messages, list):
             return
         for m in messages:
             if not isinstance(m, dict):
                 continue
             mid, text = m.get("id"), m.get("text")
-            if not isinstance(mid, str) or not isinstance(text, str) or mid in self._seen:
+            if not isinstance(mid, str) or not isinstance(text, str):
                 continue
-            self._seen.append(mid)
             try:
                 self._on_message(mid, text)
             except Exception:
