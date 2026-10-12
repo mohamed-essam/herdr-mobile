@@ -151,17 +151,17 @@ a chat too. It needs the `herdr-hermes` Hermes plugin in
 only), which streams the session to the same companion chat socket. The companion
 must be protocol 13 or newer; the header then says `hermes`.
 
-Copy or link the directory into Hermes' plugins directory, then enable it. A plugin
-installs disabled:
+Copy or link the directory into Hermes' plugins directory, then enable it:
 
     ln -s /path/to/herdr-mobile/hermes/herdr-hermes ~/.hermes/plugins/herdr-hermes
     hermes plugins validate ~/.hermes/plugins/herdr-hermes
     hermes plugins enable herdr-hermes
 
-(`hermes plugins install <git-url | owner/repo>` also works for a Git repository that
-holds the plugin at its root, and installs it disabled unless you pass `--enable`;
-this repository keeps the plugin in a subdirectory.) Restart running Hermes sessions
-afterwards.
+(`hermes plugins install <git-url | owner/repo>` suits a Git repository that holds the
+plugin at its root; it asks whether to enable the plugin, and `--enable` or
+`--no-enable` skips that prompt. This repository keeps the plugin in a subdirectory,
+hence the link above. This flow has not been verified against a live Hermes.) Restart
+running Hermes sessions afterwards.
 
 The socket rules are the Claude plugin's: the plugin uses `HERDR_MOBILE_CHAT_SOCK`,
 else `$XDG_RUNTIME_DIR/herdr-mobile/chat.sock`, in the environment Hermes runs in
@@ -187,13 +187,24 @@ Limits to know about:
   `plugins.entries.herdr-hermes.allow_gateway_injection: true` in Hermes' config; it
   also needs a session key, which Hermes hands the plugin only after the session's
   first stop or question, so until then a phone prompt there can be refused (the chat
-  shows the refusal). Classic CLI
-  sessions need neither.
+  shows the refusal). Classic CLI sessions need neither.
 - A prompt Hermes rewrites before running it can appear twice (the phone's row and
   the rewritten one).
 - The chat shows whole messages, not streaming deltas, and tool rows from forked
   runs (background review, `/btw`) and subagents are left out.
-- Disabling the plugin takes effect on the next Hermes restart.
+- If the phone connects, or the companion restarts, in the middle of a turn, that
+  turn's already-sent tool calls are not in the rebuilt history until the next resync
+  (replies and later events still arrive).
+- After `/resume` to another session inside one Hermes process, the phone switches to
+  the new session at the next prompt.
+- With several Hermes profiles in one process, phone prompts go in through the first
+  profile.
+- There is no unload hook: disabling the plugin stops its hooks only after a Hermes
+  restart, and its sync loop keeps running until then.
+- The commands the phone can run are read from Hermes' internal plugin-command
+  registry, which may change between Hermes versions; if it does, the phone's slash
+  commands are sent as text instead.
+- Python 3.10 or newer is assumed; the package metadata does not enforce it.
 
 ### App
 
