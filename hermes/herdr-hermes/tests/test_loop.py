@@ -336,3 +336,51 @@ def test_start_stop_thread():
     assert loop._thread is None
     assert not any(t.name == "herdr-hermes-sync" for t in threading.enumerate())
     loop.stop()  # harmless when stopped
+
+
+# -- the last state control survives a resync (lastState in register.ts) -----
+
+
+def test_working_pushed_before_a_resync_follows_the_snapshot():
+    loop, fake, _, _ = make([text(1)])
+    loop.set_session("s1", "/w")
+    loop.push(text(1))
+    loop.push(events.state(True))  # both cleared by the resync
+    loop.tick_once()
+    evs = fake.events()
+    assert types(evs) == ["hello", "snapshot_begin", "snapshot_chunk", "snapshot_end", "state"]
+    assert evs[-1] == events.state(True)
+
+
+def test_a_later_idle_replaces_the_remembered_working():
+    loop, fake, _, _ = started()
+    loop.push(events.state(True))
+    loop.push(events.state(False))
+    fake.replies = [{"resync": True}]
+    loop.tick_once()
+    loop.tick_once()
+    evs = fake.events()
+    assert types(evs) == ["hello", "snapshot_begin", "snapshot_end", "state"]
+    assert evs[-1] == events.state(False)
+
+
+def test_no_state_pushed_adds_nothing_to_a_resync():
+    loop, fake, _, _ = started()
+    fake.replies = [{"resync": True}]
+    loop.tick_once()
+    loop.tick_once()
+    assert types(fake.events()) == ["hello", "snapshot_begin", "snapshot_end"]
+
+
+def test_state_pushed_while_offline_is_sent_after_recovery():
+    loop, fake, _, _ = started()
+    fake.replies = [SyncError("down")]
+    loop.tick_once()
+    loop.push(events.state(True))  # dropped from the queue, but remembered
+    loop.tick_once()  # the probe succeeds
+    loop.tick_once()  # the resync
+    evs = fake.events()
+    assert types(evs) == ["hello", "snapshot_begin", "snapshot_end", "state"]
+    assert evs[-1] == events.state(True)
+    loop.tick_once()
+    assert fake.events() == []  # sent once, not again

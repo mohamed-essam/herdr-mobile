@@ -68,6 +68,9 @@ class Loop:
         self._cwd = ""
         self._offline = False
         self._need_resync = False
+        # The newest `state` control, offline too: a resync clears the queue,
+        # so it is re-sent after the snapshot (the mod's `lastState`).
+        self._last_state: Optional[dict] = None
         # Serializes tick_once.
         self._ticking = threading.Lock()
         self._stop = threading.Event()
@@ -77,6 +80,8 @@ class Loop:
 
     def push(self, event: dict) -> None:
         with self._lock:
+            if isinstance(event, dict) and event.get("type") == "state":
+                self._last_state = event
             # Offline, nothing is queued: the resync on recovery sends the
             # full history, which covers these (as the mod drops `pending`).
             if not self._offline:
@@ -155,7 +160,8 @@ class Loop:
         self._deliver(reply.get("messages") if isinstance(reply, dict) else None)
 
     def _resync(self, session_id: str, cwd: str) -> bool:
-        """Puts hello + the snapshot ahead of events pushed during the read."""
+        """Puts hello + the snapshot + the last state control ahead of events
+        pushed during the read."""
         try:
             history = list(self._history())[-HISTORY_EVENTS:]
             head = [events.hello(session_id, cwd)] + _snapshot(history)
@@ -164,6 +170,8 @@ class Loop:
                 self._need_resync = True  # retried next tick
             return False
         with self._lock:
+            if self._last_state is not None:
+                head.append(self._last_state)
             self._queue.extendleft(reversed(head))
         return True
 
