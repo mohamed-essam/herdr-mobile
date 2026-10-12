@@ -214,8 +214,17 @@ class Hooks:
         self.push(events.state(False))
 
     _agent_loop_stopped = _idle
-    _on_session_end = _idle
-    _on_session_reset = _idle
+    _on_session_end = _idle  # fires every turn: must not forget the session
+
+    def _on_session_reset(self, kw: Dict[str, Any]) -> None:
+        # /new and /resume switch sessions in-process; an in-process /resume
+        # fires no on_session_start, so forget the session and let the next
+        # pre_llm_call adopt the one it carries.
+        if self._skip(kw):
+            return
+        with self._lock:
+            self._session_id = None
+        self.push(events.state(False))
 
     def _on_human_input_request(self, kw: Dict[str, Any]) -> None:
         if self._skip(kw):

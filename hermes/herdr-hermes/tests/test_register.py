@@ -235,6 +235,23 @@ def test_pre_llm_call_adopts_the_session_when_none_started():
     assert loop.sessions == [("s9", os.getcwd())]  # e.g. a compression rotation
 
 
+def test_on_session_reset_lets_the_next_prompt_adopt_a_different_session():
+    ctx, loop, _ = active()
+    ctx.call("pre_llm_call", session_id="s1", user_message="a", conversation_history=[])
+    ctx.call("on_session_reset", session_id="s2", platform="cli", reason="resume")
+    assert loop.events[-1] == {"type": "state", "state": "idle"}
+    ctx.call("pre_llm_call", session_id="s2", user_message="b", conversation_history=[])
+    assert loop.sessions == [("s1", os.getcwd()), ("s2", os.getcwd())]
+
+
+def test_on_session_end_keeps_the_session():
+    ctx, loop, _ = active()
+    ctx.call("pre_llm_call", session_id="s1", user_message="a", conversation_history=[])
+    ctx.call("on_session_end", session_id="s1", completed=True, platform="cli")
+    ctx.call("pre_llm_call", session_id="s1", user_message="b", conversation_history=[])
+    assert loop.sessions == [("s1", os.getcwd())]
+
+
 def test_post_llm_call_pushes_assistant_text_then_idle():
     ctx, loop, _ = active()
     r = ctx.call(
