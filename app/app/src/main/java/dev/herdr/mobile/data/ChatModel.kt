@@ -104,7 +104,7 @@ object ChatReducer {
                 agents = f.agents?.associateBy { it.agentId } ?: v.agents,
                 tasks = f.tasks ?: v.tasks,
                 commands = f.commands ?: v.commands,
-                agent = if (f.agentId == null) f.agent ?: v.agent else v.agent,
+                agent = if (f.agentId == null) f.agent else v.agent,
                 missing = f.missing,
                 // A new epoch (companion restart / new session) dropped any held answer.
                 answering = if (v.loaded && f.epoch == v.epoch) v.answering - answeredResults(entries) else emptySet(),

@@ -411,7 +411,7 @@ fun parseServerFrame(text: String): ServerFrame {
             maxSeq(obj["events"] as? JsonArray),
             obj.strOrNull("agentId"), obj.bool("missing"),
             obj.agentsOrNull("agents"), obj.tasksOrNull("tasks"), obj.commandsOrNull("commands"),
-            obj.strOrNull("agent"))
+            obj.strOrNull("agent")?.takeIf { it.isNotBlank() })
         "chat_history_page" -> ServerFrame.ChatHistoryPage(
             obj.str("reqId"), obj.str("paneId"),
             obj["epoch"]?.jsonPrimitive?.intOrNull ?: 0,

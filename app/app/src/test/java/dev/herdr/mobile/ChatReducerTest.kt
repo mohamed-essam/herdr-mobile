@@ -531,11 +531,11 @@ class ChatReducerTest {
 
     // ---- protocol 13: the reported agent ----
 
-    @Test fun snapshotSetsAgentAndALaterOneWithoutKeepsIt() {
+    @Test fun snapshotSetsAgentAndALaterOneWithoutClearsIt() {
         var v = onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", emptyList(), agent = "hermes"))
         assertEquals("hermes", v.agent)
         v = onFrame(v, snap(1, user(1, "x")))
-        assertEquals("hermes", v.agent)
+        assertNull(v.agent)
     }
 
     @Test fun threadSnapshotDoesNotChangeAgent() {
