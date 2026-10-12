@@ -302,3 +302,28 @@ private func welcomed(_ server: TestServer, _ client: CompanionClient) async thr
     #expect(await server.nextPeer(within: .seconds(2)) != nil)
     #expect(ContinuousClock.now - asked >= .milliseconds(500))
 }
+
+
+// MARK: Review fixes (CPE-2139 review, turn 3)
+
+@Test @MainActor func terminalOutputIsNeverDroppedAndStaysOutOfFrames() async throws {
+    let (server, client, run) = try await start()
+    defer { run.cancel() }
+    let peer = try await welcomed(server, client)
+    let terminal = client.terminal()
+    let frames = client.frames()
+
+    // Far past what frames() holds for a reader (16 + 64), sent while nobody reads `terminal`.
+    let chunks = (0..<300).map { Data("chunk \($0)\n".utf8) }
+    for chunk in chunks { peer.send(#"{"t":"term_data","termId":"t1","data":"\#(chunk.base64EncodedString())"}"#) }
+    peer.send(#"{"t":"term_exit","termId":"t1","code":0,"reason":"ended"}"#)
+    peer.send(#"{"t":"pane_removed","paneId":"w1:p1"}"#)
+
+    #expect(await nextElement(of: frames) == .welcome)
+    #expect(await nextElement(of: frames) == .paneRemoved(paneId: "w1:p1"), "no terminal output on frames()")
+    for chunk in chunks { #expect(await nextElement(of: terminal) == .termData(termId: "t1", data: chunk)) }
+    #expect(await nextElement(of: terminal) == .termExit(termId: "t1", code: 0, reason: "ended"))
+    let late = client.frames()
+    #expect(await nextElement(of: late) == .welcome)
+    #expect(await nextElement(of: late) == .paneRemoved(paneId: "w1:p1"), "no terminal output replayed")
+}

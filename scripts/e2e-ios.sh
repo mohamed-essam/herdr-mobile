@@ -46,7 +46,8 @@ xcrun simctl bootstatus "$UDID" -b >/dev/null &
 BOOT_PID=$!
 
 log "Building app for $SIM_NAME ($UDID)…"
-xcodebuild -quiet -project "$REPO/ios/HerdrMobile.xcodeproj" -scheme HerdrMobile \
+# Packages may ship build plugins; Xcode asks to trust each one once, xcodebuild needs this flag.
+xcodebuild -quiet -skipPackagePluginValidation -project "$REPO/ios/HerdrMobile.xcodeproj" -scheme HerdrMobile \
   -destination "id=$UDID" -derivedDataPath "$OUT/DerivedData" build
 wait "$GO_PID"
 wait "$BOOT_PID"

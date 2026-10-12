@@ -1,16 +1,46 @@
 import HerdrKit
 import SwiftUI
 
-/// An open pane: its chat, with agent threads stacked over it; back pops one at a time.
+/// An open pane: its chat when its herdr-chat mod reports, else its terminal; the header's
+/// toggle flips between them. Agent threads stack over the chat; back pops one at a time.
 /// Ported from Android's PaneScreen.kt.
-///
-/// Implementer default (CPE-2096): the terminal is M6, so a pane only opens here in chat.
 struct PaneScreen: View {
+    let pane: Pane
+    let context: PaneContext
+    let client: CompanionClient
+    let chat: ChatStore
+    let onExit: () -> Void
+    @State private var showChat: Bool
+
+    init(pane: Pane, context: PaneContext, client: CompanionClient, chat: ChatStore, onExit: @escaping () -> Void) {
+        self.pane = pane
+        self.context = context
+        self.client = client
+        self.chat = chat
+        self.onExit = onExit
+        _showChat = State(initialValue: pane.chat)
+    }
+
+    var body: some View {
+        if showChat {
+            // Leaving for the terminal drops the chat's state: back is a fresh entry at the newest item.
+            PaneChat(pane: pane, context: context, connected: client.state == .connected, chat: chat, onExit: onExit,
+                     onTerminal: { showChat = false })
+        } else {
+            TerminalScreen(pane: pane, context: context, client: client, onExit: onExit,
+                           onChat: pane.chat ? { showChat = true } : nil)
+        }
+    }
+}
+
+/// A pane's chat with its threads pushed over it.
+private struct PaneChat: View {
     let pane: Pane
     let context: PaneContext
     let connected: Bool
     let chat: ChatStore
     let onExit: () -> Void
+    let onTerminal: () -> Void
     @State private var threads = ThreadStack()
 
     var body: some View {
@@ -19,7 +49,7 @@ struct PaneScreen: View {
         // draft, and its stream stays open: agent summaries only arrive on it.
         NavigationStack(path: Binding(get: { threads.ids }, set: { ids in while threads.ids.count > ids.count { threads.pop() } })) {
             ChatScreen(pane: pane, context: context, connected: connected, chat: chat, onExit: onExit,
-                       onOpenThread: { threads.push($0) })
+                       onTerminal: onTerminal, onOpenThread: { threads.push($0) })
                 .toolbarVisibility(.hidden, for: .navigationBar)
                 .navigationDestination(for: String.self) { agentId in
                     ThreadScreen(pane: pane, context: context, agentId: agentId, agents: chat.view(main).agents, connected: connected,
@@ -87,6 +117,7 @@ struct ChatScreen: View {
     let connected: Bool
     let chat: ChatStore
     let onExit: () -> Void
+    let onTerminal: () -> Void
     let onOpenThread: (String) -> Void
     @State private var draft = ""
     @State private var showTasks = false
@@ -103,9 +134,9 @@ struct ChatScreen: View {
                                 questionPending: asking.map { !view.answering.contains($0.toolUseId) } ?? false)
         VStack(spacing: 0) {
             PaneHeader(context: context, breadcrumb: context.breadcrumb, status: status.label, statusColor: color(status.kind),
-                       onBack: onExit, showsToggle: true)
+                       onBack: onExit, toggle: PaneHeader.Toggle(label: ">_ terminal", id: "terminalToggle", action: onTerminal))
             TasksStrip(tasks: view.tasks) { showTasks = true }
-            if !pane.chat { UnavailableBanner() }
+            if !pane.chat { UnavailableBanner(onTerminal: onTerminal) }
             GeometryReader { geo in
                 VStack(spacing: 0) {
                     ChatTimelineView(key: key, view: view, chat: chat, agents: view.agents, tasks: view.tasks, agentLabel: agent,
@@ -155,8 +186,8 @@ struct ChatScreen: View {
     }
 }
 
-/// Implementer default (CPE-2096): "Open terminal" waits for M6 and shows disabled.
 private struct UnavailableBanner: View {
+    let onTerminal: () -> Void
     @Environment(\.herdr) private var c
 
     var body: some View {
@@ -164,9 +195,8 @@ private struct UnavailableBanner: View {
             Text("chat unavailable — mod not reporting").font(HerdrFont.small).foregroundStyle(c.red)
                 .accessibilityIdentifier("unavailableBanner")
             Spacer()
-            Button("Open terminal") {}
-                .font(HerdrFont.small.weight(.semibold)).foregroundStyle(c.overlay0)
-                .disabled(true)
+            Button("Open terminal", action: onTerminal)
+                .font(HerdrFont.small.weight(.semibold)).foregroundStyle(c.mauve)
                 .accessibilityIdentifier("openTerminal")
         }
         .padding(.leading, 20).padding(.trailing, 8).padding(.vertical, 8)

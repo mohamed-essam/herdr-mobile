@@ -88,19 +88,25 @@ func (r *recorder) ClosePane(_ context.Context, id string) error {
 }
 func (r *recorder) CreateWorkspace(context.Context) (string, string, error) {
 	r.record("CreateWorkspace")
-	return "", "", nil
+	return r.created()
 }
 func (r *recorder) CreateTab(_ context.Context, workspaceID string) (string, string, error) {
 	r.record("CreateTab", workspaceID)
-	return "", "", nil
+	return r.created()
 }
 func (r *recorder) SplitPane(_ context.Context, targetPaneID, workspaceID, direction string) (string, string, error) {
 	r.record("SplitPane", targetPaneID, workspaceID, direction)
-	return "", "", nil
+	return r.created()
 }
 func (r *recorder) StartAgent(_ context.Context, name string, argv []string, workspaceID, tabID, split string) (string, string, error) {
 	r.record("StartAgent", name, argv, workspaceID, tabID, split)
-	return "", "", nil
+	return r.created()
+}
+
+// created is the scenario's pane for every create.
+func (r *recorder) created() (string, string, error) {
+	c := r.scenario().Created
+	return c.PaneID, c.TerminalID, nil
 }
 func (r *recorder) MovePane(_ context.Context, paneID, dest, tabID, direction string) error {
 	r.record("MovePane", paneID, dest, tabID, direction)

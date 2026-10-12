@@ -1,0 +1,31 @@
+# The terminal ending shows the exit overlay with its reason; Reattach opens a new attach.
+appId: dev.herdr.mobile
+---
+- runFlow: subflows/open-terminal.yaml
+- runScript:
+    file: ../scripts/control.js
+    env:
+      ENDPOINT: /term-exit
+      BODY: '{"code":2}'
+- assertVisible: { id: terminalExit, text: "terminal disconnected" }
+- assertVisible: { id: terminalExitDetail, text: "ended unexpectedly \\(code 2\\)" }
+- assertVisible: { id: chatStatus, text: ".*terminal disconnected" }
+- assertVisible: { id: key-esc, enabled: false }
+- tapOn: { id: reattach }
+- extendedWaitUntil:
+    visible: { id: chatStatus, text: ".*attached" }
+    timeout: 10000
+- assertNotVisible: { id: terminalExit }
+- runScript:
+    file: ../scripts/received.js
+    env:
+      CALL: TermOpen
+      ARGS: '["term_1"]'
+      COUNT: 2
+- runScript:
+    file: ../scripts/control.js
+    env:
+      ENDPOINT: /term-exit
+      BODY: '{"code":0}'
+- assertVisible: { id: terminalExit, text: "session ended" }
+- assertVisible: { id: terminalExitDetail, text: "the terminal process exited" }

@@ -1,0 +1,11 @@
+# Launch the "terminal" scenario and open the shell pane w1:p1 in its terminal, attached.
+appId: dev.herdr.mobile
+---
+- runFlow:
+    file: launch.yaml
+    env:
+      SCENARIO: terminal
+- tapOn: { id: "row-w1:p1" }
+- extendedWaitUntil:
+    visible: { id: chatStatus, text: ".*attached" }
+    timeout: 10000

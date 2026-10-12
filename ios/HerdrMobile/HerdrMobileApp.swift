@@ -26,6 +26,8 @@ enum SettingsKey {
     static let companionURL = LaunchOptions.companionURLKey
     /// Most recent first.
     static let recentAgents = "recentAgents"
+    /// The terminal's pinch-zoomed font size.
+    static let terminalFontSize = TerminalFont.key
 }
 
 /// One companion connection and the dashboard and chat state it feeds.

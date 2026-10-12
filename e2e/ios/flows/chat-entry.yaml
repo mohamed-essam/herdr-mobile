@@ -1,5 +1,5 @@
 # Every dashboard control that opens a pane opens its chat (row tap, "›", "Answer in chat ›",
-# "Other…"); a shell has no chat and waits for the terminal (M6). Back closes the chat. A pane
+# "Other…"); a shell has no chat and opens its terminal. Back closes the chat. A pane
 # whose mod stops reporting shows the banner; a pane that goes away pops back to the dashboard.
 appId: dev.herdr.mobile
 ---
@@ -22,10 +22,14 @@ appId: dev.herdr.mobile
 - scrollUntilVisible:
     element: { id: "row-w1:p2" }
 - tapOn: { id: "row-w1:p2" }
-- assertNotVisible: { id: chatTitle }
+- extendedWaitUntil:
+    visible: { id: chatStatus, text: ".*attached" }
+    timeout: 10000
+- assertNotVisible: { id: composer }
+- tapOn: { id: chatBack }
 - tapOn: { id: "row-w1:p1" }
 - assertVisible: { id: chatTitle, text: app }
-- assertVisible: { id: terminalToggle, enabled: false }
+- assertVisible: { id: terminalToggle, enabled: true }
 - runScript:
     file: ../scripts/received.js
     env:
@@ -48,7 +52,7 @@ appId: dev.herdr.mobile
     env:
       NAME: chat-off
 - assertVisible: { id: unavailableBanner, text: ".*chat unavailable — mod not reporting.*" }
-- assertVisible: { id: openTerminal, enabled: false }
+- assertVisible: { id: openTerminal, enabled: true }
 - runFlow:
     file: subflows/play.yaml
     env:

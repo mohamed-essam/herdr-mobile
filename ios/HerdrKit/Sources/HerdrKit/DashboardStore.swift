@@ -14,6 +14,8 @@ public final class DashboardStore {
     /// Why the last action failed, until `clearError()`.
     public private(set) var error: String?
 
+    /// The terminal of the pane the last create made, until it is opened.
+    private var createdTerminalId: String?
     private var panesById: [String: Pane] = [:]
     private var workspaces: [Workspace] = []
     private var tabs: [Tab] = []
@@ -51,6 +53,14 @@ public final class DashboardStore {
     }
 
     public func clearError() { error = nil }
+
+    /// The pane the last create made, once it is in `panes`, until `clearCreated()`.
+    /// Ported from Android's autoOpen.
+    public var createdPane: Pane? {
+        createdTerminalId.flatMap { id in panesById.values.first { $0.terminalId == id } }
+    }
+
+    public func clearCreated() { createdTerminalId = nil }
 
     // MARK: Answering in place
 
@@ -125,6 +135,12 @@ public final class DashboardStore {
     }
 
     private func perform(_ r: ClientRequest) async {
-        do { _ = try await request(r) } catch { self.error = errorLabel(error) }
+        do {
+            if case .created(_, _, _, let terminalId?, _) = try await request(r), !terminalId.isEmpty {
+                createdTerminalId = terminalId
+            }
+        } catch {
+            self.error = errorLabel(error)
+        }
     }
 }

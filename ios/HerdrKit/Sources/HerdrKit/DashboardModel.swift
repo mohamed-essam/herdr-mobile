@@ -64,6 +64,9 @@ extension Pane {
     /// "⟳ 3" while the pane has background tasks running.
     public var bgBadge: String? { bgRunning > 0 ? "⟳ \(bgRunning)" : nil }
 
+    /// It has a terminal or a chat to open.
+    public var canOpen: Bool { !terminalId.trimmed.isEmpty || chat }
+
     var activityTs: Int { activity?.ts ?? 0 }
     var untimed: Int { activityTs > 0 ? 0 : 1 }
 }
@@ -267,7 +270,10 @@ public struct PaneContext: Equatable, Sendable {
     public var tabCrumb: String { tabNumber > 0 ? "tab \(tabNumber)" : tabLabel }
 
     /// The chat header's "shop › tab 1 › claude": repo, tab and agent, the empty ones left out.
-    public var breadcrumb: String { [repoName, tabCrumb, pane.agent ?? ""].filter { !$0.isEmpty }.joined(separator: " › ") }
+    public var breadcrumb: String { [terminalBreadcrumb, pane.agent ?? ""].filter { !$0.isEmpty }.joined(separator: " › ") }
+
+    /// The terminal header's "shop › tab 1": the breadcrumb without the agent.
+    public var terminalBreadcrumb: String { [repoName, tabCrumb].filter { !$0.isEmpty }.joined(separator: " › ") }
 
     /// "herdr-mobile · claude".
     public var meta: String { [repoName, pane.displayName].filter { !$0.isEmpty }.joined(separator: " · ") }

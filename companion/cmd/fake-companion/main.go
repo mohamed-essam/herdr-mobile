@@ -13,6 +13,11 @@
 //	POST /play     {"name":"live"}           send the scenario's named frames to every connected app
 //	POST /stop                               drop every app and refuse new WS connections (503)
 //	GET  /fetch/*                            404, recorded as a Fetch call: a request the app should never make
+//	POST /term-exit {"code":3}               end every live terminal with this exit code (or the next one to open)
+//
+// term_open never runs herdr: it runs this binary's attach program (attach.go),
+// recorded as TermOpen, which reports each read of the app's typing as TermInput.
+// The attach program itself calls POST /attach/input and GET /attach/wait.
 package main
 
 import (
@@ -47,6 +52,11 @@ type scenario struct {
 	Chats  map[string]chatScenario      `json:"chats"`
 	Images map[string]chatbridge.Image  `json:"images"`
 	Frames map[string][]json.RawMessage `json:"frames"`
+	// The pane every create answers with, so a flow can auto-open it.
+	Created struct {
+		PaneID     string `json:"paneId"`
+		TerminalID string `json:"terminalId"`
+	} `json:"created"`
 }
 
 // chatScenario is one chat stream: Events make its snapshot, Older is reachable
@@ -96,6 +106,11 @@ type fake struct {
 	scenario scenario
 	drop     context.CancelFunc // ends every live app connection; /stop until the next /scenario
 	dropped  context.Context
+
+	exe         string // this binary, run as the attach program
+	control     string // the control API's URL, for the attach program
+	exitWaiters map[chan int]struct{}
+	pendingExit *int // a /term-exit no attach was live for
 }
 
 func newFake(dir, name string) (*fake, error) {
@@ -103,7 +118,11 @@ func newFake(dir, name string) (*fake, error) {
 	if err != nil {
 		return nil, err
 	}
-	f := &fake{dir: dir, scenario: s}
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	f := &fake{dir: dir, scenario: s, exe: exe, exitWaiters: map[chan int]struct{}{}}
 	f.rec = &recorder{scenario: f.current}
 	f.dropped, f.drop = context.WithCancel(context.Background())
 	f.srv = wsserver.NewServer(wsserver.AllowAll{}, f.rec)
@@ -113,6 +132,7 @@ func newFake(dir, name string) (*fake, error) {
 	f.srv.SetTabSnapshot(func() []state.Tab { return f.current().Tabs })
 	f.srv.SetPushEndpoint(func(endpoint string) { f.rec.record("RegisterPush", endpoint) })
 	f.srv.SetChat(f.rec)
+	f.srv.SetAttachArgv(f.attachArgv)
 	return f, nil
 }
 
@@ -158,6 +178,7 @@ func (f *fake) controlHandler() http.Handler {
 		}
 		f.mu.Lock()
 		f.scenario = s
+		f.pendingExit = nil
 		if f.dropped.Err() != nil {
 			f.dropped, f.drop = context.WithCancel(context.Background())
 		}
@@ -205,6 +226,22 @@ func (f *fake) controlHandler() http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(f.rec.all())
 	})
+	mux.HandleFunc("POST /term-exit", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Code int }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		f.endAttaches(req.Code)
+		log.Printf("term-exit %d", req.Code)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /attach/input", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		f.rec.record("TermInput", r.URL.Query().Get("target"), string(b))
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /attach/wait", f.waitExit)
 	mux.HandleFunc("POST /stop", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.drop()
@@ -216,6 +253,10 @@ func (f *fake) controlHandler() http.Handler {
 }
 
 func main() {
+	if target, control, ok := attachArgs(os.Args[1:]); ok {
+		runAttach(target, control)
+		return
+	}
 	listen := flag.String("listen", "127.0.0.1:18787", "WS listen address (the app connects here)")
 	control := flag.String("control", "127.0.0.1:18788", "control API listen address")
 	dir := flag.String("scenarios", "e2e/scenarios", "directory of scenario JSON files")
@@ -234,6 +275,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	f.setControlURL("http://" + ctlLn.Addr().String())
 	errc := make(chan error, 2)
 	go func() { errc <- http.Serve(wsLn, f.wsHandler()) }()
 	go func() { errc <- http.Serve(ctlLn, f.controlHandler()) }()

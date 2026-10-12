@@ -75,8 +75,11 @@ extension EnvironmentValues {
 }
 
 /// The type ramp by role. Mono for identity, numbers and tool output; the system face for prose.
-/// The Android app bundles JetBrains Mono and Geist; this uses the system's own faces.
+/// The Android app bundles JetBrains Mono and Geist; this uses the system's own faces, except
+/// for the terminal and its key bar, which bundle JetBrains Mono.
 enum HerdrFont {
+    /// The bundled terminal face's PostScript name.
+    static let terminalFace = "JetBrainsMono-Regular"
     static let display = Font.system(size: 28, weight: .semibold)
     static let headline = Font.system(size: 22, weight: .semibold)
     static let title = Font.system(size: 15, weight: .semibold)

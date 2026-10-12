@@ -5,10 +5,10 @@ import SwiftUI
 /// what's done, then the rest, with the workspace switcher and "+" at the bottom.
 /// Ported from Android's DashboardScreen.kt.
 ///
-/// Tapping a pane (its row, a needs-you card's "›", "Answer in chat ›" or "Other…") opens it
-/// in chat; the pane screen replaces the dashboard until back, or until the pane goes away.
-/// Implementer default (CPE-2096): a pane without chat has nowhere to open until the
-/// terminal (M6), so tapping it does nothing. A long press opens the pane's actions.
+/// Tapping a pane (its row, a needs-you card's "›", "Answer in chat ›" or "Other…") opens it,
+/// in chat when it has one, else its terminal; so does a pane this app just created, once it
+/// appears. The pane screen replaces the dashboard until back, or until the pane goes away.
+/// A long press opens the pane's actions.
 struct DashboardScreen: View {
     let client: CompanionClient
     let store: DashboardStore
@@ -29,17 +29,22 @@ struct DashboardScreen: View {
         Group {
             if let open {
                 PaneScreen(pane: open, context: paneContexts(store.repos)[open.paneId] ?? PaneContext(fallback: open),
-                           connected: connected, chat: chat, onExit: { openPaneId = nil })
+                           client: client, chat: chat, onExit: { openPaneId = nil })
+                    .id(open.paneId)
             } else {
                 dashboard(panes)
             }
         }
         // A pane closed here or elsewhere pops back, and doesn't reopen if it comes back.
         .onChange(of: open == nil) { _, gone in if gone { openPaneId = nil } }
+        .onChange(of: store.createdPane?.paneId) { _, id in
+            guard let id else { return }
+            openPaneId = id
+            store.clearCreated()
+        }
     }
 
-    /// Opens `p` in chat; a pane without chat waits for the terminal (M6).
-    private func openPane(_ p: Pane) { if p.chat { openPaneId = p.paneId } }
+    private func openPane(_ p: Pane) { if p.canOpen { openPaneId = p.paneId } }
 
     /// `panes` is `store.panes`, read once per render: the store sorts on each read.
     private func dashboard(_ panes: [Pane]) -> some View {

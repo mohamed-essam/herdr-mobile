@@ -147,3 +147,18 @@ import Testing
     await store.newWorkspace()
     #expect(store.error == "not connected")
 }
+
+@Test @MainActor func aCreatedPaneIsOfferedOnceItAppears() async {
+    let (store, requests) = makeStore()
+    requests.reply = { _ in .created(reqId: "n1", ok: true, paneId: "w2:p1", terminalId: "term_9", error: nil) }
+    await store.newWorkspace()
+    #expect(store.createdPane == nil, "not in panes yet")
+    store.apply(.paneUpdate(pane("w2:p1", ws: "w2", terminal: "term_9")))
+    #expect(store.createdPane?.paneId == "w2:p1")
+    store.clearCreated()
+    #expect(store.createdPane == nil)
+
+    requests.reply = { _ in .created(reqId: "n2", ok: true, paneId: nil, terminalId: "", error: nil) }
+    await store.newTab(in: RowAction(kind: .workspace, id: "w2", label: "app"))
+    #expect(store.createdPane == nil, "a create without a terminal opens nothing")
+}

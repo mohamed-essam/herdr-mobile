@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"io"
@@ -326,5 +327,100 @@ func TestFakeCompanionServesScenarioChats(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("received lacks %s: %s", want, got)
 		}
+	}
+}
+
+// The test binary doubles as the fake's attach program (see attachArgs).
+func TestMain(m *testing.M) {
+	if target, control, ok := attachArgs(os.Args[1:]); ok {
+		runAttach(target, control)
+		return
+	}
+	os.Exit(m.Run())
+}
+
+// readFrame reads frames until one of type want, and returns it.
+func readFrame(ctx context.Context, t *testing.T, c *websocket.Conn, want string) map[string]any {
+	t.Helper()
+	for {
+		_, b, err := c.Read(ctx)
+		if err != nil {
+			t.Fatalf("waiting for %s: %v", want, err)
+		}
+		var f map[string]any
+		json.Unmarshal(b, &f)
+		if f["t"] == want {
+			return f
+		}
+	}
+}
+
+// waitReceived polls GET /received until it holds want.
+func waitReceived(ctx context.Context, t *testing.T, url, want string) {
+	t.Helper()
+	for {
+		_, got := call(t, "GET", url+"/received", "")
+		if strings.Contains(got, want) {
+			return
+		}
+		if ctx.Err() != nil {
+			t.Fatalf("received never held %s: %s", want, got)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// Terminal flows: term_open runs the fake's own attach program, never herdr. It prints a
+// banner, reports what the app typed as TermInput, and ends with POST /term-exit's code
+// (now, or on the next attach when none is live). A create answers with the scenario's
+// "created" pane.
+func TestFakeCompanionTerminal(t *testing.T) {
+	f, err := newFake("../../../e2e/scenarios", "terminal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctl := httptest.NewServer(f.controlHandler())
+	defer ctl.Close()
+	f.setControlURL(ctl.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	c, _ := dial(ctx, t, f)
+	write := func(msg string) {
+		if err := c.Write(ctx, websocket.MessageText, []byte(msg)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write(`{"t":"create","reqId":"n1","what":"workspace"}`)
+	if got := readFrame(ctx, t, c, "created"); got["terminalId"] != "term_9" || got["paneId"] != "w3:p1" {
+		t.Fatalf("created = %v", got)
+	}
+
+	write(`{"t":"term_open","reqId":"r1","target":"term_1","cols":54,"rows":33}`)
+	termID := readFrame(ctx, t, c, "term_opened")["termId"].(string)
+	waitReceived(ctx, t, ctl.URL, `{"call":"TermOpen","args":["term_1"]}`)
+	var out []byte
+	for !strings.Contains(string(out), "fake attach term_1") {
+		b, _ := base64.StdEncoding.DecodeString(readFrame(ctx, t, c, "term_data")["data"].(string))
+		out = append(out, b...)
+	}
+
+	write(`{"t":"term_input","termId":"` + termID + `","data":"` + base64.StdEncoding.EncodeToString([]byte("\x1b[A")) + `"}`)
+	waitReceived(ctx, t, ctl.URL, `{"call":"TermInput","args":["term_1","\u001b[A"]}`)
+	write(`{"t":"term_input","termId":"` + termID + `","data":"` + base64.StdEncoding.EncodeToString([]byte{3}) + `"}`)
+	waitReceived(ctx, t, ctl.URL, `{"call":"TermInput","args":["term_1","\u0003"]}`)
+
+	if code, body := call(t, "POST", ctl.URL+"/term-exit", `{"code":3}`); code != http.StatusNoContent {
+		t.Fatalf("term-exit: %d %s", code, body)
+	}
+	if got := readFrame(ctx, t, c, "term_exit"); got["code"] != 3.0 || got["reason"] != "error" {
+		t.Fatalf("term_exit = %v", got)
+	}
+
+	// With no attach live, the next one ends at once.
+	call(t, "POST", ctl.URL+"/term-exit", `{"code":0}`)
+	write(`{"t":"term_open","reqId":"r2","target":"term_1","cols":54,"rows":33}`)
+	if got := readFrame(ctx, t, c, "term_exit"); got["code"] != 0.0 || got["reason"] != "ended" {
+		t.Fatalf("second term_exit = %v", got)
 	}
 }

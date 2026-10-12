@@ -1,0 +1,31 @@
+# A dropped socket shows "reconnecting…" over a dead key bar; the reconnect opens a fresh
+# attach (the companion killed the old PTY).
+appId: dev.herdr.mobile
+---
+- runFlow: subflows/open-terminal.yaml
+- runScript:
+    file: ../scripts/control.js
+    env:
+      ENDPOINT: /stop
+- extendedWaitUntil:
+    visible: { id: terminalReconnecting, text: "reconnecting…" }
+    timeout: 15000
+- assertVisible: { id: chatStatus, text: ".*reconnecting…" }
+- assertVisible: { id: key-esc, enabled: false }
+- runScript:
+    file: ../scripts/control.js
+    env:
+      ENDPOINT: /scenario
+      NAME: terminal
+- extendedWaitUntil:
+    visible: { id: chatStatus, text: ".*attached" }
+    timeout: 20000
+- assertNotVisible: { id: terminalReconnecting }
+- runScript:
+    file: ../scripts/received.js
+    env:
+      CALL: TermOpen
+      ARGS: '["term_1"]'
+      COUNT: 1
+- tapOn: { id: key-esc }
+- runFlow: { file: subflows/typed.yaml, env: { WANT: '"\u001b"' } }

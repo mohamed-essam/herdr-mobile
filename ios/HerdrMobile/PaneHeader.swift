@@ -1,18 +1,23 @@
 import HerdrKit
 import SwiftUI
 
-/// The header of a pane's chat or thread: back, the terminal toggle, then the workspace
-/// badge and title and a mono breadcrumb ending in the live status ("… › claude · working").
-/// Ported from Android's PaneHeader.kt.
-///
-/// Implementer default (CPE-2096): the terminal is M6, so ">_ terminal" shows disabled.
+/// The header of a pane's chat, thread or terminal: back, the chat/terminal toggle, then the
+/// workspace badge and title and a mono breadcrumb ending in the live status
+/// ("… › claude · working"). Ported from Android's PaneHeader.kt.
 struct PaneHeader: View {
+    /// The button that flips between a pane's chat and its terminal.
+    struct Toggle {
+        let label: String
+        let id: String
+        let action: () -> Void
+    }
+
     let context: PaneContext
     let breadcrumb: String
     let status: String
     let statusColor: Color
     let onBack: () -> Void
-    var showsToggle = false
+    var toggle: Toggle?
     @Environment(\.herdr) private var c
 
     var body: some View {
@@ -26,13 +31,14 @@ struct PaneHeader: View {
                 .accessibilityLabel("Back")
                 .accessibilityIdentifier("chatBack")
                 Spacer()
-                if showsToggle {
-                    Button(">_ terminal") {}
-                        .font(HerdrFont.meta).foregroundStyle(c.overlay0)
-                        .padding(.horizontal, 12).frame(height: 36)
-                        .background(c.base, in: .rect(cornerRadius: HerdrRadius.field))
-                        .disabled(true)
-                        .accessibilityIdentifier("terminalToggle")
+                if let toggle {
+                    Button(action: toggle.action) {
+                        Text(toggle.label).font(HerdrFont.meta).foregroundStyle(c.text)
+                            .padding(.horizontal, 12).frame(height: 36)
+                            .background(c.base, in: .rect(cornerRadius: HerdrRadius.field))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier(toggle.id)
                 }
             }
             .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 4)

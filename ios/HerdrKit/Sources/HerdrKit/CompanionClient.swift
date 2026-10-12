@@ -47,6 +47,7 @@ public final class CompanionClient {
     // Sized as Android's SharedFlows (CompanionClient.kt).
     @ObservationIgnored private let frameFeed = Broadcast<ServerFrame>(replay: 16, unread: 64)
     @ObservationIgnored private let imageFeed = Broadcast<ChatImage>(replay: 0, unread: 8)
+    @ObservationIgnored private let terminalFeed = Broadcast<ServerFrame>(replay: 0, unread: nil)
     /// The live connection. One that ended, or that a newer `run()` replaced, no longer touches the client.
     @ObservationIgnored private var link: Link?
     @ObservationIgnored private var lastReqId = 0
@@ -64,14 +65,18 @@ public final class CompanionClient {
         initialBackoff = backoff
     }
 
-    /// A new stream of every frame except chat images, pongs, frames this app can't read,
-    /// and the replies `request` returns. It starts with the last 16 frames, then holds the
+    /// A new stream of every frame except chat images, terminal output, pongs, frames this
+    /// app can't read, and the replies `request` returns. It starts with the last 16 frames, then holds the
     /// newest 64 while unread. It ends when its reader is cancelled; call again for another.
     public func frames() -> AsyncStream<ServerFrame> { frameFeed.subscribe() }
 
     /// A new stream of chat image replies, apart from `frames()` so their megabytes are never
     /// replayed. Holds the newest 8 while unread.
     public func images() -> AsyncStream<ChatImage> { imageFeed.subscribe() }
+
+    /// A new stream of terminal output (`term_data`, `term_exit`), apart from `frames()`
+    /// because a byte stream can't lose a chunk: it holds everything unread, and replays nothing.
+    public func terminal() -> AsyncStream<ServerFrame> { terminalFeed.subscribe() }
 
     /// Connects, and reconnects after every drop, until the calling task is cancelled.
     public func run() async {
@@ -162,6 +167,9 @@ public final class CompanionClient {
                 link.imagesDue = max(0, link.imagesDue - 1)
                 imageFeed.yield(image)
                 continue
+            case .termData, .termExit:
+                terminalFeed.yield(frame)
+                continue
             case .welcome:
                 link.welcomed = true
                 state = .connected
@@ -221,21 +229,21 @@ public final class CompanionClient {
 }
 
 /// Hands each value to every reader's own stream. A new reader first gets the last
-/// `replay` values; one more than `unread` behind loses its oldest.
+/// `replay` values; one more than `unread` behind loses its oldest (nil: none is lost).
 @MainActor private final class Broadcast<Element: Sendable> {
     private let replay: Int
-    private let unread: Int
+    private let unread: Int?
     private var recent: [Element] = []
     private var readers: [Int: AsyncStream<Element>.Continuation] = [:]
     private var lastId = 0
 
-    init(replay: Int, unread: Int) {
+    init(replay: Int, unread: Int?) {
         self.replay = replay
         self.unread = unread
     }
 
     func subscribe() -> AsyncStream<Element> {
-        let (stream, reader) = AsyncStream.makeStream(of: Element.self, bufferingPolicy: .bufferingNewest(replay + unread))
+        let (stream, reader) = AsyncStream.makeStream(of: Element.self, bufferingPolicy: unread.map { .bufferingNewest(replay + $0) } ?? .unbounded)
         recent.forEach { reader.yield($0) }
         lastId += 1
         let id = lastId

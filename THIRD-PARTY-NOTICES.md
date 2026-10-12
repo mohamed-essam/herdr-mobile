@@ -20,7 +20,9 @@ license. The upstream files retain their original headers where present.
 
 - **Files:** `app/app/src/main/assets/fonts/JetBrainsMono-Regular.ttf`,
   `app/app/src/main/res/font/jetbrains_mono_regular.ttf`,
-  `app/app/src/main/res/font/jetbrains_mono_semibold.ttf`
+  `app/app/src/main/res/font/jetbrains_mono_semibold.ttf`,
+  `ios/HerdrMobile/Fonts/JetBrainsMono-Regular.ttf` (licence copy:
+  `ios/HerdrMobile/Fonts/JetBrainsMono-OFL.txt`, shipped in the iOS app)
 - **Source:** [JetBrains/JetBrainsMono](https://github.com/JetBrains/JetBrainsMono)
 - **License:** SIL Open Font License 1.1 — full text in
   [`app/app/src/main/assets/fonts/OFL.txt`](app/app/src/main/assets/fonts/OFL.txt)
@@ -39,4 +41,6 @@ license. The upstream files retain their original headers where present.
 Go and Gradle dependencies (e.g. `github.com/coder/websocket`,
 `github.com/creack/pty`, AndroidX, Jetpack Compose) are fetched at build time and
 governed by their respective licenses as declared in `companion/go.mod` and the
-Gradle version catalog (`app/gradle/libs.versions.toml`).
+Gradle version catalog (`app/gradle/libs.versions.toml`). The iOS app's Swift
+packages (MarkdownUI, MIT; SwiftTerm, MIT) are pinned in
+`ios/HerdrMobile.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`.

@@ -1161,3 +1161,26 @@ func TestChatHistoryEchoesAgentID(t *testing.T) {
 		t.Fatalf("page: %v", pg)
 	}
 }
+
+func TestSetAttachArgvReplacesTheAttachProgram(t *testing.T) {
+	s := NewServer(AllowAll{}, &stubRPC{})
+	gotTarget := make(chan string, 1)
+	s.SetAttachArgv(func(target string) []string { gotTarget <- target; return []string{"sh", "-c", "printf replaced"} })
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	ctx := context.Background()
+	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close(websocket.StatusNormalClosure, "")
+	c.Write(ctx, websocket.MessageText, []byte(`{"t":"term_open","reqId":"r1","target":"term_7","cols":80,"rows":24}`))
+	readUntil(t, ctx, c, "term_opened")
+	data := readUntil(t, ctx, c, "term_data")
+	if dec, _ := base64.StdEncoding.DecodeString(data["data"].(string)); !strings.Contains(string(dec), "replaced") {
+		t.Fatalf("term_data from the default program, got %q", dec)
+	}
+	if got := <-gotTarget; got != "term_7" {
+		t.Fatalf("target: got %q", got)
+	}
+}

@@ -7,6 +7,11 @@
 	<!-- Shown if iOS asks before the app reaches a companion on the local network (a LAN address rather than a tailnet one). -->
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>herdr connects to the herdr companion running on your computer.</string>
+	<!-- The terminal and its key bar use JetBrains Mono (OFL, licence in Fonts/), as on Android. -->
+	<key>UIAppFonts</key>
+	<array>
+		<string>JetBrainsMono-Regular.ttf</string>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

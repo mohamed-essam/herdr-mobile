@@ -233,6 +233,13 @@ private let closeTree = buildTree(
 @Test func theChatBreadcrumbNamesRepoTabAndAgent() {
     let ctx = PaneContext(pane: pane("w1:p1"), workspaceLabel: "api", workspaceNumber: 1, repoName: "shop", tabLabel: "1", tabNumber: 2)
     #expect(ctx.breadcrumb == "shop › tab 2 › claude")
+    #expect(ctx.terminalBreadcrumb == "shop › tab 2", "the terminal leaves the agent out")
     let bare = PaneContext(pane: pane("w1:p1", agent: nil), workspaceLabel: "api", workspaceNumber: 0, repoName: "", tabLabel: "", tabNumber: 0)
     #expect(bare.breadcrumb == "")
+}
+
+@Test func aPaneOpensWithATerminalOrAChat() {
+    #expect(pane("p", terminal: "term_1").canOpen)
+    #expect(pane("p", terminal: "", chat: true).canOpen)
+    #expect(!pane("p", terminal: " ", chat: false).canOpen)
 }

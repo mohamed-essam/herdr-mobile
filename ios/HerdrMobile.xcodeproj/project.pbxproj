@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		4D0000000000000000000010 /* HerdrKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4D0000000000000000000011 /* HerdrKit */; };
 		4D0000000000000000000013 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 4D0000000000000000000014 /* MarkdownUI */; };
+		4D0000000000000000000016 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 4D0000000000000000000017 /* SwiftTerm */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -30,6 +31,7 @@
 			files = (
 				4D0000000000000000000010 /* HerdrKit in Frameworks */,
 				4D0000000000000000000013 /* MarkdownUI in Frameworks */,
+				4D0000000000000000000016 /* SwiftTerm in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -74,6 +76,7 @@
 			packageProductDependencies = (
 				4D0000000000000000000011 /* HerdrKit */,
 				4D0000000000000000000014 /* MarkdownUI */,
+				4D0000000000000000000017 /* SwiftTerm */,
 			);
 			productName = HerdrMobile;
 			productReference = 4D0000000000000000000001 /* HerdrMobile.app */;
@@ -106,6 +109,7 @@
 			packageReferences = (
 				4D0000000000000000000012 /* XCLocalSwiftPackageReference "HerdrKit" */,
 				4D0000000000000000000015 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
+				4D0000000000000000000018 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 4D0000000000000000000005 /* Products */;
@@ -185,6 +189,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 56S6Q9SA8U;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "HerdrMobile-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = herdr;
@@ -212,6 +217,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 56S6Q9SA8U;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "HerdrMobile-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = herdr;
@@ -273,6 +279,14 @@
 				minimumVersion = 2.4.1;
 			};
 		};
+		4D0000000000000000000018 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm";
+			requirement = {
+				kind = exactVersion;
+				version = 1.11.2;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -284,6 +298,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 4D0000000000000000000015 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
 			productName = MarkdownUI;
+		};
+		4D0000000000000000000017 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4D0000000000000000000018 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
