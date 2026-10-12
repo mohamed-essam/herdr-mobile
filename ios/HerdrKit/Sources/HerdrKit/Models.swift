@@ -21,6 +21,36 @@ public struct Pane: Equatable, Sendable {
     public let ask: PaneAsk?
     /// Background tasks still running.
     public let bgRunning: Int
+    /// The Claude session's context-window fill; nil when no herdr-chat mod is live.
+    public let context: PaneUsage?
+}
+
+/// A session's context window: `percent` of `window` tokens used (`tokens` when the engine reported them).
+public struct PaneUsage: Equatable, Sendable {
+    public let percent: Int
+    public let tokens: Int?
+    public let window: Int
+}
+
+/// One rate-limit window: how much of it is used, and when it resets (nil when unknown).
+public struct LimitWindow: Equatable, Sendable {
+    public let kind: LimitKind
+    public let percentUsed: Double
+    public let resetsAt: Date?
+}
+
+/// The account's rate-limit reading, and when a mod measured it (epoch ms).
+public struct Limits: Equatable, Sendable {
+    public let windows: [LimitWindow]
+    public let observedAt: Int
+}
+
+/// One of the session's slash commands, as the composer's picker lists it.
+public struct SlashCommand: Equatable, Sendable {
+    public let name: String
+    public let description: String
+    /// Where it comes from: "builtin", "project", a plugin's name…
+    public let source: String
 }
 
 /// A one-line summary of a pane's latest chat event. `tool` is set only for
@@ -92,6 +122,9 @@ public enum ChatEvent: Equatable, Sendable {
     case taskNotice(uuid: String, status: String, summary: String, ts: Int?)
     /// An AskUserQuestion call; it may repeat (e.g. after a resync), so key it by `toolUseId`.
     case question(uuid: String, toolUseId: String, questions: [QuestionItem], ts: Int?)
+    /// A slash command sent from the phone ran: `command` as run (`/name args`), what it
+    /// printed (`text`, empty when nothing), or why it was refused (`isError`).
+    case commandOutput(uuid: String, command: String, text: String, isError: Bool, ts: Int?)
 }
 
 public struct ChatEntry: Equatable, Sendable {
@@ -147,6 +180,10 @@ public struct BgTask: Equatable, Sendable {
     public let status: RunStatus
     public let startedAt: Int
     public let endedAt: Int?
+    /// The whole command, when `label` (one clipped line) doesn't show all of it.
+    public let detail: String?
+    /// What the launch said the task does.
+    public let description: String?
 }
 
 /// A pane's chat, or (with `agentId`) one agent's thread of it.
@@ -164,6 +201,8 @@ public struct ChatSnapshot: Equatable, Sendable {
     /// Main snapshots only; nil means not sent, distinct from empty.
     public let agents: [AgentSummary]?
     public let tasks: [BgTask]?
+    /// The session's slash commands (main snapshots from a mod that lists them); nil means not sent.
+    public let commands: [SlashCommand]?
 }
 
 /// A page of older chat entries. A `stale` page (the epoch moved on) is empty.
@@ -203,6 +242,46 @@ extension Pane: Decodable {
         activity = try c.value("activity")
         ask = try c.value("ask")
         bgRunning = try c.value("bgRunning", or: 0)
+        context = try? c.value("context")
+    }
+}
+
+extension PaneUsage: Decodable {
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: JSONKey.self)
+        percent = try c.value("percent", or: 0)
+        tokens = try c.value("tokens")
+        window = try c.value("window", or: 0)
+    }
+}
+
+extension LimitWindow: Decodable {
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: JSONKey.self)
+        kind = try c.value("kind", or: .unknown(""))
+        percentUsed = try c.value("percentUsed", or: 0)
+        resetsAt = (try c.value("resetsAt") as String?).flatMap { try? Date($0, strategy: .iso8601) }
+    }
+}
+
+extension Limits: Decodable {
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: JSONKey.self)
+        windows = try c.lossy("limits") ?? []
+        observedAt = try c.value("observedAt", or: 0)
+    }
+}
+
+extension SlashCommand: Decodable {
+    /// Throws without a name, so a list skips it.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: JSONKey.self)
+        name = try c.value("name", or: "")
+        guard !name.isEmpty else {
+            throw DecodingError.dataCorruptedError(forKey: "name", in: c, debugDescription: "command without a name")
+        }
+        description = try c.value("description", or: "")
+        source = try c.value("source", or: "")
     }
 }
 
@@ -298,6 +377,9 @@ extension ChatEvent: Decodable {
         case "question":
             self = .question(uuid: try string("uuid"), toolUseId: try string("toolUseId"),
                              questions: try c.lossy("questions") ?? [], ts: ts)
+        case "command_output":
+            self = .commandOutput(uuid: try string("uuid"), command: try string("command"), text: try string("text"),
+                                  isError: try c.value("isError", or: false), ts: ts)
         case let type:
             throw DecodingError.dataCorruptedError(forKey: "type", in: c, debugDescription: "unknown chat event \(type)")
         }
@@ -367,6 +449,9 @@ extension BgTask: Decodable {
         status = try c.value("status", or: .unknown(""))
         startedAt = try c.value("startedAt", or: 0)
         endedAt = try c.value("endedAt")
+        func text(_ key: JSONKey) throws -> String? { (try c.value(key) as String?).flatMap { $0.trimmed.isEmpty ? nil : $0 } }
+        detail = try text("detail")
+        description = try text("description")
     }
 }
 
@@ -403,6 +488,7 @@ extension ChatSnapshot: Decodable {
         missing = try c.value("missing", or: false)
         agents = try c.lossy("agents")
         tasks = try c.lossy("tasks")
+        commands = try c.lossy("commands")
     }
 }
 

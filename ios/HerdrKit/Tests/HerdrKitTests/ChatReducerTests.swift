@@ -1,12 +1,6 @@
 import Testing
 @testable import HerdrKit
 
-private func view(_ frames: ServerFrame..., now: Int = 0) -> ChatView {
-    var v = ChatView()
-    for f in frames { v.apply(f, now: now) }
-    return v
-}
-
 @Test func aSnapshotLoadsTheView() {
     let a = agentSummary("ag1", parent: "toolu_a")
     let v = view(snapshot([user(1, "hi"), said(2, "hello")], epoch: 3, state: .working, hasMore: true, maxSeq: 7,

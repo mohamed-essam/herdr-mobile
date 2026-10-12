@@ -57,7 +57,12 @@
             }
           ]
         },
-        "bgRunning": 2
+        "bgRunning": 2,
+        "context": {
+          "percent": 61,
+          "tokens": 122000,
+          "window": 200000
+        }
       },
       {
         "paneId": "w2:p1",
@@ -162,7 +167,12 @@
           }
         ]
       },
-      "bgRunning": 2
+      "bgRunning": 2,
+      "context": {
+        "percent": 61,
+        "tokens": 122000,
+        "window": 200000
+      }
     },
     "t": "pane_update"
   },
@@ -271,6 +281,18 @@
           "ts": 1791279006000
         },
         "ts": 1791279004000
+      }
+    ],
+    "commands": [
+      {
+        "name": "clear",
+        "description": "Clear conversation history",
+        "source": "builtin"
+      },
+      {
+        "name": "review",
+        "description": "Review a pull request",
+        "source": "project"
       }
     ],
     "epoch": 2,
@@ -390,6 +412,27 @@
           "type": "from_a_newer_mod",
           "uuid": "u7"
         }
+      },
+      {
+        "seq": 8,
+        "event": {
+          "type": "command_output",
+          "uuid": "cmd-c9",
+          "command": "/context",
+          "text": "61% of 200k tokens",
+          "ts": 1791279008000
+        }
+      },
+      {
+        "seq": 9,
+        "event": {
+          "type": "command_output",
+          "uuid": "cmd-c10",
+          "command": "/nope",
+          "text": "Unknown command: /nope",
+          "isError": true,
+          "ts": 1791279009000
+        }
       }
     ],
     "hasMore": true,
@@ -412,7 +455,9 @@
         "toolUseId": "toolu_3",
         "status": "done",
         "startedAt": 1791279000000,
-        "endedAt": 1791279007000
+        "endedAt": 1791279007000,
+        "detail": "npm run dev \\\n  --port 3000",
+        "description": "Start the dev server"
       }
     ]
   },
@@ -483,6 +528,19 @@
     "t": "chat_event"
   },
   {
+    "epoch": 2,
+    "event": {
+      "type": "command_output",
+      "uuid": "cmd-c9",
+      "command": "/context",
+      "text": "61% of 200k tokens",
+      "ts": 1791279008000
+    },
+    "paneId": "w1:p1",
+    "seq": 8,
+    "t": "chat_event"
+  },
+  {
     "agent": {
       "agentId": "ag1",
       "parentToolUseId": "toolu_2",
@@ -526,9 +584,27 @@
         "toolUseId": "toolu_3",
         "status": "done",
         "startedAt": 1791279000000,
-        "endedAt": 1791279007000
+        "endedAt": 1791279007000,
+        "detail": "npm run dev \\\n  --port 3000",
+        "description": "Start the dev server"
       }
     ]
+  },
+  {
+    "commands": [
+      {
+        "name": "clear",
+        "description": "Clear conversation history",
+        "source": "builtin"
+      },
+      {
+        "name": "review",
+        "description": "Review a pull request",
+        "source": "project"
+      }
+    ],
+    "paneId": "w1:p1",
+    "t": "chat_commands"
   },
   {
     "paneId": "w1:p1",
@@ -615,5 +691,21 @@
     "ok": false,
     "reqId": "q17",
     "t": "chat_answer_result"
+  },
+  {
+    "limits": [
+      {
+        "kind": "five_hour",
+        "percentUsed": 42.5,
+        "resetsAt": "2026-10-01T14:00:00Z"
+      },
+      {
+        "kind": "seven_day",
+        "percentUsed": 18,
+        "resetsAt": "2026-10-04T09:30:00+02:00"
+      }
+    ],
+    "observedAt": 1791279010000,
+    "t": "limits"
   }
 ]

@@ -9,6 +9,9 @@ enum DashboardSheet: Identifiable {
     case agents(RowAction)
     case otherAgent(RowAction)
     case move(RowAction)
+    case servers
+    case renameServer(Server)
+    case removeServer(Server)
 
     var id: String {
         switch self {
@@ -18,6 +21,9 @@ enum DashboardSheet: Identifiable {
         case .agents(let a): "agents:\(a.id)"
         case .otherAgent(let a): "other:\(a.id)"
         case .move(let a): "move:\(a.id)"
+        case .servers: "servers"
+        case .renameServer(let s): "renameServer:\(s.id)"
+        case .removeServer(let s): "removeServer:\(s.id)"
         }
     }
 }
@@ -26,6 +32,7 @@ struct DashboardSheetView: View {
     let sheet: DashboardSheet
     let store: DashboardStore
     let connected: Bool
+    let servers: ServerControls
     /// Replaces the sheet; nil dismisses it.
     let show: (DashboardSheet?) -> Void
     @Environment(\.herdr) private var c
@@ -45,12 +52,30 @@ struct DashboardSheetView: View {
             case .otherAgent(let target):
                 OtherAgentSheet { command in run { await store.startAgent(command, in: target) } }
             case .move(let target): MoveSheet(target: target, store: store, run: run)
+            case .servers:
+                ServerSheet(controls: servers, onRename: { show(.renameServer($0)) }, onRemove: { show(.removeServer($0)) },
+                            onDone: { show(nil) })
+            case .renameServer(let s):
+                ServerRenameSheet(server: s) { name in
+                    show(nil)
+                    servers.rename(s, name)
+                }
+            case .removeServer(let s):
+                ServerRemoveSheet(server: s) {
+                    show(nil)
+                    servers.remove(s)
+                }
             }
         }
         .herdrSheet(isSwitcher ? c.mantle : c.base)
     }
 
-    private var isSwitcher: Bool { if case .switcher = sheet { true } else { false } }
+    private var isSwitcher: Bool {
+        switch sheet {
+        case .switcher, .servers: true
+        default: false
+        }
+    }
 
     /// Closes the sheet and runs `action`.
     private func run(_ action: @escaping @MainActor () async -> Void) {

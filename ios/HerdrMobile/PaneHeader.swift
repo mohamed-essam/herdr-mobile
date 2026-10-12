@@ -3,7 +3,8 @@ import SwiftUI
 
 /// The header of a pane's chat, thread or terminal: back, the chat/terminal toggle, then the
 /// workspace badge and title and a mono breadcrumb ending in the live status
-/// ("… › claude · working"). Ported from Android's PaneHeader.kt.
+/// ("… › claude · working"), then the usage line (context and 5h/7d limits) when there is
+/// anything to show. Ported from Android's PaneHeader.kt.
 struct PaneHeader: View {
     /// The button that flips between a pane's chat and its terminal.
     struct Toggle {
@@ -20,6 +21,8 @@ struct PaneHeader: View {
     var toggle: Toggle?
     /// For a breadcrumb that quotes the agent (a thread's subagent label).
     var masksBreadcrumb = false
+    @Environment(\.usageLimits) private var limits
+    @Environment(\.launchOptions) private var options
     @Environment(\.herdr) private var c
 
     var body: some View {
@@ -54,6 +57,9 @@ struct PaneHeader: View {
                     .font(HerdrFont.meta).foregroundStyle(c.overlay2).lineLimit(1)
                     .accessibilityIdentifier("chatStatus")
                 if masksBreadcrumb { line.maskedInReports() } else { line }
+                TimelineView(.periodic(from: .now, by: 30)) { _ in
+                    UsageLine(usage: context.pane.context, limits: limits, now: options.now().epochMs)
+                }
             }
             .padding(.horizontal, 20).padding(.top, 4).padding(.bottom, 16)
             Rectangle().fill(c.base).frame(height: 1)

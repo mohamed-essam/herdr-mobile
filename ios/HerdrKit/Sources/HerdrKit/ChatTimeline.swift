@@ -91,7 +91,7 @@ public func buildTimeline(entries: [ChatEntry], epoch: Int, pageStarts: Set<Int>
         }
         flush()
         let s: Speaker = switch e.event {
-        case .userText: .user
+        case .userText, .commandOutput: .user
         case .taskNotice: .notice
         default: .agent
         }
@@ -282,6 +282,8 @@ public func taskGlyph(_ kind: TaskKind) -> String {
 extension BgTask {
     /// Subagent and workflow tasks have a card in the chat to jump to.
     public var hasCard: Bool { kind == .subagent || kind == .workflow }
+    /// The whole command when the mod sent it, else the label.
+    public var fullText: String { detail ?? label }
 }
 
 // MARK: Threads

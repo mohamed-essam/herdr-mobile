@@ -1,10 +1,9 @@
 import Foundation
 
 /// The launch-argument contract the e2e flows drive. iOS turns `-companionURL ws://…`
-/// into a UserDefaults value, so each switch is a plain settings read, and a saved
-/// setting under the same key works the same way.
+/// into a UserDefaults value, so each switch is a plain settings read.
 public struct LaunchOptions: Sendable {
-    /// The `-companionURL` switch's key, which is also where the app saves the companion.
+    /// The `-companionURL` switch's key, where versions before the server list saved the companion.
     public static let companionURLKey = "companionURL"
 
     /// `-companionURL <ws url>`: connect to this companion. Nil unless it is a ws/wss URL (any case) with a host.

@@ -30,6 +30,8 @@ public final class ChatStore {
     private var images: [ImageKey: ImageState] = [:]
 
     @ObservationIgnored private var opened: Set<ChatKey> = []
+    /// Unsent composer text by pane, kept while the app runs.
+    @ObservationIgnored private var drafts: [String: String] = [:]
     @ObservationIgnored private var lastId = 0
     /// Least recently used first.
     @ObservationIgnored private var imageOrder: [ImageKey] = []
@@ -63,6 +65,11 @@ public final class ChatStore {
 
     public func clearError() { error = nil }
 
+    /// The pane's unsent composer text: leaving the pane, the terminal or a thread keeps it.
+    public func draft(paneId: String) -> String { drafts[paneId] ?? "" }
+
+    public func setDraft(_ text: String, paneId: String) { drafts[paneId] = text.isEmpty ? nil : text }
+
     // MARK: Frames
 
     public func apply(_ frame: ServerFrame) {
@@ -71,7 +78,8 @@ public final class ChatStore {
         case .welcome: return reconnected()
         case .chatSnapshot(let s): key = ChatKey(paneId: s.paneId, agentId: s.agentId)
         case .chatEvent(let paneId, _, _, _, let agentId): key = ChatKey(paneId: paneId, agentId: agentId)
-        case .chatState(let paneId, _), .chatAgent(let paneId, _, _), .chatTasks(let paneId, _): key = ChatKey(paneId: paneId)
+        case .chatState(let paneId, _), .chatAgent(let paneId, _, _), .chatTasks(let paneId, _), .chatCommands(let paneId, _):
+            key = ChatKey(paneId: paneId)
         default: return
         }
         // Only scalars of the old view: holding a copy would make the in-place apply copy every entry.

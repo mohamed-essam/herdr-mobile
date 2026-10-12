@@ -44,7 +44,7 @@ private func frame(_ json: String) throws -> ServerFrame {
     #expect(decoded.first == .welcome)
     #expect(decoded.contains(.panes([Pane(
         paneId: "w1:p1", workspaceId: "w1", tabId: "w1:t1", terminalId: "term_1", cwd: "/Users/dev/herdr",
-        focused: true, agent: "claude", agentStatus: .idle, chat: false, activity: nil, ask: nil, bgRunning: 0)])))
+        focused: true, agent: "claude", agentStatus: .idle, chat: false, activity: nil, ask: nil, bgRunning: 0, context: nil)])))
 }
 
 @Test func decodesAPaneWithItsActivityAndPendingQuestion() throws {
@@ -59,9 +59,11 @@ private func frame(_ json: String) throws -> ServerFrame {
     #expect(ask.questions[0].options == [QuestionOption(label: "Postgres", description: "relational"), QuestionOption(label: "SQLite", description: nil)])
     #expect(ask.questions[1].min == 1 && ask.questions[1].max == 8 && ask.questions[1].unit == "workers")
     #expect(ask.questions[2].placeholder == "feat/…")
+    #expect(pane.context == PaneUsage(percent: 61, tokens: 122_000, window: 200_000))
 
     let shell = try #require(panes?.last)
     #expect(shell.agent == nil && shell.agentStatus == nil && !shell.chat && shell.activity == nil && shell.bgRunning == 0)
+    #expect(shell.context == nil)
 }
 
 @Test func decodesWorkspacesTabsAndReplies() throws {
@@ -95,8 +97,8 @@ private func frame(_ json: String) throws -> ServerFrame {
     }.first)
     #expect(snapshot.paneId == "w1:p1" && snapshot.epoch == 2 && snapshot.state == .working && snapshot.hasMore)
     // seq 7 is an event type this app doesn't know: left out, but still counted in maxSeq.
-    #expect(snapshot.entries.map(\.seq) == [1, 2, 3, 4, 5, 6])
-    #expect(snapshot.maxSeq == 7)
+    #expect(snapshot.entries.map(\.seq) == [1, 2, 3, 4, 5, 6, 8, 9])
+    #expect(snapshot.maxSeq == 9)
     #expect(snapshot.entries[0].event == .userText(
         uuid: "u1", text: "look at this", ts: 1_791_279_000_000, images: ["img1"], imageSizes: ["img1": PixelSize(width: 640, height: 480)]))
     #expect(snapshot.entries[1].event == .assistantText(uuid: "u2", text: "On it.", ts: 1_791_279_001_000))
@@ -109,13 +111,18 @@ private func frame(_ json: String) throws -> ServerFrame {
         return
     }
     #expect(uuid == "toolu_ask" && toolUseId == "toolu_ask" && questions.count == 3)
+    #expect(snapshot.entries[6].event == .commandOutput(uuid: "cmd-c9", command: "/context", text: "61% of 200k tokens", isError: false, ts: 1_791_279_008_000))
+    #expect(snapshot.entries[7].event == .commandOutput(uuid: "cmd-c10", command: "/nope", text: "Unknown command: /nope", isError: true, ts: 1_791_279_009_000))
+    #expect(snapshot.commands == goldenCommands)
     #expect(snapshot.agents == [AgentSummary(
         agentId: "ag1", parentToolUseId: "toolu_2", parentAgentId: nil, kind: .subagent, label: "review", type: "code-reviewer",
         phase: nil, status: .running, activity: PaneActivity(kind: .tool, tool: "Read", text: "Read: main.go", ts: 1_791_279_006_000),
         ts: 1_791_279_004_000)])
     #expect(snapshot.tasks == [
-        BgTask(id: "bg1", kind: .subagent, label: "review", toolUseId: "toolu_2", status: .running, startedAt: 1_791_279_004_000, endedAt: nil),
-        BgTask(id: "bg2", kind: .shell, label: "npm run dev", toolUseId: "toolu_3", status: .done, startedAt: 1_791_279_000_000, endedAt: 1_791_279_007_000),
+        BgTask(id: "bg1", kind: .subagent, label: "review", toolUseId: "toolu_2", status: .running, startedAt: 1_791_279_004_000, endedAt: nil,
+               detail: nil, description: nil),
+        BgTask(id: "bg2", kind: .shell, label: "npm run dev", toolUseId: "toolu_3", status: .done, startedAt: 1_791_279_000_000, endedAt: 1_791_279_007_000,
+               detail: "npm run dev \\\n  --port 3000", description: "Start the dev server"),
     ])
 }
 
@@ -124,7 +131,7 @@ private func frame(_ json: String) throws -> ServerFrame {
     let threads = all.compactMap { f -> ChatSnapshot? in if case .chatSnapshot(let s) = f, s.agentId != nil { s } else { nil } }
     #expect(threads.map(\.agentId) == ["ag1", "ag9"])
     #expect(threads.map(\.missing) == [false, true])
-    #expect(threads.allSatisfy { $0.agents == nil && $0.tasks == nil })
+    #expect(threads.allSatisfy { $0.agents == nil && $0.tasks == nil && $0.commands == nil })
 
     #expect(all.contains(.chatEvent(paneId: "w1:p1", epoch: 2, seq: 2, entry: ChatEntry(seq: 2, event: .assistantText(uuid: "u2", text: "On it.", ts: 1_791_279_001_000)), agentId: nil)))
     #expect(all.contains { if case .chatEvent(_, _, 3, .some, "ag1") = $0 { true } else { false } })
@@ -133,6 +140,8 @@ private func frame(_ json: String) throws -> ServerFrame {
     #expect(all.contains(.chatAgent(paneId: "w1:p1", agent: nil, removedId: "ag1")))
     #expect(all.contains { if case .chatTasks("w1:p1", let tasks) = $0 { tasks.map(\.id) == ["bg1", "bg2"] } else { false } })
     #expect(all.contains(.chatState(paneId: "w1:p1", state: .idle)))
+    #expect(all.contains(.chatCommands(paneId: "w1:p1", commands: goldenCommands)))
+    #expect(all.contains { if case .chatEvent(_, _, 8, let e?, nil) = $0 { e.event == .commandOutput(uuid: "cmd-c9", command: "/context", text: "61% of 200k tokens", isError: false, ts: 1_791_279_008_000) } else { false } })
     #expect(all.contains(.chatSendResult(reqId: "c12", ok: true, error: nil)))
     #expect(all.contains(.chatSendResult(reqId: "c13", ok: false, error: "no_mod")))
     #expect(all.contains { if case .chatHistoryPage(let p) = $0 { p.reqId == "h14" && p.entries.count == 2 && p.hasMore && !p.stale } else { false } })
@@ -157,7 +166,7 @@ func rejectsFramesWithoutAType(_ text: String) {
 @Test func fillsMissingPaneFieldsWithDefaults() throws {
     #expect(try frame(#"{"t":"pane_update","pane":{"paneId":"p"}}"#) == .paneUpdate(Pane(
         paneId: "p", workspaceId: "", tabId: "", terminalId: "", cwd: "", focused: false,
-        agent: nil, agentStatus: nil, chat: false, activity: nil, ask: nil, bgRunning: 0)))
+        agent: nil, agentStatus: nil, chat: false, activity: nil, ask: nil, bgRunning: 0, context: nil)))
 }
 
 @Test func skipsChatPartsThisAppCannotRead() throws {
@@ -298,4 +307,34 @@ func encodesRequestsWithTheirReqId(_ request: ClientRequest, _ prefix: String, _
             #expect(s.entries.count == (json["events"] as? [Any])?.count, "\(file.lastPathComponent) \(s.paneId) \(s.agentId ?? "")")
         }
     }
+}
+
+private let goldenCommands = [
+    SlashCommand(name: "clear", description: "Clear conversation history", source: "builtin"),
+    SlashCommand(name: "review", description: "Review a pull request", source: "project"),
+]
+
+@Test func decodesTheLimitsReading() throws {
+    let all = try frames(in: everyFrame)
+    let limits = try #require(all.compactMap { f -> Limits? in if case .limits(let l) = f { l } else { nil } }.first)
+    #expect(limits.observedAt == 1_791_279_010_000)
+    #expect(limits.windows == [
+        LimitWindow(kind: .fiveHour, percentUsed: 42.5, resetsAt: try Date("2026-10-01T14:00:00Z", strategy: .iso8601)),
+        LimitWindow(kind: .sevenDay, percentUsed: 18, resetsAt: try Date("2026-10-04T07:30:00Z", strategy: .iso8601)),
+    ])
+}
+
+@Test func decodesLooseLimitsAndCommands() throws {
+    // An unknown window kind is kept as such; a bad or missing reset time is unknown, not fatal.
+    #expect(try frame(#"{"t":"limits","limits":[{"kind":"opus_week","percentUsed":3},{"kind":"five_hour","percentUsed":1,"resetsAt":"soon"}]}"#)
+        == .limits(Limits(windows: [LimitWindow(kind: .unknown("opus_week"), percentUsed: 3, resetsAt: nil),
+                                    LimitWindow(kind: .fiveHour, percentUsed: 1, resetsAt: nil)], observedAt: 0)))
+    // A command without a name is skipped; a missing list is empty.
+    #expect(try frame(#"{"t":"chat_commands","paneId":"p","commands":[{"description":"x"},{"name":"init"}]}"#)
+        == .chatCommands(paneId: "p", commands: [SlashCommand(name: "init", description: "", source: "")]))
+    #expect(try frame(#"{"t":"chat_commands","paneId":"p"}"#) == .chatCommands(paneId: "p", commands: []))
+    // Blank task detail and description count as none.
+    let tasks = try frame(#"{"t":"chat_tasks","paneId":"p","tasks":[{"id":"b","detail":" ","description":""}]}"#)
+    #expect(tasks == .chatTasks(paneId: "p", tasks: [BgTask(id: "b", kind: .unknown(""), label: "", toolUseId: "", status: .unknown(""),
+                                                            startedAt: 0, endedAt: nil, detail: nil, description: nil)]))
 }

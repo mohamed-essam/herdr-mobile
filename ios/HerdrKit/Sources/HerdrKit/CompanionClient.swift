@@ -53,6 +53,8 @@ public final class CompanionClient {
     @ObservationIgnored private var lastReqId = 0
     @ObservationIgnored private var pushEndpoint: String?
     @ObservationIgnored private var backoffWait: Task<Void, Never>?
+    /// `reconnectNow()` came while an attempt was open: if it fails, the next one goes at once.
+    @ObservationIgnored private var kicked = false
 
     public convenience init(url: URL) {
         self.init(url: url, keepalive: .seconds(10), requestTimeout: .seconds(8), backoff: Backoff())
@@ -83,8 +85,16 @@ public final class CompanionClient {
         var backoff = initialBackoff
         state = .connecting
         while !Task.isCancelled {
-            if await connection() { backoff.reset() }
+            if await connection() {
+                backoff.reset()
+                kicked = false
+            }
             guard !Task.isCancelled else { break }
+            if kicked {
+                kicked = false
+                state = .reconnecting
+                continue
+            }
             let wait = Task { [delay = backoff.next()] in _ = try? await Task.sleep(for: delay) }
             backoffWait = wait
             state = .reconnecting
@@ -95,8 +105,9 @@ public final class CompanionClient {
     }
 
     /// Ends the wait before the next reconnect, e.g. when the app returns to the foreground.
+    /// During an attempt, it skips the wait after that attempt if it fails.
     public func reconnectNow() {
-        backoffWait?.cancel()
+        if let backoffWait { backoffWait.cancel() } else { kicked = true }
     }
 
     /// Sends a frame that gets no reply; it is dropped while disconnected. The last

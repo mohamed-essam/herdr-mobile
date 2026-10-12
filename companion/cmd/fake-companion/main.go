@@ -6,7 +6,8 @@
 //
 // A localhost control API lets a flow drive it:
 //
-//	POST /scenario {"name":"one-idle-pane"}  load a scenario, (re)start the WS side, clear /received
+//	POST /scenario {"name":"one-idle-pane"}  load a scenario, (re)start the WS side, clear /received,
+//	                                         and send its state (and limits reading) to every app
 //	POST /emit     <one JSON frame>          send a frame to every connected app
 //	GET  /received                           JSON array of the companion calls the app caused,
 //	                                         e.g. {"call":"RenamePane","args":["w1:p1","build"]}
@@ -35,6 +36,7 @@ import (
 
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/chatbridge"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/herdr"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/limits"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/proto"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/wsserver"
@@ -52,6 +54,9 @@ type scenario struct {
 	Chats  map[string]chatScenario      `json:"chats"`
 	Images map[string]chatbridge.Image  `json:"images"`
 	Frames map[string][]json.RawMessage `json:"frames"`
+	// The account's rate-limit reading, sent after the state on connect and on
+	// POST /scenario; none when nil.
+	Limits *limits.Limits `json:"limits"`
 	// The pane every create answers with, so a flow can auto-open it.
 	Created struct {
 		PaneID     string `json:"paneId"`
@@ -68,6 +73,7 @@ type chatScenario struct {
 	Older     []chatbridge.Entry `json:"older"`
 	Agents    []json.RawMessage  `json:"agents"`
 	Tasks     json.RawMessage    `json:"tasks"`
+	Commands  json.RawMessage    `json:"commands"`
 	SendError string             `json:"sendError"`
 }
 
@@ -130,10 +136,19 @@ func newFake(dir, name string) (*fake, error) {
 	f.srv.SetInitialSnapshot(func() []state.Pane { return f.current().Panes })
 	f.srv.SetWorkspaceSnapshot(func() []state.Workspace { return f.current().Workspaces })
 	f.srv.SetTabSnapshot(func() []state.Tab { return f.current().Tabs })
+	f.srv.SetLimitsSnapshot(func() []byte { return f.current().limitsFrame() })
 	f.srv.SetPushEndpoint(func(endpoint string) { f.rec.record("RegisterPush", endpoint) })
 	f.srv.SetChat(f.rec)
 	f.srv.SetAttachArgv(f.attachArgv)
 	return f, nil
+}
+
+// limitsFrame is the scenario's limits frame, nil when it has no reading.
+func (s scenario) limitsFrame() []byte {
+	if s.Limits == nil {
+		return nil
+	}
+	return proto.Limits(*s.Limits)
 }
 
 func (f *fake) current() scenario {
@@ -187,6 +202,9 @@ func (f *fake) controlHandler() http.Handler {
 		f.srv.Broadcast(proto.PanesSnapshot(s.Panes))
 		f.srv.Broadcast(proto.WorkspacesSnapshot(s.Workspaces))
 		f.srv.Broadcast(proto.TabsSnapshot(s.Tabs))
+		if l := s.limitsFrame(); l != nil {
+			f.srv.Broadcast(l)
+		}
 		log.Printf("scenario %s", req.Name)
 		w.WriteHeader(http.StatusNoContent)
 	})

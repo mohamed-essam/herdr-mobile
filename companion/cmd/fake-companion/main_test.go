@@ -156,7 +156,11 @@ func TestScenarioFrames(t *testing.T) {
 			defer cancel()
 			c, _ := dial(ctx, t, f)
 			frames := []json.RawMessage{}
-			for range 4 { // welcome + panes, workspaces, tabs
+			n := 4 // welcome + panes, workspaces, tabs, and the limits reading when there is one
+			if f.current().Limits != nil {
+				n++
+			}
+			for range n {
 				_, b, err := c.Read(ctx)
 				if err != nil {
 					t.Fatal(err)
@@ -327,6 +331,48 @@ func TestFakeCompanionServesScenarioChats(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("received lacks %s: %s", want, got)
 		}
+	}
+}
+
+// Usage and command flows: a scenario's limits reading goes out on connect, after the
+// state (as the companion sends a saved reading), and again on POST /scenario; a chat's
+// commands come with its snapshot.
+func TestFakeCompanionSendsLimitsAndCommands(t *testing.T) {
+	f, err := newFake("../../../e2e/scenarios", "usage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctl := httptest.NewServer(f.controlHandler())
+	defer ctl.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, _ := dial(ctx, t, f)
+	for _, want := range []string{"welcome", "panes", "workspaces", "tabs", "limits"} {
+		if got := readType(ctx, t, c); got != want {
+			t.Fatalf("connect frames: got %q, want %q", got, want)
+		}
+	}
+	if code, _ := call(t, "POST", ctl.URL+"/scenario", `{"name":"usage"}`); code != http.StatusNoContent {
+		t.Fatalf("scenario: %d", code)
+	}
+	if l := readFrame(ctx, t, c, "limits"); len(l["limits"].([]any)) != 2 || l["observedAt"].(float64) != 1791279240000 {
+		t.Fatalf("limits: %v", l)
+	}
+
+	f, err = newFake("../../../e2e/scenarios", "commands")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, _ = dial(ctx, t, f)
+	for range 4 { // welcome + panes, workspaces, tabs: no limits in this scenario
+		readType(ctx, t, c)
+	}
+	if err := c.Write(ctx, websocket.MessageText, []byte(`{"t":"chat_open","paneId":"w1:p1"}`)); err != nil {
+		t.Fatal(err)
+	}
+	snap := readFrame(ctx, t, c, "chat_snapshot")
+	if cmds, _ := snap["commands"].([]any); len(cmds) < 3 {
+		t.Fatalf("snapshot commands: %v", snap["commands"])
 	}
 }
 

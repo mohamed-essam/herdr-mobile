@@ -179,6 +179,18 @@ struct ChatTimelineView: View {
                         .foregroundStyle(taskNoticeIsError(entry.event) ? c.red : c.overlay2).lineLimit(2)
                         .accessibilityIdentifier("msg-\(entry.seq)")
                 }
+            // What a command sent from the phone printed, under its echo (the engine's own user row).
+            case .commandOutput(_, _, let text, let isError, _):
+                GutterRow(time: time, timeId: "ts-\(entry.seq)", speaker: head ? youSpeaker(c) : nil, spacing: 4) {
+                    let out = text[..<(text.lastIndex { !$0.isWhitespace }.map(text.index(after:)) ?? text.startIndex)]
+                    Text(out.isEmpty ? "(no output)" : out).font(HerdrFont.code).foregroundStyle(isError ? c.red : c.subtext1)
+                        .lineLimit(20).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .background(c.base, in: .rect(cornerRadius: HerdrRadius.tile))
+                        .accessibilityIdentifier("msg-\(entry.seq)")
+                        .maskedInReports()
+                }
             case .toolUse, .toolResult:
                 EmptyView()
             }

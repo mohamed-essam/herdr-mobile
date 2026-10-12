@@ -44,6 +44,8 @@ public struct ChatView: Equatable, Sendable {
     public internal(set) var agents: [String: AgentSummary] = [:]
     /// The pane's background tasks (main view only).
     public internal(set) var tasks: [BgTask] = []
+    /// The session's slash commands (main view only); empty: no picker.
+    public internal(set) var commands: [SlashCommand] = []
     /// A thread's snapshot said the companion doesn't know that agent.
     public internal(set) var missing = false
 
@@ -69,6 +71,8 @@ extension ChatView {
             pending = confirm(pending, sameEpoch
                 ? s.entries.filter { $0.seq > lastSeq }.compactMap(\.userText)
                 : Array(s.entries.compactMap(\.userText).suffix(pending.count { $0.status != .failed })))
+            // A /clear's echo goes with the old session: the new session's epoch is its delivery.
+            if loaded && !sameEpoch { pending.removeAll { $0.status != .failed && startsNewSession($0.text) } }
             answering = sameEpoch ? answering.subtracting(resultIds(kept)) : []
             setState(s.state, now: now)
             loaded = true
@@ -83,6 +87,7 @@ extension ChatView {
             // A thread's snapshot sends neither: keep what the view has.
             if let a = s.agents { agents = Dictionary(a.map { ($0.agentId, $0) }, uniquingKeysWith: { $1 }) }
             if let t = s.tasks { tasks = t }
+            if let c = s.commands { commands = c }
             missing = s.missing
         case .chatEvent(_, let e, let seq, let entry, _):
             if !loaded || gap { return }
@@ -97,6 +102,7 @@ extension ChatView {
         case .chatAgent(_, let agent?, _): agents[agent.agentId] = agent
         case .chatAgent(_, nil, let removed?): agents[removed] = nil
         case .chatTasks(_, let t): tasks = t
+        case .chatCommands(_, let c): commands = c
         default: break
         }
     }
@@ -179,9 +185,22 @@ extension ChatView {
 private func confirm(_ pending: [PendingMessage], _ texts: [String]) -> [PendingMessage] {
     var out = pending
     for t in texts {
-        if let i = out.firstIndex(where: { $0.status != .failed && $0.text == t }) { out.remove(at: i) }
+        if let i = out.firstIndex(where: { $0.status != .failed && sameText($0.text, t) }) { out.remove(at: i) }
     }
     return out
+}
+
+/// A command comes back as `/name args`, however the space after its name was typed.
+private func sameText(_ a: String, _ b: String) -> Bool {
+    func spaced(_ s: String) -> String { s.replacing(/\s+/, with: " ", maxReplacements: 1) }
+    return a == b || (a.hasPrefix("/") && b.hasPrefix("/") && spaced(a) == spaced(b))
+}
+
+private let newSessionCommands: Set = ["/clear", "/reset", "/new"]
+
+/// A command that starts a new session.
+private func startsNewSession(_ text: String) -> Bool {
+    newSessionCommands.contains(String(text.prefix { !$0.isWhitespace }))
 }
 
 private func dedupQuestions(_ entries: [ChatEntry]) -> [ChatEntry] {
@@ -201,7 +220,8 @@ extension ChatEvent {
     public var ts: Int? {
         switch self {
         case .userText(_, _, let ts, _, _), .assistantText(_, _, let ts), .toolUse(_, _, _, _, let ts),
-             .toolResult(_, _, _, _, let ts, _), .taskNotice(_, _, _, let ts), .question(_, _, _, let ts): ts
+             .toolResult(_, _, _, _, let ts, _), .taskNotice(_, _, _, let ts), .question(_, _, _, let ts),
+             .commandOutput(_, _, _, _, let ts): ts
         }
     }
 }

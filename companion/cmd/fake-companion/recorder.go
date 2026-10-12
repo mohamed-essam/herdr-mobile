@@ -130,6 +130,9 @@ func (r *recorder) Subscribe(paneID, agentID string) (chatbridge.Snapshot, <-cha
 	snap := chatbridge.Snapshot{PaneID: paneID, AgentID: agentID, State: "idle"}
 	if c, ok := r.scenario().chat(paneID, agentID); ok {
 		snap.Epoch, snap.Events, snap.HasMore, snap.Agents, snap.Tasks = c.epoch(), c.Events, len(c.Older) > 0, c.Agents, c.Tasks
+		if agentID == "" {
+			snap.Commands = c.Commands
+		}
 		if c.State != "" {
 			snap.State = c.State
 		}

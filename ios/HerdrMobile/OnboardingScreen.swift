@@ -1,10 +1,15 @@
 import HerdrKit
 import SwiftUI
 
-/// Setup: run the companion, enter its tailnet address, connect. Ported from
+/// Setup: run the companion, enter its tailnet address, connect. Also adds a server from
+/// the dashboard, with "← back"; an address already saved is refused. Ported from
 /// Android's OnboardingScreen.kt; push (step 3) waits for its own milestone.
 struct ConnectScreen: View {
     @Binding var input: String
+    /// The saved server's name at this address, if any.
+    let duplicateOf: (CompanionAddress) -> String?
+    /// Back to the dashboard, when adding a server.
+    let onBack: (() -> Void)?
     let onConnect: (CompanionAddress) -> Void
     @Environment(\.herdr) private var c
 
@@ -12,8 +17,14 @@ struct ConnectScreen: View {
 
     var body: some View {
         let steps = connectStepStates(hostEntered: address != nil)
+        let duplicate = address.flatMap(duplicateOf)
         VStack(spacing: 0) {
             ScrollView {
+                if let onBack {
+                    Button("← back", action: onBack).font(HerdrFont.meta).foregroundStyle(c.subtext1)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 16)
+                        .accessibilityIdentifier("connectBack")
+                }
                 VStack(alignment: .leading, spacing: 8) {
                     Wordmark(font: .system(size: 28, weight: .semibold, design: .monospaced))
                     Text("One terminal for the whole herd, in your pocket.").font(HerdrFont.body).foregroundStyle(c.subtext1)
@@ -28,7 +39,10 @@ struct ConnectScreen: View {
                     Step(number: 2, state: steps[1]) {
                         Text("Enter its tailnet address").font(HerdrFont.title).foregroundStyle(c.text)
                         AddressField(input: $input, address: address, onGo: connect)
-                        if !input.trimmingCharacters(in: .whitespaces).isEmpty && address == nil {
+                        if let duplicate {
+                            Text("Already saved as \(duplicate).")
+                                .font(HerdrFont.small).foregroundStyle(c.red).accessibilityIdentifier("addressError")
+                        } else if !input.trimmingCharacters(in: .whitespaces).isEmpty && address == nil {
                             Text("That doesn't look like a host or ws:// address.")
                                 .font(HerdrFont.small).foregroundStyle(c.red).accessibilityIdentifier("addressError")
                         } else {
@@ -45,7 +59,7 @@ struct ConnectScreen: View {
             .padding(.horizontal, 24)
             Button("Connect", action: connect)
                 .buttonStyle(PrimaryButtonStyle())
-                .disabled(address == nil)
+                .disabled(address == nil || duplicate != nil)
                 .accessibilityIdentifier("connectButton")
                 .padding(.horizontal, 24).padding(.bottom, 32)
         }
@@ -53,7 +67,7 @@ struct ConnectScreen: View {
     }
 
     private func connect() {
-        if let address { onConnect(address) }
+        if let address, duplicateOf(address) == nil { onConnect(address) }
     }
 }
 

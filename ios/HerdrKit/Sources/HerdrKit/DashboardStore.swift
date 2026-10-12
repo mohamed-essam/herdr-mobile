@@ -13,6 +13,8 @@ public final class DashboardStore {
     public private(set) var recentAgents: [String]
     /// Why the last action failed, until `clearError()`.
     public private(set) var error: String?
+    /// The account's latest rate-limit reading; nil until the companion sends one.
+    public private(set) var limits: Limits?
 
     /// The terminal of the pane the last create made, until it is opened.
     private var createdTerminalId: String?
@@ -48,6 +50,7 @@ public final class DashboardStore {
         case .paneRemoved(let id): panesById[id] = nil
         case .workspaces(let all): workspaces = all
         case .tabs(let all): tabs = all
+        case .limits(let l): limits = l
         default: break
         }
     }

@@ -8,10 +8,12 @@ final class TestServer: Sendable {
     private let listener: NWListener
     private let peers: AsyncStream<Peer>
 
-    init() async throws {
+    /// Listens on `port`, or on a free one when nil.
+    init(port: UInt16? = nil) async throws {
         let parameters = NWParameters.tcp
         parameters.defaultProtocolStack.applicationProtocols.insert(NWProtocolWebSocket.Options(), at: 0)
-        parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: .any)
+        parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: port.flatMap(NWEndpoint.Port.init(rawValue:)) ?? .any)
+        parameters.allowLocalEndpointReuse = true
         let listener = try NWListener(using: parameters)
         let (peers, newPeer) = AsyncStream.makeStream(of: Peer.self)
         // A peer arrives once its WebSocket handshake is done: dropping one mid-handshake hangs the client.
@@ -41,6 +43,11 @@ final class TestServer: Sendable {
     }
 
     deinit { listener.cancel() }
+
+    var port: UInt16 { UInt16(url.port!) }
+
+    /// Stops listening, like a companion that went down: new connections are refused.
+    func stop() { listener.cancel() }
 
     /// The client's next connection, or nil when none comes `within` the wait.
     func nextPeer(within wait: Duration = .seconds(5)) async -> Peer? {

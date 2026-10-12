@@ -67,6 +67,20 @@ public enum ChatState: WireEnum {
     }
 }
 
+/// A rate-limit window's span.
+public enum LimitKind: WireEnum {
+    case fiveHour, sevenDay, unknown(String)
+
+    public static let known: [Self] = [.fiveHour, .sevenDay]
+    public var raw: String {
+        switch self {
+        case .fiveHour: "five_hour"
+        case .sevenDay: "seven_day"
+        case .unknown(let raw): raw
+        }
+    }
+}
+
 public enum AgentKind: WireEnum {
     case subagent, workflow, unknown(String)
 

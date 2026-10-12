@@ -13,6 +13,7 @@ struct DashboardScreen: View {
     let client: CompanionClient
     let store: DashboardStore
     let chat: ChatStore
+    let servers: ServerControls
     @State private var sheet: DashboardSheet?
     /// The pane shown in place of the dashboard.
     @State private var openPaneId: String?
@@ -31,6 +32,7 @@ struct DashboardScreen: View {
                 PaneScreen(pane: open, context: paneContexts(store.repos)[open.paneId] ?? PaneContext(fallback: open),
                            client: client, chat: chat, onExit: { openPaneId = nil })
                     .id(open.paneId)
+                    .environment(\.usageLimits, store.limits)
             } else {
                 dashboard(panes)
             }
@@ -46,6 +48,9 @@ struct DashboardScreen: View {
 
     private func openPane(_ p: Pane) { if p.canOpen { openPaneId = p.paneId } }
 
+    /// The active server's chip, opening the server list.
+    private var chip: ServerChip? { servers.active.map { s in ServerChip(name: s.name) { sheet = .servers } } }
+
     /// `panes` is `store.panes`, read once per render: the store sorts on each read.
     private func dashboard(_ panes: [Pane]) -> some View {
         TimelineView(.periodic(from: .now, by: 30)) { _ in
@@ -54,7 +59,7 @@ struct DashboardScreen: View {
             ZStack(alignment: .bottom) {
                 c.crust.ignoresSafeArea()
                 if panes.isEmpty {
-                    if connected { EmptyState { Task { await store.newWorkspace() } } } else { ConnectingState() }
+                    if connected { EmptyState(server: chip) { Task { await store.newWorkspace() } } } else { ConnectingState(server: chip) }
                 } else {
                     content(panes: panes, contexts: contexts, now: options.now().epochMs)
                     bottom(repos: repos, contexts: contexts)
@@ -66,7 +71,7 @@ struct DashboardScreen: View {
             disconnectedSince = up ? nil : disconnectedSince ?? options.now()
         }
         .sheet(item: $sheet) { s in
-            DashboardSheetView(sheet: s, store: store, connected: connected, show: { sheet = $0 })
+            DashboardSheetView(sheet: s, store: store, connected: connected, servers: servers, show: { sheet = $0 })
         }
     }
 
@@ -78,9 +83,10 @@ struct DashboardScreen: View {
         func actions(_ p: Pane) { if connected { sheet = .actions(paneAction(p)) } }
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                TopBar(connected: connected, count: panes.count)
+                TopBar(connected: connected, count: panes.count, server: chip)
                 if !connected { ReconnectBanner(since: disconnectedSince) }
                 StatTiles(counts: StatusCounts(panes: panes))
+                if let limits = store.limits { LimitsStrip(limits: limits, now: now) }
                 Group {
                     if !sections.needsYou.isEmpty || !resumed.isEmpty {
                         SectionHeader(id: "needs", text: "● needs you · \(sections.needsYou.count)", color: c.red)
@@ -140,11 +146,13 @@ struct DashboardScreen: View {
 private struct TopBar: View {
     let connected: Bool
     let count: Int
+    let server: ServerChip?
     @Environment(\.herdr) private var c
 
     var body: some View {
-        HStack {
+        HStack(spacing: 12) {
             Wordmark()
+            server
             Spacer()
             if connected {
                 HStack(spacing: 6) {
@@ -439,6 +447,7 @@ private struct PaneRow: View {
                         .maskedInReports()
                     if let badge = pane.bgBadge { BgChip(paneId: pane.paneId, text: badge) }
                 }
+                if let usage = pane.context { ContextBar(paneId: pane.paneId, percent: usage.percent).padding(.top, 4) }
             }
             Spacer()
             let age = relativeAge(ms: pane.activity?.ts ?? 0, now: now)
@@ -499,12 +508,13 @@ private struct BottomBar: View {
 }
 
 private struct EmptyState: View {
+    let server: ServerChip?
     let onNew: () -> Void
     @Environment(\.herdr) private var c
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            TopBar(connected: true, count: 0)
+            TopBar(connected: true, count: 0, server: server)
             Spacer()
             VStack(alignment: .leading, spacing: 24) {
                 Text("The herd is resting").font(HerdrFont.display).foregroundStyle(c.text)
@@ -526,17 +536,22 @@ private struct EmptyState: View {
     }
 }
 
+/// Connecting, with the server chip on top so a server that is down can be left.
 private struct ConnectingState: View {
+    let server: ServerChip?
     @Environment(\.herdr) private var c
 
     var body: some View {
-        VStack(spacing: 12) {
-            Spinner(font: HerdrFont.stat).foregroundStyle(c.yellow)
-            Text("Connecting…").font(HerdrFont.title).foregroundStyle(c.text)
+        VStack(spacing: 0) {
+            TopBar(connected: false, count: 0, server: server)
+            VStack(spacing: 12) {
+                Spinner(font: HerdrFont.stat).foregroundStyle(c.yellow)
+                Text("Connecting…").font(HerdrFont.title).foregroundStyle(c.text)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("connecting")
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("connecting")
     }
 }
 

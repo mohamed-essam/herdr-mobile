@@ -134,6 +134,32 @@ private func welcomed(_ server: TestServer, _ client: CompanionClient) async thr
     #expect(await server.nextPeer(within: .seconds(2)) != nil)
 }
 
+// Android's 52b6d75: an attempt that failed while the reconnect that opened it was still
+// finishing stopped the retries for good. Here every attempt fails around a reconnectNow
+// (refused while the companion is down, then dropped before its welcome), and the client
+// must still connect once the companion is back.
+@Test @MainActor func keepsRetryingWhenAttemptsFailAroundReconnectNow() async throws {
+    let down = try await TestServer()
+    let port = down.port
+    down.stop()
+    let client = CompanionClient(url: down.url, keepalive: .seconds(60), requestTimeout: .seconds(5), backoff: Backoff(first: .milliseconds(50)))
+    let run = Task { await client.run() }
+    defer { run.cancel() }
+    for _ in 0..<30 {
+        client.reconnectNow()
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(client.state == .reconnecting)
+
+    // Each failure doubled the wait (to 15 s by now): kick it, as returning to the foreground does.
+    let server = try await TestServer(port: port)
+    client.reconnectNow()
+    let failing = try #require(await server.nextPeer())
+    failing.drop()
+    client.reconnectNow()
+    _ = try await welcomed(server, client)
+}
+
 @Test @MainActor func reSendsThePushEndpointAfterEveryReconnect() async throws {
     let (server, client, run) = try await start()
     defer { run.cancel() }

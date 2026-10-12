@@ -17,11 +17,11 @@ func until(within wait: Duration = .seconds(5), _ condition: () -> Bool) async -
 func pane(
     _ id: String, ws: String = "w1", tab: String? = nil, agent: String? = "claude", status: AgentStatus? = .idle,
     cwd: String = "", terminal: String = "term", chat: Bool = false, ts: Int? = nil, activity: PaneActivity? = nil,
-    ask: PaneAsk? = nil, bg: Int = 0, focused: Bool = false
+    ask: PaneAsk? = nil, bg: Int = 0, focused: Bool = false, context: PaneUsage? = nil
 ) -> Pane {
     Pane(paneId: id, workspaceId: ws, tabId: tab ?? "\(ws):t1", terminalId: terminal, cwd: cwd, focused: focused,
          agent: agent, agentStatus: agent == nil ? .unknown("unknown") : status, chat: chat,
-         activity: activity ?? ts.map { PaneActivity(kind: .text, tool: nil, text: "", ts: $0) }, ask: ask, bgRunning: bg)
+         activity: activity ?? ts.map { PaneActivity(kind: .text, tool: nil, text: "", ts: $0) }, ask: ask, bgRunning: bg, context: context)
 }
 
 func workspace(_ id: String, _ label: String = "", number: Int = 1, lastActivity: Int = 0, repo: String? = nil) -> Workspace {
@@ -76,16 +76,17 @@ func agentSummary(_ id: String, parent: String, kind: AgentKind = .subagent, lab
 }
 
 func bgTask(_ id: String, kind: TaskKind = .shell, status: RunStatus = .running, label: String = "", toolUseId: String = "",
-            startedAt: Int = 0, endedAt: Int? = nil) -> BgTask {
-    BgTask(id: id, kind: kind, label: label, toolUseId: toolUseId, status: status, startedAt: startedAt, endedAt: endedAt)
+            startedAt: Int = 0, endedAt: Int? = nil, detail: String? = nil, description: String? = nil) -> BgTask {
+    BgTask(id: id, kind: kind, label: label, toolUseId: toolUseId, status: status, startedAt: startedAt, endedAt: endedAt,
+           detail: detail, description: description)
 }
 
 func snapshot(_ entries: [ChatEntry], pane: String = "p", agentId: String? = nil, epoch: Int = 1, state: ChatState = .idle,
               hasMore: Bool = false, maxSeq: Int? = nil, missing: Bool = false, agents: [AgentSummary]? = nil,
-              tasks: [BgTask]? = nil) -> ServerFrame {
+              tasks: [BgTask]? = nil, commands: [SlashCommand]? = nil) -> ServerFrame {
     .chatSnapshot(ChatSnapshot(paneId: pane, epoch: epoch, state: state, entries: entries, hasMore: hasMore,
                                maxSeq: maxSeq ?? entries.map(\.seq).max() ?? 0, agentId: agentId, missing: missing,
-                               agents: agents, tasks: tasks))
+                               agents: agents, tasks: tasks, commands: commands))
 }
 
 func event(_ entry: ChatEntry?, seq: Int? = nil, pane: String = "p", agentId: String? = nil, epoch: Int = 1) -> ServerFrame {
@@ -95,4 +96,11 @@ func event(_ entry: ChatEntry?, seq: Int? = nil, pane: String = "p", agentId: St
 func page(_ entries: [ChatEntry], pane: String = "p", agentId: String? = nil, epoch: Int = 1, hasMore: Bool = false,
           stale: Bool = false) -> ChatHistoryPage {
     ChatHistoryPage(reqId: "h1", paneId: pane, epoch: epoch, entries: entries, hasMore: hasMore, stale: stale, agentId: agentId)
+}
+
+/// The chat view after `frames`, applied in order at `now`.
+func view(_ frames: ServerFrame..., now: Int = 0) -> ChatView {
+    var v = ChatView()
+    for f in frames { v.apply(f, now: now) }
+    return v
 }

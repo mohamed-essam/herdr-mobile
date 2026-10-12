@@ -1,0 +1,75 @@
+# Slash commands: the picker filters the session's commands as a name is typed and fills
+# one in; a command's output shows under its echo; a live chat_commands updates the list;
+# a /clear is delivered by the new session; a shell task expands to its whole command.
+appId: dev.instabug.herdr.mobile
+---
+- runFlow:
+    file: subflows/launch.yaml
+    env:
+      SCENARIO: commands
+- tapOn: { id: "row-w1:p1" }
+- extendedWaitUntil:
+    visible: { id: chatTitle }
+    timeout: 5000
+# History: each output row under the engine's echo of its command.
+- assertVisible: { id: msg-3, text: "Context: 61% of 200k tokens.*" }
+- assertVisible:
+    id: msg-3
+    below: { id: msg-2, text: "/context" }
+- assertVisible: { id: msg-5, text: "Unknown command: /nope" }
+
+# A shell task opens to its description and whole command.
+- tapOn: { id: tasksStrip }
+- tapOn: { id: task-bg1 }
+- assertVisible: { id: taskDescription-bg1, text: "Start the dev server" }
+- assertVisible: { id: taskDetail-bg1, text: ".*--watch assets" }
+- swipe:
+    direction: DOWN
+- assertNotVisible: { id: taskDetail-bg1 }
+
+- tapOn: { id: composer }
+- inputText: "/"
+- assertVisible: { id: slashPicker }
+- assertVisible: { id: slash-clear }
+- inputText: "re"
+- assertVisible: { id: slash-review, text: "/review.*Review a pull request.*" }
+- assertVisible: { id: slash-release-notes, text: ".*herdr-tools.*" }
+- assertNotVisible: { id: slash-clear }
+- tapOn: { id: slash-review }
+- assertNotVisible: { id: slashPicker }
+- assertVisible: { id: composer, text: "/review " }
+- inputText: "42"
+- tapOn: { id: sendButton }
+- runScript:
+    file: ../scripts/received.js
+    env:
+      CALL: ChatSend
+      ARGS: '["w1:p1","/review 42"]'
+- runFlow:
+    file: subflows/play.yaml
+    env:
+      NAME: ran
+- assertVisible: { id: msg-7, text: "Reviewing PR #42.*" }
+- assertNotVisible: { id: pendingLabel }
+
+# The list updates live.
+- runFlow:
+    file: subflows/play.yaml
+    env:
+      NAME: more-commands
+- tapOn: { id: composer }
+- inputText: "/dep"
+- assertVisible: { id: slash-deploy }
+- eraseText: 4
+
+- tapOn: { id: composer }
+# /clear: its echo goes with the old session, so the new session's snapshot delivers it.
+- inputText: "/clear"
+- tapOn: { id: sendButton }
+- assertVisible: { id: pendingLabel }
+- runFlow:
+    file: subflows/play.yaml
+    env:
+      NAME: cleared
+- assertNotVisible: { id: pendingLabel }
+- assertNotVisible: { id: msg-3 }

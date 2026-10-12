@@ -6,26 +6,33 @@ import SwiftUI
 
 /// "● CLAUDE ASKS", each question with large tap rows (or a text or number field) and an
 /// "Other…" field, then "Send answer". A long or multi-question ask scrolls inside the sheet.
-struct QuestionSheet: View {
+/// The handle row folds it to a `QuestionBar`, to read the chat.
+private struct QuestionSheet: View {
     let question: PendingQuestion
     let agent: String
     let enabled: Bool
     let sending: Bool
+    /// One per question, held by the panel so folding the sheet keeps the picks.
+    @Binding var inputs: [QuestionInput]
+    let onMinimize: () -> Void
     let onSubmit: ([String: String]) -> Void
-    @State private var inputs: [QuestionInput]
     @State private var fieldsHeight: CGFloat = 0
     @Environment(\.herdr) private var c
-
-    init(question: PendingQuestion, agent: String, enabled: Bool, sending: Bool, onSubmit: @escaping ([String: String]) -> Void) {
-        (self.question, self.agent, self.enabled, self.sending, self.onSubmit) = (question, agent, enabled, sending, onSubmit)
-        _inputs = State(initialValue: question.questions.map { _ in QuestionInput() })
-    }
 
     var body: some View {
         let active = enabled && !sending
         let answers = buildAnswers(question.questions, inputs)
         VStack(spacing: 12) {
-            Capsule().fill(c.surface1).frame(width: 32, height: 4).padding(.top, 12)
+            Button(action: onMinimize) {
+                Capsule().fill(c.surface1).frame(width: 32, height: 4)
+                    .frame(maxWidth: .infinity, minHeight: 28)
+                    .overlay(alignment: .trailing) { Text("▾ hide").font(HerdrFont.meta).foregroundStyle(c.overlay2) }
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 4)
+            .accessibilityLabel("Hide question")
+            .accessibilityIdentifier("questionHide")
             // As tall as the questions, scrolling once the sheet's height cap is reached.
             ScrollView {
                 fields(active).onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fieldsHeight = $0 }
@@ -154,6 +161,65 @@ private struct SheetField: View {
             .background(c.mantle, in: .rect(cornerRadius: HerdrRadius.tile))
             .overlay(RoundedRectangle(cornerRadius: HerdrRadius.tile).stroke(c.surface0))
             .accessibilityIdentifier(id)
+    }
+}
+
+/// A folded question: one bar where the composer was; a tap brings the sheet back.
+/// A pending question where the composer was: its sheet, or the bar it folds to. It holds
+/// the picks, so folding keeps them.
+struct QuestionPanel: View {
+    let question: PendingQuestion
+    let agent: String
+    let enabled: Bool
+    let sending: Bool
+    let maxSheetHeight: CGFloat
+    let folded: Bool
+    let onFold: (Bool) -> Void
+    let onSubmit: ([String: String]) -> Void
+    @State private var inputs: [QuestionInput]
+
+    init(question: PendingQuestion, agent: String, enabled: Bool, sending: Bool, maxSheetHeight: CGFloat,
+         folded: Bool, onFold: @escaping (Bool) -> Void, onSubmit: @escaping ([String: String]) -> Void) {
+        (self.question, self.agent, self.enabled, self.sending) = (question, agent, enabled, sending)
+        (self.maxSheetHeight, self.folded, self.onFold, self.onSubmit) = (maxSheetHeight, folded, onFold, onSubmit)
+        _inputs = State(initialValue: question.questions.map { _ in QuestionInput() })
+    }
+
+    var body: some View {
+        if folded {
+            QuestionBar(agent: agent, count: question.questions.count, sending: sending) { onFold(false) }
+        } else {
+            QuestionSheet(question: question, agent: agent, enabled: enabled, sending: sending, inputs: $inputs,
+                          onMinimize: { onFold(true) }, onSubmit: onSubmit)
+                .frame(maxHeight: maxSheetHeight)
+                .layoutPriority(1) // sized to its questions first; the timeline takes the rest
+        }
+    }
+}
+
+private struct QuestionBar: View {
+    let agent: String
+    let count: Int
+    let sending: Bool
+    let onExpand: () -> Void
+    @Environment(\.herdr) private var c
+
+    var body: some View {
+        Button(action: onExpand) {
+            HStack {
+                Text(sending ? "● sending answer…" : "● \(agent) asks" + (count > 1 ? " · \(count) questions" : ""))
+                    .font(HerdrFont.title).foregroundStyle(c.red).lineLimit(1)
+                Spacer()
+                Text("Answer ▴").font(HerdrFont.title).foregroundStyle(c.mauve)
+            }
+            .padding(.horizontal, 16).frame(minHeight: 48)
+            .background(c.red.opacity(0.12), in: .rect(cornerRadius: HerdrRadius.tile))
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("questionBar")
+        .padding(.horizontal, 16).padding(.vertical, 12)
     }
 }
 

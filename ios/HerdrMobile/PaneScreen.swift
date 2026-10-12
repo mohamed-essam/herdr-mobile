@@ -109,8 +109,9 @@ struct ThreadScreen: View {
 }
 
 /// A pane's chat: the header, the tasks strip, the timeline, and the composer at the
-/// bottom, with Interrupt while the agent works; a pending question replaces the composer
-/// as a pinned sheet. Ported from Android's ChatScreen.kt.
+/// bottom, with Interrupt while the agent works and the slash-command picker above it while a
+/// command name is typed; a pending question replaces the composer as a pinned sheet that
+/// folds to a bar. The draft is the store's, per pane. Ported from Android's ChatScreen.kt.
 struct ChatScreen: View {
     let pane: Pane
     let context: PaneContext
@@ -119,7 +120,8 @@ struct ChatScreen: View {
     let onExit: () -> Void
     let onTerminal: () -> Void
     let onOpenThread: (String) -> Void
-    @State private var draft = ""
+    /// The question whose sheet is folded to its bar.
+    @State private var foldedQuestion: String?
     @State private var showTasks = false
     @State private var scrollTarget: String?
     @Environment(\.herdr) private var c
@@ -132,6 +134,7 @@ struct ChatScreen: View {
         let asking = pendingQuestion(view.entries, answered: view.answered)
         let status = chatStatus(connected: connected, state: view.state,
                                 questionPending: asking.map { !view.answering.contains($0.toolUseId) } ?? false)
+        let folded = asking != nil && asking?.toolUseId == foldedQuestion
         VStack(spacing: 0) {
             PaneHeader(context: context, breadcrumb: context.breadcrumb, status: status.label, statusColor: color(status.kind),
                        onBack: onExit, toggle: PaneHeader.Toggle(label: ">_ terminal", id: "terminalToggle", action: onTerminal))
@@ -141,24 +144,19 @@ struct ChatScreen: View {
                 VStack(spacing: 0) {
                     ChatTimelineView(key: key, view: view, chat: chat, agents: view.agents, tasks: view.tasks, agentLabel: agent,
                                      readOnly: false, working: working, onOpenThread: onOpenThread, scrollTarget: $scrollTarget)
-                        .opacity(asking == nil ? 1 : 0.45)
+                        .opacity(asking == nil || folded ? 1 : 0.45)
                     if let asking {
-                        QuestionSheet(question: asking, agent: agent, enabled: connected && pane.chat,
-                                      sending: view.answering.contains(asking.toolUseId)) { answers in
+                        QuestionPanel(question: asking, agent: agent, enabled: connected && pane.chat,
+                                      sending: view.answering.contains(asking.toolUseId), maxSheetHeight: geo.size.height * 0.8,
+                                      folded: folded, onFold: { foldedQuestion = $0 ? asking.toolUseId : nil }) { answers in
                             Task { await chat.answer(paneId: pane.paneId, toolUseId: asking.toolUseId, answers: answers) }
                         }
-                        .id(asking.toolUseId)
-                        .frame(maxHeight: geo.size.height * 0.8)
-                        .layoutPriority(1) // sized to its questions first; the timeline takes the rest
+                        // A new question (or the same one grown) opens with fresh picks, one per question.
+                        .id("\(asking.toolUseId)/\(asking.questions.count)")
                     } else {
-                        Composer(draft: $draft, placeholder: working ? "Queue a message…" : "Message \(agent)…",
-                                 canSend: connected && pane.chat, interrupt: working, connected: connected,
-                                 onSend: {
-                                     let text = draft
-                                     draft = ""
-                                     Task { await chat.send(paneId: pane.paneId, text: text) }
-                                 },
-                                 onInterrupt: { Task { await chat.interrupt(paneId: pane.paneId) } })
+                        ComposerArea(paneId: pane.paneId, chat: chat, commands: pane.chat ? view.commands : [], agent: agent,
+                                     canSend: connected && pane.chat, working: working, connected: connected,
+                                     maxPickerHeight: geo.size.height * 0.4)
                     }
                 }
             }
@@ -201,6 +199,37 @@ private struct UnavailableBanner: View {
         }
         .padding(.leading, 20).padding(.trailing, 8).padding(.vertical, 8)
         .background(c.red.opacity(0.12))
+    }
+}
+
+/// The composer with the slash-command picker above it while a command name is typed. It
+/// holds the draft, so typing redraws only this, and keeps it in the store per pane.
+private struct ComposerArea: View {
+    let paneId: String
+    let chat: ChatStore
+    let commands: [SlashCommand]
+    let agent: String
+    let canSend: Bool
+    let working: Bool
+    let connected: Bool
+    let maxPickerHeight: CGFloat
+    @State private var draft = ""
+
+    var body: some View {
+        if let matches = slashMatches(draft, commands), !matches.isEmpty {
+            SlashPicker(commands: matches) { draft = "/\($0.name) " }
+                .frame(maxHeight: maxPickerHeight)
+        }
+        Composer(draft: $draft, placeholder: working ? "Queue a message…" : "Message \(agent)…",
+                 canSend: canSend, interrupt: working, connected: connected,
+                 onSend: {
+                     let text = draft
+                     draft = ""
+                     Task { await chat.send(paneId: paneId, text: text) }
+                 },
+                 onInterrupt: { Task { await chat.interrupt(paneId: paneId) } })
+            .onAppear { draft = chat.draft(paneId: paneId) }
+            .onChange(of: draft) { _, text in chat.setDraft(text, paneId: paneId) }
     }
 }
 
@@ -259,6 +288,48 @@ private struct Composer: View {
     }
 }
 
+/// The session's slash commands matching what's typed after "/", above the composer: a tap
+/// fills in `/name ` for the arguments.
+private struct SlashPicker: View {
+    let commands: [SlashCommand]
+    let onPick: (SlashCommand) -> Void
+    @Environment(\.herdr) private var c
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                ForEach(commands, id: \.name) { cmd in
+                    Button { onPick(cmd) } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 8) {
+                                Text("/\(cmd.name)").font(HerdrFont.code).foregroundStyle(c.mauve).lineLimit(1)
+                                if !cmd.source.isEmpty && cmd.source != "builtin" {
+                                    Text(cmd.source).font(HerdrFont.meta).foregroundStyle(c.overlay2)
+                                }
+                            }
+                            if !cmd.description.isEmpty {
+                                Text(cmd.description).font(HerdrFont.small).foregroundStyle(c.overlay2).lineLimit(1)
+                                    .maskedInReports()
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16).padding(.vertical, 10)
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("slash-\(cmd.name)")
+                }
+            }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(c.base, in: .rect(cornerRadius: HerdrRadius.tile))
+        .accessibilityIdentifier("slashPicker")
+        .padding(.horizontal, 16).padding(.top, 8)
+    }
+}
+
 /// One line under the header summing up the pane's background tasks; absent when there are none.
 private struct TasksStrip: View {
     let tasks: [BgTask]
@@ -282,10 +353,12 @@ private struct TasksStrip: View {
 }
 
 /// The tasks as rows: glyph, label, status and duration, ticking each second while one
-/// runs. Subagent and workflow rows jump to their card; shell and monitor rows don't.
+/// runs. Subagent and workflow rows jump to their card; shell and monitor rows expand to
+/// their description and whole, selectable command.
 private struct TasksSheet: View {
     let tasks: [BgTask]
     let onPick: (BgTask) -> Void
+    @State private var expanded: Set<String> = []
     @Environment(\.launchOptions) private var options
     @Environment(\.herdr) private var c
 
@@ -296,10 +369,12 @@ private struct TasksSheet: View {
                 SheetTitle(text: "Background tasks")
                 ListCard {
                     ForEach(tasks, id: \.id) { t in
-                        Button { onPick(t) } label: { row(t, now: now) }
+                        Button {
+                            if t.hasCard { onPick(t) } else if expanded.remove(t.id) == nil { expanded.insert(t.id) }
+                        } label: { row(t, now: now) }
                             .buttonStyle(.plain)
-                            .disabled(!t.hasCard)
                             .accessibilityIdentifier("task-\(t.id)")
+                        if expanded.contains(t.id) { detail(t) }
                     }
                 }
                 .maskedInReports()
@@ -308,6 +383,22 @@ private struct TasksSheet: View {
             .padding(20)
         }
         .herdrSheet(c.base, detents: [.medium, .large])
+    }
+
+    private func detail(_ t: BgTask) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let d = t.description {
+                Text(d).font(HerdrFont.body).foregroundStyle(c.subtext1)
+                    .accessibilityIdentifier("taskDescription-\(t.id)")
+            }
+            Text(t.fullText).font(HerdrFont.code).foregroundStyle(c.text).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10).padding(.vertical, 8)
+                .background(c.mantle)
+                .accessibilityIdentifier("taskDetail-\(t.id)")
+                .maskedInReports()
+        }
+        .padding(.leading, 40).padding(.trailing, 16).padding(.bottom, 12)
     }
 
     private func row(_ t: BgTask, now: Int) -> some View {
