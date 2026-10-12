@@ -325,8 +325,8 @@ func TestInitialSnapshotIncludesWorkspacesAndTabs(t *testing.T) {
 	defer c.Close(websocket.StatusNormalClosure, "")
 
 	welcome := readUntil(t, ctx, c, "welcome")
-	if welcome["companionProtocol"].(float64) != 12 {
-		t.Fatalf("want companionProtocol 11, got %v", welcome["companionProtocol"])
+	if welcome["companionProtocol"].(float64) != 13 {
+		t.Fatalf("want companionProtocol 13, got %v", welcome["companionProtocol"])
 	}
 	ws := readUntil(t, ctx, c, "workspaces")
 	arr := ws["workspaces"].([]any)

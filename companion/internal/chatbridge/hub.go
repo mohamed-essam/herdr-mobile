@@ -71,6 +71,9 @@ type Snapshot struct {
 	// Commands is the session's slash commands (main snapshots only); nil
 	// when the mod sent no list.
 	Commands json.RawMessage
+	// Agent names the plugin behind the session (main snapshots only), from
+	// hello.agent; "" means claude.
+	Agent string
 }
 
 // Update is one change fanned out to a pane's subscribers. Main-stream
@@ -203,6 +206,9 @@ type pane struct {
 	// commands is the session's latest slash-command list (nil = none). It
 	// belongs to the pane: a new epoch keeps it.
 	commands json.RawMessage
+
+	// agent is the plugin name from the latest hello ("" = claude).
+	agent string
 }
 
 type Hub struct {
@@ -338,6 +344,10 @@ func (p *pane) apply(paneID, sessionID string, raw json.RawMessage, now time.Tim
 			p.dropStaging() // the old session's unfinished snapshots
 		}
 		p.sessionID = sessionID
+		p.agent = ""
+		if len(head.Agent) > 0 {
+			_ = json.Unmarshal(head.Agent, &p.agent) // non-string: stays ""
+		}
 		return true
 	case head.AgentID != "" && (head.Type == "snapshot_begin" || head.Type == "snapshot_chunk" || head.Type == "snapshot_end"):
 		p.applyThreadSnapshot(paneID, head.Type, head.AgentID, head.Events, now)
@@ -579,7 +589,7 @@ func (p *pane) snapshot(paneID string) Snapshot {
 	start := max(0, len(p.events)-SnapshotTail)
 	ev := make([]Entry, len(p.events)-start)
 	copy(ev, p.events[start:])
-	return Snapshot{PaneID: paneID, Epoch: p.epoch, State: p.state, Events: ev, HasMore: start > 0, Agents: p.agentList(), Tasks: p.tasks, Commands: p.commands}
+	return Snapshot{PaneID: paneID, Epoch: p.epoch, State: p.state, Events: ev, HasMore: start > 0, Agents: p.agentList(), Tasks: p.tasks, Commands: p.commands, Agent: p.agent}
 }
 
 // fan delivers u to every main-stream subscriber without blocking.
