@@ -68,6 +68,13 @@ def question_notice(request_id: str, prompt: str, ts: int) -> dict:
     )
 
 
+def command_output(uuid: str, command: str, text: str, ts: int, is_error: bool = False) -> dict:
+    ev = {"type": "command_output", "uuid": uuid, "command": command, "text": cap(text), "ts": ts}
+    if is_error:
+        ev["isError"] = True
+    return ev
+
+
 def hello(session_id: str, cwd: str) -> dict:
     return {"type": "hello", "sessionId": session_id, "cwd": cwd, "agent": "hermes"}
 

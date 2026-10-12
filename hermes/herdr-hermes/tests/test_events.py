@@ -102,5 +102,21 @@ def test_hello_and_state():
     assert state(False) == {"type": "state", "state": "idle"}
 
 
+def test_command_output():
+    assert events.command_output("cmd-m1", "/foo a", "done", 10) == {
+        "type": "command_output",
+        "uuid": "cmd-m1",
+        "command": "/foo a",
+        "text": "done",
+        "ts": 10,
+    }
+
+
+def test_command_output_error_and_capped():
+    ev = events.command_output("cmd-m1", "/foo", "a" * 70000, 10, is_error=True)
+    assert ev["isError"] is True
+    assert ev["text"].endswith("…[truncated]")
+
+
 def test_constants():
     assert (events.MAX_TEXT, events.PREVIEW, events.SUMMARY) == (65536, 400, 120)
