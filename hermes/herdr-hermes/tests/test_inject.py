@@ -179,6 +179,57 @@ def test_async_command_handler():
     assert "isError" not in pushed[0]
 
 
+def test_command_exiting_keeps_worker_alive():
+    import sys
+
+    def handler(raw):
+        sys.exit(3)
+
+    ctx = FakeCtx(commands={"foo": cmd(handler)})
+    inj, pushed = make(ctx)
+    inj.submit("m1", "/foo")
+    inj.submit("m2", "after")
+    inj.run_pending()
+    assert pushed[0]["uuid"] == "cmd-m1" and pushed[0]["isError"] is True
+    assert pushed[0]["text"] == "3"
+    assert ctx.injected == [("after", "user", "sk-1")]
+
+
+def test_async_command_cancelled_keeps_worker_alive():
+    import asyncio
+
+    async def handler(raw):
+        raise asyncio.CancelledError()
+
+    ctx = FakeCtx(commands={"foo": cmd(handler)})
+    inj, pushed = make(ctx)
+    inj.submit("m1", "/foo")
+    inj.submit("m2", "after")
+    inj.run_pending()
+    assert pushed[0]["uuid"] == "cmd-m1" and pushed[0]["isError"] is True
+    assert pushed[0]["text"] == "CancelledError"
+    assert ctx.injected == [("after", "user", "sk-1")]
+
+
+def test_worker_thread_survives_system_exit():
+    import sys
+
+    def handler(raw):
+        sys.exit()
+
+    ctx = FakeCtx(commands={"foo": cmd(handler)})
+    pushed = []
+    inj = Injector(ctx, pushed.append, lambda: None, clock=Clock())
+    try:
+        inj.submit("m1", "/foo")
+        inj.submit("m2", "after")
+    finally:
+        inj.close()
+    assert pushed[0]["isError"] is True and pushed[0]["text"] == "SystemExit"
+    assert ctx.injected == [("after", "user", None)]
+    assert not any(t.name == "herdr-hermes-inject" for t in threading.enumerate())
+
+
 def test_command_names_read_from_registry():
     ctx = FakeCtx(commands={"foo": cmd(lambda a: None)})
     inj, _ = make(ctx)

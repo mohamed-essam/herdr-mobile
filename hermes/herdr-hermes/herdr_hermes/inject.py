@@ -148,7 +148,10 @@ class Injector:
                 self._run_command(msg_id, slash[0], slash[1], reg[slash[0]])
             else:
                 self._inject(msg_id, text)
-        except Exception:
+        # BaseException: a handler's SystemExit or CancelledError must not end
+        # the worker, or every later phone message would stall unseen. The
+        # worker is a daemon thread, so not re-raising never blocks exit.
+        except BaseException:
             logger.exception("herdr-hermes: phone message %s failed", msg_id)
 
     def _ts(self) -> int:
@@ -160,7 +163,7 @@ class Injector:
         try:
             handler = entry["handler"]
             result = _resolve(handler(args))
-        except Exception as exc:
+        except BaseException as exc:  # SystemExit, CancelledError too (see _handle)
             self._push(events.command_output(uuid, command, _error_text(exc), self._ts(), is_error=True))
             return
         text = "" if result is None else str(result)
