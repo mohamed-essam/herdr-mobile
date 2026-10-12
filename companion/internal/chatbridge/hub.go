@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/limits"
 )
 
 const (
@@ -66,11 +68,15 @@ type Snapshot struct {
 	Missing bool
 	Agents  []json.RawMessage
 	Tasks   json.RawMessage
+	// Commands is the session's slash commands (main snapshots only); nil
+	// when the mod sent no list.
+	Commands json.RawMessage
 }
 
 // Update is one change fanned out to a pane's subscribers. Main-stream
 // subscribers get "event" | "state" | "snapshot" | "agent" (Agent is the
-// merged summary) | "agent_removed" | "tasks" (Tasks is the list); a
+// merged summary) | "agent_removed" | "tasks" (Tasks is the list) |
+// "commands" (Commands is the list); a
 // thread's subscribers get only its "event" and "snapshot". AgentID names
 // the thread or agent concerned.
 type Update struct {
@@ -82,6 +88,7 @@ type Update struct {
 	Snapshot Snapshot
 	Agent    json.RawMessage
 	Tasks    json.RawMessage
+	Commands json.RawMessage
 }
 
 type OutMsg struct {
@@ -112,21 +119,41 @@ type Ask struct {
 	Questions json.RawMessage `json:"questions"`
 }
 
+// Context is a session's context-window fill as the mod reports it.
+type Context struct {
+	Percent int `json:"percent"`
+	Tokens  int `json:"tokens,omitempty"`
+	Window  int `json:"window"`
+}
+
+// Usage is a /sync body's `usage`: the session's context fill (nil before
+// its first response) and the account's rate-limit windows.
+type Usage struct {
+	Context *Context        `json:"context"`
+	Limits  []limits.Window `json:"limits"`
+	// LimitsAt is when the mod measured Limits (epoch ms; 0 from an older mod).
+	LimitsAt int64 `json:"limitsAt"`
+}
+
 // Summary is what the dashboard shows for a pane: its latest activity,
-// newest pending question and number of running background tasks. All are
-// zero while the pane's mod is not live.
+// newest pending question, number of running background tasks and context
+// fill. All are zero while the pane's mod is not live.
 type Summary struct {
 	Activity  *Activity
 	Ask       *Ask
 	BgRunning int
+	Context   *Context
 }
 
-func (s Summary) empty() bool { return s.Activity == nil && s.Ask == nil && s.BgRunning == 0 }
+func (s Summary) empty() bool {
+	return s.Activity == nil && s.Ask == nil && s.BgRunning == 0 && s.Context == nil
+}
 
 func sameSummary(a, b Summary) bool {
 	actEq := a.Activity == b.Activity || (a.Activity != nil && b.Activity != nil && *a.Activity == *b.Activity)
 	askEq := a.Ask == b.Ask || (a.Ask != nil && b.Ask != nil && a.Ask.ToolUseID == b.Ask.ToolUseID && bytes.Equal(a.Ask.Questions, b.Ask.Questions))
-	return actEq && askEq && a.BgRunning == b.BgRunning
+	ctxEq := a.Context == b.Context || (a.Context != nil && b.Context != nil && *a.Context == *b.Context)
+	return actEq && askEq && ctxEq && a.BgRunning == b.BgRunning
 }
 
 // question is a pending AskUserQuestion, keyed by its toolUseId. order ranks
@@ -159,6 +186,8 @@ type pane struct {
 	qorder     int
 	// activity is the latest activity-bearing chat event's summary.
 	activity *Activity
+	// context is the session's latest context fill (Usage.Context).
+	context *Context
 	// answered is closed (and cleared) when an answer is stored or the pane
 	// is dropped, waking every WaitAnswer on the pane.
 	answered chan struct{}
@@ -170,6 +199,10 @@ type pane struct {
 	agents    map[string]json.RawMessage
 	tasks     json.RawMessage
 	bgRunning int
+
+	// commands is the session's latest slash-command list (nil = none). It
+	// belongs to the pane: a new epoch keeps it.
+	commands json.RawMessage
 }
 
 type Hub struct {
@@ -178,6 +211,7 @@ type Hub struct {
 	now        func() time.Time
 	onLiveness func(paneID string, live bool)
 	onSummary  func(paneID string, s Summary)
+	onLimits   func([]limits.Window, int64)
 	nextSub    int
 	nextMsg    int
 	answerWait time.Duration // the /answer hold; tests shorten it
@@ -194,7 +228,7 @@ func NewHub(now func() time.Time) *Hub {
 	if now == nil {
 		now = time.Now
 	}
-	return &Hub{panes: map[string]*pane{}, now: now, onLiveness: func(string, bool) {}, onSummary: func(string, Summary) {},
+	return &Hub{panes: map[string]*pane{}, now: now, onLiveness: func(string, bool) {}, onSummary: func(string, Summary) {}, onLimits: func([]limits.Window, int64) {},
 		notified: map[string]bool{}, summaries: map[string]Summary{}, answerWait: AnswerWait}
 }
 
@@ -269,7 +303,7 @@ func (h *Hub) SyncBody(paneID, sessionID string, events []json.RawMessage, image
 
 func isChatEvent(t string) bool {
 	switch t {
-	case "user_text", "assistant_text", "tool_use", "tool_result", "task_notice", "question":
+	case "user_text", "assistant_text", "tool_use", "tool_result", "task_notice", "question", "command_output":
 		return true
 	}
 	return false
@@ -287,6 +321,7 @@ func (p *pane) apply(paneID, sessionID string, raw json.RawMessage, now time.Tim
 		AgentID   string            `json:"agentId"`
 		Agent     json.RawMessage   `json:"agent"`
 		Tasks     json.RawMessage   `json:"tasks"`
+		Commands  json.RawMessage   `json:"commands"`
 	}
 	if json.Unmarshal(raw, &head) != nil {
 		return false
@@ -310,6 +345,8 @@ func (p *pane) apply(paneID, sessionID string, raw json.RawMessage, now time.Tim
 		p.applyAgent(head.Agent)
 	case head.Type == "tasks":
 		p.applyTasks(head.Tasks)
+	case head.Type == "commands":
+		p.applyCommands(head.Commands)
 	case isChatEvent(head.Type) && head.AgentID != "":
 		p.applyThreadEvent(head.AgentID, head.Type, raw, now)
 	case head.Type == "snapshot" && head.AgentID != "":
@@ -388,6 +425,7 @@ func activityOf(typ string, raw json.RawMessage, now time.Time) *Activity {
 		Tool      string  `json:"tool"`
 		Summary   string  `json:"summary"`
 		Text      string  `json:"text"`
+		Command   string  `json:"command"`
 		TS        float64 `json:"ts"`
 		Questions []struct {
 			Question string `json:"question"`
@@ -409,6 +447,8 @@ func activityOf(typ string, raw json.RawMessage, now time.Time) *Activity {
 		a.Kind, a.Text = "user", oneLine(ev.Text)
 	case "task_notice":
 		a.Kind, a.Text = "notice", oneLine(ev.Summary)
+	case "command_output":
+		a.Kind, a.Text = "user", oneLine(ev.Command)
 	case "question":
 		a.Kind = "question"
 		if len(ev.Questions) > 0 {
@@ -442,7 +482,7 @@ func (p *pane) summary(now time.Time) Summary {
 	if p == nil || !p.live {
 		return Summary{}
 	}
-	s := Summary{Activity: p.activity, BgRunning: p.bgRunning}
+	s := Summary{Activity: p.activity, BgRunning: p.bgRunning, Context: p.context}
 	var best *question
 	for id, q := range p.questions {
 		if q.answer != nil || now.Sub(q.added) >= QuestionTTL || (best != nil && q.order < best.order) {
@@ -539,7 +579,7 @@ func (p *pane) snapshot(paneID string) Snapshot {
 	start := max(0, len(p.events)-SnapshotTail)
 	ev := make([]Entry, len(p.events)-start)
 	copy(ev, p.events[start:])
-	return Snapshot{PaneID: paneID, Epoch: p.epoch, State: p.state, Events: ev, HasMore: start > 0, Agents: p.agentList(), Tasks: p.tasks}
+	return Snapshot{PaneID: paneID, Epoch: p.epoch, State: p.state, Events: ev, HasMore: start > 0, Agents: p.agentList(), Tasks: p.tasks, Commands: p.commands}
 }
 
 // fan delivers u to every main-stream subscriber without blocking.
@@ -834,5 +874,25 @@ func (h *Hub) notify(paneID string) {
 			h.summaries[paneID] = sum
 		}
 		h.onSummary(paneID, sum)
+	}
+}
+
+// SetOnLimits registers the callback for a /sync's rate-limit windows and
+// their measurement time (Usage.LimitsAt). It is called without the hub's
+// lock held, once per /sync that carries any. Set it before the hub is used.
+func (h *Hub) SetOnLimits(fn func([]limits.Window, int64)) { h.onLimits = fn }
+
+// SetUsage records a /sync body's usage, ahead of SyncBody (whose summary
+// delivery then carries the context). nil (an older mod) changes nothing;
+// a usage without context clears the pane's.
+func (h *Hub) SetUsage(paneID string, u *Usage) {
+	if u == nil {
+		return
+	}
+	h.mu.Lock()
+	h.get(paneID).context = u.Context
+	h.mu.Unlock()
+	if len(u.Limits) > 0 {
+		h.onLimits(u.Limits, u.LimitsAt)
 	}
 }

@@ -32,6 +32,8 @@ fun ThreadScreen(
     val c = Herdr.colors
     val view by remember(pane.paneId, agentId) { vm.chatView(pane.paneId, agentId) }.collectAsState()
     val connected by vm.connected.collectAsState()
+    val limits by vm.limits.collectAsState()
+    val now = rememberNow()
     val repoTree by vm.repoTree.collectAsState()
     val listState = rememberSaveable(agentId, saver = LazyListState.Saver) { LazyListState() }
 
@@ -62,6 +64,7 @@ fun ThreadScreen(
             onBack = onBack,
             toggleLabel = null,
             onToggle = {},
+            usage = pane.context, limits = limits, now = now,
         )
         if (view.missing) {
             Column(

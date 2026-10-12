@@ -1,8 +1,10 @@
 import type { EngineInterface, Register } from 'claude-code'
 import { agentControls, forgetWorkflow, linkFromMeta, linkJournal, linkSpawn, newAgentsState, recordWorkflow, referencedImages, releaseHeld, resetAgents, routeAgentEvents, setStatus, settleUnlisted, type AgentControl, type AgentsState, type Workflow } from './agents'
 import { listStatus, newestAgents, parseListing, resyncTasks, THREAD_EVENTS, type AgentFile } from './resync'
-import { expireTasks, noticeStatus, taskFromLaunch, taskFromNotice, tasksControl, type TasksControl, type TasksState } from './tasks'
-import { normalizeBlocks, normalizeSnapshot, shouldForward, utf8Bytes, type ChatEvent, type ChatImage, type Normalized } from './normalize'
+import { expireTasks, noticeStatus, taskFromLaunch, taskFromNotice, taskFromStop, tasksControl, type TasksControl, type TasksState } from './tasks'
+import { cap, normalizeBlocks, normalizeSnapshot, shouldForward, taskNotices, utf8Bytes, type ChatEvent, type ChatImage, type Normalized } from './normalize'
+import { toUsage, type Usage } from './usage'
+import { parseSlash, toCommands, type SlashCommand } from './commands'
 import { addTranscriptLine, finishTranscriptHistory, HISTORY_IMAGES, newTranscriptHistory, splitPiece, type FinishedHistory, type TranscriptOpts } from './transcript'
 
 // History goes out as begin (`total`: its event count), chunks, end; an
@@ -19,6 +21,8 @@ type Control =
   | AgentControl
   // The background tasks as they stand (the newest replaces any earlier one).
   | TasksControl
+  // The session's slash commands (the newest replaces any earlier one).
+  | { type: 'commands'; commands: SlashCommand[] }
 type Outgoing = ChatEvent | Control
 
 // A chunk's events serialize to at most CHUNK_BYTES; a /sync body, images
@@ -88,6 +92,17 @@ export type State = {
   // `threadsMissed` asks for a resync once it says so.
   threads: boolean
   threadsMissed: boolean
+  // The latest status-line figures (session.measure, seeded by
+  // $.session.usage() at each resync); sent on every /sync while set.
+  usage: Usage | null
+  // Bumped by every session.measure and /clear or /resume reset: a seed
+  // whose read spans a bump is stale and is dropped.
+  usageGen: number
+  // The slash commands as last listed (null before the first listing, or on
+  // an engine without the op), re-listed every COMMANDS_MS; `commandsAt`
+  // when that last listing ran (clock ms).
+  commands: SlashCommand[] | null
+  commandsAt: number
 }
 
 export type QueuedImage = { id: string; img: ChatImage; bytes: number }
@@ -97,6 +112,8 @@ function queued(id: string, img: ChatImage): QueuedImage {
 }
 
 const SYNC_MS = 1000
+// Commands come and go with plugin reloads; re-listed this often.
+const COMMANDS_MS = 30_000
 
 function isV2(ev: Outgoing): boolean {
   return ev.type === 'agent' || ev.type === 'tasks' || ('agentId' in ev && ev.agentId !== undefined)
@@ -282,7 +299,24 @@ function resync($: EngineInterface, s: State) {
   }
   s.needResync = false
   s.building = true
+  void seedUsage($, s)
   void buildHistory($, s)
+}
+
+// Reads the status line's figures once; a session.measure or reset that
+// landed meanwhile wins. An engine without the op leaves usage unset. The
+// seed has no stamp of its own: the held one, else the session's start (a
+// lower bound on the reading's age).
+async function seedUsage($: EngineInterface, s: State) {
+  const gen = s.usageGen
+  try {
+    const raw = await $.session.usage()
+    const u = toUsage(raw)
+    if (s.usageGen !== gen || !u) return
+    s.usage = { ...u, limitsAt: s.usage?.limitsAt ?? raw.startedAt }
+  } catch {
+    // the next session.measure fills it
+  }
 }
 
 // Reads the session fresh (the transcript read can take several ticks) and
@@ -297,6 +331,7 @@ async function buildHistory($: EngineInterface, s: State) {
     const head: Outgoing[] = [{ type: 'hello', sessionId, cwd: s.cwd }, ...snapshot(events)]
     if (s.lastState) head.push({ type: 'state', state: s.lastState })
     head.push(...s.openQuestions.values())
+    if (s.commands) head.push({ type: 'commands', commands: s.commands })
     // The agents and their threads, from the session's files beside the
     // transcript (only a history read from one has them). Never fails the
     // main snapshot.
@@ -325,7 +360,7 @@ async function buildHistory($: EngineInterface, s: State) {
     // A question queued during the build is in both: send it once, here; the
     // same for a tasks control.
     // A row for an agent whose thread snapshot is now queued goes after it.
-    const queued = s.pending.filter(ev => !(ev.type === 'tasks' && s.threads && sendTasks) && !(ev.type === 'question' && s.openQuestions.has(ev.toolUseId)))
+    const queued = s.pending.filter(ev => !(ev.type === 'tasks' && s.threads && sendTasks) && !(ev.type === 'question' && s.openQuestions.has(ev.toolUseId)) && ev.type !== 'commands')
     s.pending = head
     placeRows(s, queued)
     // Thread images get what room the history's own leave (see historyImages).
@@ -471,7 +506,7 @@ function newestReferenced(events: readonly ChatEvent[], images: Record<string, C
 // has room (the first one goes even alone in a body too small for it, but
 // only in a body that is otherwise empty).
 function takeBody(s: State): { events: Outgoing[]; images: Record<string, ChatImage> } {
-  let bytes = utf8Bytes(JSON.stringify({ paneId: s.paneId, sessionId: s.sessionId, events: [], images: {} }))
+  let bytes = utf8Bytes(JSON.stringify({ paneId: s.paneId, sessionId: s.sessionId, events: [], images: {}, ...(s.usage ? { usage: s.usage } : {}) }))
   let n = 0
   let chunks = 0
   for (; n < s.pending.length; n++) {
@@ -544,6 +579,40 @@ export async function linkWorkflowAgents($: EngineInterface, s: State) {
   if (queueV2(s, [...controls, ...released])) queueImages(s, released, images)
 }
 
+// Lists the session's commands once COMMANDS_MS has passed since the last
+// listing, queueing the list when it changed. An engine without the op (or a
+// failed listing) leaves what was listed.
+async function refreshCommands($: EngineInterface, s: State) {
+  const now = await $.clock.now()
+  if (s.commandsAt && now - s.commandsAt < COMMANDS_MS) return
+  s.commandsAt = now
+  let list: SlashCommand[]
+  try {
+    list = toCommands(await $.command.list())
+  } catch {
+    return
+  }
+  if (s.commands && JSON.stringify(s.commands) === JSON.stringify(list)) return
+  s.commands = list
+  s.pending = s.pending.filter(ev => ev.type !== 'commands')
+  s.pending.push({ type: 'commands', commands: list })
+}
+
+// Runs a phone message naming a command as that command. The engine records
+// the command itself as a user row (the chat's echo); what it printed, if
+// anything, goes into the chat after it, and so does the reason the engine
+// refused a run (the command went away meanwhile).
+async function runCommand($: EngineInterface, s: State, m: { id: string; text: string }, slash: { command: string; args: string }) {
+  const command = slash.args ? `/${slash.command} ${slash.args}` : `/${slash.command}`
+  const row = { type: 'command_output' as const, uuid: `cmd-${m.id}`, command }
+  try {
+    const text = (await $.command.run({ command: slash.command, args: slash.args })).text ?? ''
+    if (text.trim()) s.pending.push({ ...row, text: cap(text), ts: Date.now() })
+  } catch (err) {
+    s.pending.push({ ...row, text: cap(err instanceof Error ? err.message : String(err)), isError: true, ts: Date.now() })
+  }
+}
+
 async function tick($: EngineInterface, s: State) {
   if (s.inFlight || !s.paneId) return
   s.inFlight = true
@@ -554,6 +623,7 @@ async function tick($: EngineInterface, s: State) {
     const held = s.offline || s.building
     if (!held && s.agents.held.size) await linkWorkflowAgents($, s)
     if (expireTasks(s.tasks, Date.now())) queueTasks(s)
+    if (!held) await refreshCommands($, s)
     const { events, images } = held ? { events: [], images: {} } : takeBody(s)
     const res = await $.http.fetch('http://chat/sync', {
       method: 'POST',
@@ -564,6 +634,7 @@ async function tick($: EngineInterface, s: State) {
         sessionId: s.sessionId,
         events,
         ...(Object.keys(images).length ? { images } : {}),
+        ...(s.usage ? { usage: s.usage } : {}),
       }),
     })
     if (!res.ok) throw new Error(`sync ${res.status}`)
@@ -595,10 +666,14 @@ async function tick($: EngineInterface, s: State) {
     // history was being built is expected to get this answer; its hello is
     // already on the way.
     if (again === true && !held) s.needResync = true
+    const names = new Set((s.commands ?? []).map(c => c.name))
     for (const m of messages) {
       // Not awaited: submit resolves only when Claude goes idle, and this
       // loop is the heartbeat that keeps the pane chat-capable meanwhile.
-      s.submitChain = s.submitChain.then(() => $.prompt.submit({ text: m.text, asUser: true })).catch(() => {})
+      const slash = parseSlash(m.text, names)
+      s.submitChain = s.submitChain
+        .then((): Promise<unknown> => (slash ? runCommand($, s, m, slash) : $.prompt.submit({ text: m.text, asUser: true })))
+        .catch(() => {})
     }
   } catch {
     s.offline = true
@@ -691,9 +766,16 @@ type Appended = {
 // rewritten) content over the incoming one. Exported so tests can drive it
 // directly: the test kit cannot answer session.append end-to-end.
 export function queueAppended(s: State, e: Appended, stored: { content?: unknown } | undefined): void {
-  if (!s.paneId || !shouldForward(e)) return
+  if (!s.paneId) return
+  // A main-loop task notice ends its task whichever row carries it: one
+  // delivered mid-turn comes as a queued_command row (door `delivery`) inside
+  // a reminder, which normalizeBlocks strips.
+  const notices = e.agentId ? [] : taskNotices(stored?.content ?? e.message.content)
   const role = e.message.role
-  if (role !== 'user' && role !== 'assistant') return
+  if (!shouldForward(e) || (role !== 'user' && role !== 'assistant')) {
+    endTasks(s, notices)
+    return
+  }
   const n = normalizeBlocks(role, stored?.content ?? e.message.content, e.uuid, Date.now())
   if (e.agentId) {
     // Its row: the agent is running (again), and its control goes first.
@@ -704,19 +786,25 @@ export function queueAppended(s: State, e: Appended, stored: { content?: unknown
   } else {
     s.pending.push(...n.events)
     queueImages(s, n.events, n.images)
-    let changed = false
-    for (const ev of n.events) {
-      if (ev.type !== 'task_notice') continue
-      const now = Date.now()
-      changed = taskFromNotice(s.tasks, ev, now) || changed
-      // A workflow's notice ends its journal reads.
-      forgetWorkflow(s.agents, ev.toolUseId ?? (ev.taskId ? s.tasks.get(ev.taskId)?.toolUseId : undefined) ?? '')
-      // A subagent's notice ends that agent too, when its task id is a linked one.
-      const ended = ev.taskId ? setStatus(s.agents, ev.taskId, noticeStatus(ev.status), now) : null
-      if (ended) queueV2(s, [ended])
-    }
-    if (changed) queueTasks(s)
+    endTasks(s, notices)
   }
+}
+
+// Main-loop task notices end their tasks (and a subagent's, its agent). One
+// without a status is a monitor's event: nothing has ended.
+function endTasks(s: State, notices: readonly { taskId?: string; toolUseId?: string; status: string; summary: string }[]) {
+  let changed = false
+  for (const ev of notices) {
+    if (!ev.status) continue
+    const now = Date.now()
+    changed = taskFromNotice(s.tasks, ev, now) || changed
+    // A workflow's notice ends its journal reads.
+    forgetWorkflow(s.agents, ev.toolUseId ?? (ev.taskId ? s.tasks.get(ev.taskId)?.toolUseId : undefined) ?? '')
+    // A subagent's notice ends that agent too, when its task id is a linked one.
+    const ended = ev.taskId ? setStatus(s.agents, ev.taskId, noticeStatus(ev.status), now) : null
+    if (ended) queueV2(s, [ended])
+  }
+  if (changed) queueTasks(s)
 }
 
 export const register: Register = on => {
@@ -743,6 +831,10 @@ export const register: Register = on => {
     threadQueue: [],
     threads: false,
     threadsMissed: false,
+    usage: null,
+    usageGen: 0,
+    commands: null,
+    commandsAt: 0,
   }
 
   // Only remembers the path; the read happens at the next resync.
@@ -795,6 +887,10 @@ export const register: Register = on => {
       s.pending = []
       s.imageQueue = []
       s.threadQueue = []
+      // The old session's context goes (a usage without one clears it in
+      // the companion); the account's limits stay.
+      s.usage = s.usage ? { limits: s.usage.limits, limitsAt: s.usage.limitsAt } : null
+      s.usageGen++
       s.needResync = true
       // The new session's transcript is found by its new id at the resync, or
       // named by its own classic event (whose arrival upgrades an api-form
@@ -811,6 +907,14 @@ export const register: Register = on => {
     const r = await next(e)
     queueAppended(s, e, r.message)
     return r
+  })
+
+  on('session.measure', async ($, e, next) => {
+    // Every measure follows an API response: its limits are measured now.
+    const u = toUsage(e)
+    s.usage = u ? { ...u, limitsAt: await $.clock.now() } : null
+    s.usageGen++
+    return next(e)
   })
 
   // The terminal dialog races the phone: the question rides the next sync and
@@ -868,6 +972,12 @@ export const register: Register = on => {
   on('tool.call', { tool: 'Monitor' }, async ($, e, next) => {
     const r = await next(e)
     if (s.paneId && !e.agentId && 'result' in r && taskFromLaunch(s.tasks, 'Monitor', e.tool_use_id, e, r.result, Date.now())) queueTasks(s)
+    return r
+  })
+  // A stopped task often gets no notice: the stop's own result ends it.
+  on('tool.call', { tool: 'TaskStop' }, async ($, e, next) => {
+    const r = await next(e)
+    if (s.paneId && !e.agentId && 'result' in r && taskFromStop(s.tasks, r.result, Date.now())) queueTasks(s)
     return r
   })
 

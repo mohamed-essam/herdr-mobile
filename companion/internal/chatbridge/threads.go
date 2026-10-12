@@ -350,3 +350,18 @@ func (p *pane) agentList() []json.RawMessage {
 	}
 	return out
 }
+
+// applyCommands stores the session's slash-command list; an identical or
+// non-array one is ignored.
+func (p *pane) applyCommands(cmds json.RawMessage) {
+	var list []json.RawMessage
+	if json.Unmarshal(cmds, &list) != nil || list == nil {
+		return
+	}
+	var buf bytes.Buffer
+	if json.Compact(&buf, cmds) != nil || bytes.Equal(p.commands, buf.Bytes()) {
+		return
+	}
+	p.commands = buf.Bytes()
+	p.fan(Update{Kind: "commands", Epoch: p.epoch, Commands: p.commands})
+}

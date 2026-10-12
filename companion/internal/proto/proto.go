@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/chatbridge"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/limits"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
 )
 
@@ -53,7 +54,7 @@ func ParseClient(b []byte) (ClientMsg, error) {
 func must(v any) []byte { b, _ := json.Marshal(v); return b }
 
 func Welcome(version string, protocol int) []byte {
-	return must(map[string]any{"t": "welcome", "herdrVersion": version, "herdrProtocol": protocol, "companionProtocol": 10})
+	return must(map[string]any{"t": "welcome", "herdrVersion": version, "herdrProtocol": protocol, "companionProtocol": 12})
 }
 func PanesSnapshot(p []state.Pane) []byte {
 	return must(map[string]any{"t": "panes", "panes": p})
@@ -154,6 +155,9 @@ func ChatSnapshot(s chatbridge.Snapshot) []byte {
 			tasks = json.RawMessage(`[]`)
 		}
 		m["tasks"] = tasks
+		if s.Commands != nil {
+			m["commands"] = s.Commands
+		}
 	}
 	return must(m)
 }
@@ -179,6 +183,11 @@ func ChatAgentRemoved(paneID, agentID string) []byte {
 // ChatTasks carries the pane's whole background-task list.
 func ChatTasks(paneID string, tasks json.RawMessage) []byte {
 	return must(map[string]any{"t": "chat_tasks", "paneId": paneID, "tasks": tasks})
+}
+
+// ChatCommands carries the pane's whole slash-command list.
+func ChatCommands(paneID string, commands json.RawMessage) []byte {
+	return must(map[string]any{"t": "chat_commands", "paneId": paneID, "commands": commands})
 }
 
 func ChatState(paneID, st string) []byte {
@@ -224,4 +233,10 @@ func ChatAnswerResult(reqID string, ok bool, errCode string) []byte {
 		m["error"] = errCode
 	}
 	return must(m)
+}
+
+// Limits is the account's rate-limit reading (5h/7d windows) and when a mod
+// last reported it.
+func Limits(l limits.Limits) []byte {
+	return must(map[string]any{"t": "limits", "limits": l.Windows, "observedAt": l.ObservedAt})
 }

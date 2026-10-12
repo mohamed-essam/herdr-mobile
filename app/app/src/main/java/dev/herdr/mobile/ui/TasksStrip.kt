@@ -3,6 +3,7 @@ package dev.herdr.mobile.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -61,6 +62,9 @@ fun taskGlyph(kind: String): String = when (kind) {
 /** The dashboard chip: how many background tasks the pane has running; null when none. */
 fun bgBadge(p: Pane): String? = if (p.bgRunning > 0) "⟳ ${p.bgRunning}" else null
 
+/** The task's whole text: the full command when the mod sent it, else its label. */
+fun taskFullText(t: BgTask): String = t.detail ?: t.label
+
 /** Subagent and workflow tasks have a card in the chat to jump to. */
 private fun BgTask.hasCard() = kind == "subagent" || kind == "workflow"
 
@@ -83,8 +87,9 @@ fun TasksStrip(tasks: List<BgTask>, onClick: () -> Unit) {
 
 /**
  * The tasks as rows: glyph, label, status and duration. The duration ticks
- * every second only while the sheet is shown and a task is running. Subagent
- * and workflow rows are tappable; shell and monitor rows aren't.
+ * every second only while the sheet is shown and a task is running. A subagent
+ * or workflow row jumps to its card; a shell or monitor row expands to show
+ * its description and whole command.
  */
 @Composable
 fun TasksSheet(tasks: List<BgTask>, now: Long, onPick: (BgTask) -> Unit, onDismiss: () -> Unit) {
@@ -94,6 +99,7 @@ fun TasksSheet(tasks: List<BgTask>, now: Long, onPick: (BgTask) -> Unit, onDismi
         value = System.currentTimeMillis()
         while (anyRunning) { delay(1_000); value = System.currentTimeMillis() }
     }
+    var expanded by remember { mutableStateOf(emptySet<String>()) }
     HerdrSheet(onDismiss) {
         Text("Background tasks", style = HerdrType.title, color = c.text, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
         ListCard {
@@ -104,22 +110,35 @@ fun TasksSheet(tasks: List<BgTask>, now: Long, onPick: (BgTask) -> Unit, onDismi
                     "done" -> c.green
                     else -> c.red
                 }
-                Row(
+                val open = t.id in expanded
+                Column(
                     Modifier.fillMaxWidth()
-                        .then(if (t.hasCard()) Modifier.clickable { onPick(t) } else Modifier)
+                        .clickable { if (t.hasCard()) onPick(t) else expanded = if (open) expanded - t.id else expanded + t.id }
                         .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(taskGlyph(t.kind), style = HerdrType.title, color = c.overlay2, modifier = Modifier.width(24.dp))
-                    Text(
-                        t.label.ifBlank { t.kind },
-                        style = HerdrType.body, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(t.status, style = HerdrType.meta, color = color)
-                    Spacer(Modifier.width(8.dp))
-                    Text(taskDuration(t, clock), style = HerdrType.meta, color = c.overlay2)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(taskGlyph(t.kind), style = HerdrType.title, color = c.overlay2, modifier = Modifier.width(24.dp))
+                        Text(
+                            t.label.ifBlank { t.kind },
+                            style = HerdrType.body, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(t.status, style = HerdrType.meta, color = color)
+                        Spacer(Modifier.width(8.dp))
+                        Text(taskDuration(t, clock), style = HerdrType.meta, color = c.overlay2)
+                    }
+                    if (open) {
+                        t.description?.let {
+                            Text(it, style = HerdrType.body, color = c.subtext1, modifier = Modifier.padding(start = 24.dp, top = 8.dp))
+                        }
+                        SelectionContainer(Modifier.padding(start = 24.dp, top = 8.dp)) {
+                            Text(
+                                taskFullText(t), style = HerdrType.code, color = c.text,
+                                modifier = Modifier.fillMaxWidth().background(c.mantle).padding(horizontal = 10.dp, vertical = 8.dp),
+                            )
+                        }
+                    }
                 }
             }
         }

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/chatbridge"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/limits"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
 )
 
@@ -78,11 +79,11 @@ func TestTermFrames(t *testing.T) {
 	}
 }
 
-func TestWelcomeAdvertisesProtocol10(t *testing.T) {
+func TestWelcomeAdvertisesProtocol12(t *testing.T) {
 	var got map[string]any
 	json.Unmarshal(Welcome("0.7.1", 14), &got)
-	if got["companionProtocol"].(float64) != 10 {
-		t.Fatalf("want companionProtocol 10, got %v", got["companionProtocol"])
+	if got["companionProtocol"].(float64) != 12 {
+		t.Fatalf("want companionProtocol 12, got %v", got["companionProtocol"])
 	}
 }
 
@@ -244,5 +245,37 @@ func TestParseClientAgentID(t *testing.T) {
 	m, err := ParseClient([]byte(`{"t":"chat_open","paneId":"p","agentId":"aa1"}`))
 	if err != nil || m.AgentID != "aa1" {
 		t.Fatalf("%+v %v", m, err)
+	}
+}
+
+func TestLimitsFrame(t *testing.T) {
+	var got map[string]any
+	_ = json.Unmarshal(Limits(limits.Limits{Windows: []limits.Window{{Kind: "five_hour", PercentUsed: 42, ResetsAt: "2026-10-08T19:40:00Z"}}, ObservedAt: 77}), &got)
+	ws := got["limits"].([]any)
+	if got["t"] != "limits" || got["observedAt"].(float64) != 77 || len(ws) != 1 || ws[0].(map[string]any)["kind"] != "five_hour" {
+		t.Fatalf("frame: %+v", got)
+	}
+}
+
+func TestChatCommandsFrameAndSnapshotField(t *testing.T) {
+	var m map[string]any
+	json.Unmarshal(ChatCommands("p", json.RawMessage(`[{"name":"compact"}]`)), &m)
+	if m["t"] != "chat_commands" || m["paneId"] != "p" || len(m["commands"].([]any)) != 1 {
+		t.Fatalf("chat_commands: %v", m)
+	}
+	m = nil
+	json.Unmarshal(ChatSnapshot(chatbridge.Snapshot{PaneID: "p"}), &m)
+	if _, has := m["commands"]; has {
+		t.Fatalf("no list from the mod: no commands field: %v", m)
+	}
+	m = nil
+	json.Unmarshal(ChatSnapshot(chatbridge.Snapshot{PaneID: "p", Commands: json.RawMessage(`[{"name":"compact"}]`)}), &m)
+	if len(m["commands"].([]any)) != 1 {
+		t.Fatalf("main snapshot commands: %v", m)
+	}
+	m = nil
+	json.Unmarshal(ChatSnapshot(chatbridge.Snapshot{PaneID: "p", AgentID: "aa1", Commands: json.RawMessage(`[{"name":"compact"}]`)}), &m)
+	if _, has := m["commands"]; has {
+		t.Fatalf("thread snapshot has no commands: %v", m)
 	}
 }

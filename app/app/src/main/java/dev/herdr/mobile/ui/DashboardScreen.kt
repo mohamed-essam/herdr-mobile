@@ -61,7 +61,8 @@ private data class AnswerToast(val paneId: String, val label: String)
  * working, then everything else, with the workspace switcher and "+" at the
  * bottom. Opening a pane replaces it with [PaneScreen]. [openRequest] is a pane
  * to open (from a notification), acknowledged with [onOpenRequestHandled].
- * [companionUrl] is shown on the empty state.
+ * [companionUrl] is shown on the empty state. [serverName] is the active
+ * server's chip in the header; tapping it calls [onServers].
  */
 @Composable
 fun DashboardScreen(
@@ -69,6 +70,8 @@ fun DashboardScreen(
     openRequest: String?,
     onOpenRequestHandled: () -> Unit,
     companionUrl: String? = null,
+    serverName: String? = null,
+    onServers: () -> Unit = {},
 ) {
     val panes by vm.panes.collectAsState()
     val connected by vm.connected.collectAsState()
@@ -127,6 +130,7 @@ fun DashboardScreen(
     val tree by vm.tree.collectAsState()
     val lastOpened by vm.lastOpenedPaneId.collectAsState()
     val disconnectedSince by vm.disconnectedSince.collectAsState()
+    val limits by vm.limits.collectAsState()
     val now by produceState(System.currentTimeMillis(), connected) {
         while (true) {
             value = System.currentTimeMillis()
@@ -175,8 +179,8 @@ fun DashboardScreen(
 
     Box(Modifier.fillMaxSize().background(c.crust)) {
         when {
-            panes.isEmpty() && connected -> EmptyState(companionUrl) { vm.createNode(what = "workspace") }
-            panes.isEmpty() -> ConnectingState(companionUrl)
+            panes.isEmpty() && connected -> EmptyState(companionUrl, serverName, onServers) { vm.createNode(what = "workspace") }
+            panes.isEmpty() -> ConnectingState(companionUrl, serverName, onServers)
             else -> {
                 val sections = dashboardSections(panes, answers)
                 val resumed = answers.values.filter { it.phase == AnswerPhase.Sent }
@@ -187,11 +191,16 @@ fun DashboardScreen(
                     Modifier.fillMaxSize().statusBarsPadding(),
                     contentPadding = PaddingValues(bottom = navBottom + 96.dp),
                 ) {
-                    item(key = "top") { TopBar(connected, panes.size) }
+                    item(key = "top") { TopBar(connected, panes.size, serverName, onServers) }
                     if (!connected) item(key = "reconnect") {
                         ReconnectBanner(staleLabel(disconnectedSince ?: now, now))
                     }
                     item(key = "stats") { StatTiles(counts, dim) }
+                    limits?.let { l ->
+                        if (limitsWorthShowing(l, now)) item(key = "limits") {
+                            LimitsStrip(l, now, dim.padding(bottom = 16.dp))
+                        }
+                    }
                     if (sections.needsYou.isNotEmpty() || resumed.isNotEmpty()) {
                         item(key = "h:needs") {
                             SectionHeader("● needs you · ${sections.needsYou.size}", c.red, dim)
@@ -366,12 +375,13 @@ fun DashboardScreen(
 }
 
 @Composable
-private fun TopBar(connected: Boolean, count: Int) {
+private fun TopBar(connected: Boolean, count: Int, serverName: String?, onServers: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp).heightIn(min = 30.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Wordmark()
+        serverName?.let { Spacer(Modifier.width(12.dp)); ServerChip(it, onServers) }
         Spacer(Modifier.weight(1f))
         if (connected) CountPill(if (count == 1) "1 pane" else "$count panes", Herdr.colors.green)
     }
@@ -402,7 +412,7 @@ private fun StatTiles(counts: StatusCounts, modifier: Modifier) {
     val c = Herdr.colors
     val dark = isSystemInDarkTheme()
     Row(
-        modifier.padding(start = 16.dp, end = 16.dp, bottom = 24.dp).fillMaxWidth(),
+        modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp).fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         for ((n, status) in listOf(counts.blocked to "blocked", counts.working to "working", counts.done to "done")) {
@@ -615,6 +625,7 @@ private fun PaneListRow(ctx: PaneContext, ageColor: Color, now: Long, onOpen: (P
                 Text(sub, style = HerdrType.meta, color = c.subtext1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 bgBadge(pane)?.let { BgChip(it) }
             }
+            pane.context?.let { ContextBar(it.percent, Modifier.padding(top = 4.dp)) }
         }
         val age = relativeAge(pane.activity?.ts ?: 0, now)
         if (age.isNotEmpty()) {
@@ -668,10 +679,10 @@ private fun BottomBar(workspaces: List<WorkspaceNode>, fabEnabled: Boolean, onSw
 }
 
 @Composable
-private fun EmptyState(companionUrl: String?, onNew: () -> Unit) {
+private fun EmptyState(companionUrl: String?, serverName: String?, onServers: () -> Unit, onNew: () -> Unit) {
     val c = Herdr.colors
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-        TopBar(connected = true, count = 0)
+        TopBar(connected = true, count = 0, serverName = serverName, onServers = onServers)
         Column(
             Modifier.weight(1f).fillMaxWidth().padding(horizontal = 32.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterVertically),
@@ -710,10 +721,10 @@ private fun EmptyState(companionUrl: String?, onNew: () -> Unit) {
 }
 
 @Composable
-private fun ConnectingState(companionUrl: String?) {
+private fun ConnectingState(companionUrl: String?, serverName: String?, onServers: () -> Unit) {
     val c = Herdr.colors
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-        TopBar(connected = false, count = 0)
+        TopBar(connected = false, count = 0, serverName = serverName, onServers = onServers)
         Column(
             Modifier.weight(1f).fillMaxWidth().padding(horizontal = 32.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),

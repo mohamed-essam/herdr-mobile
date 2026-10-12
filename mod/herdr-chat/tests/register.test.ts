@@ -5,7 +5,7 @@ import { eventsFromTranscript } from '../hooks/transcript'
 import { linkSpawn, newAgentsState, recordWorkflow } from '../hooks/agents'
 import { taskFromLaunch } from '../hooks/tasks'
 
-const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], imageQueue: [], offline: false, inFlight: false, building: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined, historyLacksPath: false, openQuestions: new Map(), agents: newAgentsState(), tasks: new Map(), tasksQueued: false, threadQueue: [], threads: true, threadsMissed: false })
+const state = (paneId: string | undefined): State => ({ paneId, sessionId: '', cwd: '', socketPath: '', pending: [], imageQueue: [], offline: false, inFlight: false, building: false, submitChain: Promise.resolve(), needResync: false, lastState: undefined, timer: undefined, transcriptPath: undefined, historyLacksPath: false, openQuestions: new Map(), agents: newAgentsState(), tasks: new Map(), tasksQueued: false, threadQueue: [], threads: true, threadsMissed: false, usage: null, usageGen: 0, commands: null, commandsAt: 0 })
 
 const MB = 1024 * 1024
 const FETCH_BODY_LIMIT = 4 * MB
@@ -37,7 +37,7 @@ const RESYNC = ['hello', 'snapshot_begin', 'snapshot_chunk', 'snapshot_end']
 
 // Wires the world beneath the plugin: env, clock, session reads, and a fake
 // companion that records each /sync body and answers with queued messages.
-function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boolean; xdg?: string; env?: Record<string, string>; threads?: boolean } = {}) {
+function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boolean; xdg?: string; env?: Record<string, string>; threads?: boolean; usage?: unknown; commands?: { name: string; description: string; source: string }[] } = {}) {
   if (opts.xdg) mock.env(on, { HERDR_PANE_ID: 'w1:p1', XDG_RUNTIME_DIR: opts.xdg })
   else if (opts.nosock) mock.env(on, { HERDR_PANE_ID: 'w1:p1' })
   else mock.env(on, opts.pane === undefined ? { HERDR_PANE_ID: 'w1:p1', HERDR_MOBILE_CHAT_SOCK: '/s/chat.sock', ...opts.env } : opts.pane ? { HERDR_PANE_ID: opts.pane, HERDR_MOBILE_CHAT_SOCK: '/s/chat.sock' } : {})
@@ -128,6 +128,9 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
   on('classic.UserPromptSubmit', () => ({}))
   on('classic.Stop', () => ({}))
   on('session.id', () => ({ value: current.id }))
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  // `usage`: what session.usage answers, or a function giving each answer.
+  if (opts.usage !== undefined) on('session.usage', () => (typeof opts.usage === 'function' ? opts.usage() : { value: opts.usage as never }))
   const counts = { messages: 0 }
   on('session.messages', () => { counts.messages++; return { value: current.history as never } })
   on('http.fetch', ($, e) => {
@@ -143,13 +146,23 @@ function world(on: On, opts: { pane?: string; down?: () => boolean; nosock?: boo
     answer.resync = false
     return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(body) } }
   })
+  // `commands`: what command.list answers (unanswered without it, as an
+  // engine without the op); each command.run is kept in `ran`.
+  const ran: { command: string; args: string }[] = []
+  const cmd = { output: 'done' as string | undefined, fail: false }
+  if (opts.commands) on('command.list', () => ({ value: opts.commands as never }))
+  on('command.run', ($, e) => {
+    ran.push({ command: e.command, args: e.args })
+    if (cmd.fail) throw new Error('unknown command')
+    return cmd.output === undefined ? {} : { text: cmd.output }
+  })
   on('prompt.submit', async ($, e) => {
     await submitGate
     submitted.push(e.text)
     return { text: e.text }
   })
   return {
-    clock, syncs, sizes, outbox, submitted, current, answer, files, reads, finds, runs, seds, tail, counts, scans, mtimes, scan, agentList,
+    clock, syncs, sizes, outbox, submitted, ran, cmd, current, answer, files, reads, finds, runs, seds, tail, counts, scans, mtimes, scan, agentList,
     hold() { let release!: () => void; submitGate = new Promise(r => (release = r)); return release },
     holdReads() { let release!: () => void; readGate = new Promise(r => (release = r)); return release },
     all: () => syncs.flatMap(s => s.events),
@@ -196,7 +209,113 @@ const imageRow = (uuid: string, data: string) =>
 
 const start = ($: any) => $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
 
+const measure = ($: any) => $.session.measure({
+  context: { tokens: 160000, window: 200000, percent: 80 },
+  rateLimits: [{ kind: 'seven_day', percentUsed: 30 }],
+  changed: ['context', 'rateLimits'],
+})
+
 describe('herdr-chat', () => {
+  const USAGE = {
+    startedAt: 1234,
+    context: { tokens: 50000, window: 200000, percent: 25 },
+    rateLimits: [{ kind: 'five_hour', percentUsed: 10, resetsAt: '2026-10-08T19:40:00Z' }],
+  }
+
+  test('the resync seeds usage from session.usage and every sync carries it', async ($, on) => {
+    const w = world(on, { usage: USAGE })
+    await start($)
+    await w.clock.advance(3000)
+    const last = w.syncs[w.syncs.length - 1] as any
+    expect(last.usage).toEqual({
+      context: { percent: 25, tokens: 50000, window: 200000 },
+      limits: [{ kind: 'five_hour', percentUsed: 10, resetsAt: '2026-10-08T19:40:00Z' }],
+      limitsAt: 1234,
+    })
+  })
+
+  test('heartbeats held while the history builds carry the seeded usage', async ($, on) => {
+    const w = world(on, { usage: USAGE })
+    w.files['/t/p1.jsonl'] = TRANSCRIPT
+    await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/p1.jsonl' })
+    await start($)
+    const release = w.holdReads()
+    await w.clock.advance(1000) // the read starts and blocks
+    await w.clock.advance(1000)
+    await w.clock.advance(1000)
+    expect(w.syncs.length).toBe(3)
+    for (const s of w.syncs.slice(1) as any[]) {
+      expect(s.events).toEqual([])
+      expect(s.usage?.limitsAt).toBe(1234)
+    }
+    release()
+    await w.clock.settle()
+  })
+
+  test('session.measure replaces the reading', async ($, on) => {
+    const w = world(on, { usage: USAGE })
+    await start($)
+    await w.clock.advance(2000)
+    const at = w.clock.now()
+    await measure($)
+    await w.clock.advance(1000)
+    const last = w.syncs[w.syncs.length - 1] as any
+    expect(last.usage).toEqual({ context: { percent: 80, tokens: 160000, window: 200000 }, limits: [{ kind: 'seven_day', percentUsed: 30 }], limitsAt: at })
+  })
+
+  test('a seed resolving after a measure does not overwrite it', async ($, on) => {
+    let release = () => {}
+    const w = world(on, { usage: () => new Promise(r => { release = () => r({ value: USAGE as never }) }) })
+    await start($)
+    await w.clock.advance(1000) // the resync's seed is in flight
+    const at = w.clock.now()
+    await measure($)
+    release()
+    await w.clock.advance(2000)
+    const last = w.syncs[w.syncs.length - 1] as any
+    expect(last.usage).toEqual({ context: { percent: 80, tokens: 160000, window: 200000 }, limits: [{ kind: 'seven_day', percentUsed: 30 }], limitsAt: at })
+  })
+
+  test('/clear drops the context but keeps the limits', async ($, on) => {
+    let seeds = 0
+    // The second (post-/clear) seed never answers.
+    const w = world(on, { usage: () => (++seeds > 1 ? new Promise(() => {}) : { value: USAGE as never }) })
+    on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+    await start($)
+    await w.clock.advance(2000)
+    const at = w.clock.now()
+    await measure($)
+    await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+    await w.clock.advance(1000)
+    const cleared = w.syncs[w.syncs.length - 1] as any
+    expect(cleared.usage).toEqual({ limits: [{ kind: 'seven_day', percentUsed: 30 }], limitsAt: at })
+  })
+
+  test('/clear: the resync seed fills the new context, keeping the held stamp', async ($, on) => {
+    const w = world(on, { usage: USAGE })
+    on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+    await start($)
+    await w.clock.advance(2000)
+    const at = w.clock.now()
+    await measure($)
+    await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+    await w.clock.advance(3000)
+    const last = w.syncs[w.syncs.length - 1] as any
+    expect(last.usage).toEqual({
+      context: { percent: 25, tokens: 50000, window: 200000 },
+      limits: [{ kind: 'five_hour', percentUsed: 10, resetsAt: '2026-10-08T19:40:00Z' }],
+      limitsAt: at,
+    })
+  })
+
+  test('no usage hook: syncs carry no usage', async ($, on) => {
+    const w = world(on)
+    await start($)
+    await w.clock.advance(3000)
+    expect(w.syncs.length).toBeGreaterThan(0)
+    for (const s of w.syncs as any[]) expect(s.usage).toBeUndefined()
+  })
+
   test('hello and the chunked history go out once the history is built', async ($, on) => {
     const w = world(on)
     await start($)
@@ -264,6 +383,35 @@ describe('herdr-chat', () => {
     expect(s.pending).toEqual([])
     queueAppended(s, { door: 'response', uuid: 's1', agentId: 'aa1', message: { role: 'assistant', content: [{ type: 'text', text: 'subagent' }] } }, undefined)
     expect(s.pending).toEqual([{ type: 'assistant_text', uuid: 's1#0', text: 'subagent', agentId: 'aa1', ts: expect.any(Number) }])
+  })
+
+  // Claude Code 2.1.294 delivers a notice that lands mid-turn as a
+  // queued_command row (door `delivery`), the notice inside a reminder (as
+  // seen live), not as a plain user row; it still ends its task.
+  const notice = (id: string, status: string) =>
+    `<task-notification>\n<task-id>${id}</task-id>\n<tool-use-id>toolu_${id}</tool-use-id>\n<status>${status}</status>\n<summary>Background command "x" completed (exit code 0)</summary>\n</task-notification>`
+  const midTurn = (uuid: string, id: string, status: string, door = 'delivery', agentId?: string) =>
+    ({ door, uuid, ...(agentId ? { agentId } : {}), message: { type: 'attachment', name: 'queued_command', role: 'user', content: [{ type: 'text', text: `<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\n\n${notice(id, status)}\n</system-reminder>` }] } }) as never
+
+  test('a task notice delivered mid-turn (inside a reminder) ends its task; no chat row is queued', () => {
+    const s = state('w1:p1')
+    taskFromLaunch(s.tasks, 'Bash', 'toolu_b1', { command: 'sleep 9' }, { backgroundTaskId: 'b1' }, 1)
+    taskFromLaunch(s.tasks, 'Bash', 'toolu_b2', { command: 'sleep 9' }, { backgroundTaskId: 'b2' }, 1)
+    queueAppended(s, midTurn('x1', 'b1', 'completed'), undefined)
+    queueAppended(s, midTurn('x2', 'b2', 'failed', 'attachment'), undefined)
+    expect(s.tasks.get('b1')).toMatchObject({ status: 'done' })
+    expect(s.tasks.get('b2')).toMatchObject({ status: 'failed' })
+    expect(s.pending.map(e => e.type)).toEqual(['tasks'])
+    expect((s.pending[0] as any).tasks.map((t: any) => [t.id, t.status])).toEqual([['b1', 'done'], ['b2', 'failed']])
+  })
+
+  test('a subagent’s mid-turn notice leaves the pane’s tasks alone', () => {
+    const s = state('w1:p1')
+    linkSpawn(s.agents, { tool_use_id: 'toolu_1', description: 'd', subagentType: 'general-purpose' }, 'aa1', 1)
+    taskFromLaunch(s.tasks, 'Bash', 'toolu_b1', { command: 'sleep 9' }, { backgroundTaskId: 'b1' }, 1)
+    queueAppended(s, midTurn('x1', 'b1', 'completed', 'delivery', 'aa1'), undefined)
+    expect(s.tasks.get('b1')).toMatchObject({ status: 'running' })
+    expect(s.pending).toEqual([])
   })
 
   test('a row from an unknown agent is held, not queued', () => {
@@ -454,6 +602,21 @@ describe('herdr-chat', () => {
     await w.clock.advance(1000)
     const last = tasksOf(w.all() as never).at(-1)!
     expect(last.tasks.map(t => t.id)).toEqual(['b4prbe90d'])
+  })
+
+  test('a TaskStop that stops a running task ends it', async ($, on) => {
+    const w = world(on)
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { backgroundTaskId: 'b4prbe90d' }, text: '' }) as never)
+    on('tool.call', { tool: 'TaskStop' }, () => ({ result: { message: 'Successfully stopped task: b4prbe90d (sleep 25)', task_id: 'b4prbe90d' }, text: '' }) as never)
+    sessionFiles(w)
+    await startAt($)
+    await w.clock.advance(6000)
+    await $.tool.call({ tool: 'Bash', command: 'sleep 25', run_in_background: true } as never)
+    await w.clock.advance(1000)
+    expect(tasksOf(w.all() as never).at(-1)!.tasks).toMatchObject([{ id: 'b4prbe90d', status: 'running' }])
+    await $.tool.call({ tool: 'TaskStop', task_id: 'b4prbe90d' } as never)
+    await w.clock.advance(1000)
+    expect(tasksOf(w.all() as never).at(-1)!.tasks).toMatchObject([{ id: 'b4prbe90d', status: 'failed' }])
   })
 
   // C1: a thread part that starts a body already holding images is size-checked too.
@@ -1299,5 +1462,99 @@ describe('herdr-chat', () => {
     const sent = w.syncs.flatMap(s => Object.keys(s.images ?? {}))
     expect(sent).toEqual(['small#0'])
     for (const n of w.sizes) expect(n).toBeLessThanOrEqual(BODY_BYTES)
+  })
+})
+
+describe('slash commands', () => {
+  const COMMANDS = [
+    { name: 'compact', description: 'Clear history but keep a summary', source: 'builtin' },
+    { name: 'brainstorming', description: 'Explore intent', source: 'plugin' },
+  ]
+  const lists = (w: ReturnType<typeof world>) => w.all().filter(e => e.type === 'commands')
+
+  test('the list goes out after the first resync, and again only when it changes', async ($, on) => {
+    const list = [...COMMANDS]
+    const w = world(on, { commands: list })
+    await start($)
+    await w.clock.advance(3000)
+    expect(lists(w)).toEqual([{ type: 'commands', commands: COMMANDS }])
+    await w.clock.advance(60_000)
+    expect(lists(w).length).toBe(1)
+    list.push({ name: 'review', description: 'Review a PR', source: 'user' })
+    await w.clock.advance(31_000)
+    expect(lists(w).length).toBe(2)
+    expect((lists(w)[1] as any).commands.map((c: any) => c.name)).toEqual(['compact', 'brainstorming', 'review'])
+  })
+
+  test('a resync sends the list again', async ($, on) => {
+    const w = world(on, { commands: COMMANDS })
+    await start($)
+    await w.clock.advance(3000)
+    w.answer.resync = true
+    await w.clock.advance(3000)
+    expect(lists(w).length).toBe(2)
+  })
+
+  test('an engine without command.list sends no list', async ($, on) => {
+    const w = world(on)
+    await start($)
+    await w.clock.advance(3000)
+    expect(lists(w)).toEqual([])
+  })
+
+  test('a known command runs as one, its output rows into the chat', async ($, on) => {
+    const w = world(on, { commands: COMMANDS })
+    await start($)
+    await w.clock.advance(3000)
+    w.outbox.push({ id: 'm1', text: '/compact keep the plan' })
+    await w.clock.advance(1000)
+    await w.clock.settle()
+    expect(w.ran).toEqual([{ command: 'compact', args: 'keep the plan' }])
+    expect(w.submitted).toEqual([])
+    await w.clock.advance(1000)
+    const out = w.all().filter(e => e.type === 'command_output')
+    expect(out).toEqual([{ type: 'command_output', uuid: 'cmd-m1', command: '/compact keep the plan', text: 'done', ts: expect.any(Number) }])
+  })
+
+  test('a command that prints nothing adds no row (the engine echoes the command itself)', async ($, on) => {
+    const w = world(on, { commands: COMMANDS })
+    w.cmd.output = undefined
+    await start($)
+    await w.clock.advance(3000)
+    w.outbox.push({ id: 'm1', text: '/brainstorming' })
+    await w.clock.advance(1000)
+    await w.clock.settle()
+    await w.clock.advance(1000)
+    expect(w.ran).toEqual([{ command: 'brainstorming', args: '' }])
+    expect(w.all().filter(e => e.type === 'command_output')).toEqual([])
+  })
+
+  test('an unknown name is submitted as typed, not run', async ($, on) => {
+    const w = world(on, { commands: COMMANDS })
+    await start($)
+    await w.clock.advance(3000)
+    w.outbox.push({ id: 'm1', text: '/nope here' }, { id: 'm2', text: 'plain' })
+    await w.clock.advance(1000)
+    await w.clock.settle()
+    expect(w.ran).toEqual([])
+    // The engine takes a slash-led prompt as a command of its own (the kit
+    // drops this one); a plain one reaches the model.
+    expect(w.submitted).toEqual(['plain'])
+    expect(w.all().filter(e => e.type === 'command_output')).toEqual([])
+  })
+
+  test('a run the engine refuses shows its error in the chat', async ($, on) => {
+    const w = world(on, { commands: COMMANDS })
+    w.cmd.fail = true
+    await start($)
+    await w.clock.advance(3000)
+    w.outbox.push({ id: 'm1', text: '/compact' })
+    await w.clock.advance(1000)
+    await w.clock.settle()
+    await w.clock.advance(1000)
+    expect(w.ran).toEqual([{ command: 'compact', args: '' }])
+    expect(w.all().filter(e => e.type === 'command_output')).toEqual([
+      { type: 'command_output', uuid: 'cmd-m1', command: '/compact', text: expect.any(String), isError: true, ts: expect.any(Number) },
+    ])
   })
 })

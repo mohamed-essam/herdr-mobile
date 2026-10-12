@@ -15,6 +15,12 @@ systemctl --user enable --now herdr-mobiled
 systemctl --user status herdr-mobiled
 ```
 
+The unit puts `~/.local/bin` on `PATH`, because opening a pane's terminal runs
+`herdr terminal attach` and the systemd user manager's default `PATH` doesn't
+include it. If herdr is installed somewhere else (`command -v herdr`), add that
+directory to the unit's `Environment=PATH=` line. Otherwise opening a terminal from
+the phone fails with `exec: "herdr": executable file not found in $PATH`.
+
 Verify from a laptop on the tailnet:
 
 ```bash

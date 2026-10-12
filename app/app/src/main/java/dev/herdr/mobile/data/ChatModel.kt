@@ -5,6 +5,7 @@ import dev.herdr.mobile.net.BgTask
 import dev.herdr.mobile.net.ChatEntry
 import dev.herdr.mobile.net.ChatEvent
 import dev.herdr.mobile.net.ServerFrame
+import dev.herdr.mobile.net.SlashCommand
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -51,6 +52,8 @@ data class ChatView(
     val agents: Map<String, AgentSummary> = emptyMap(),
     /** The pane's background tasks (main view only). */
     val tasks: List<BgTask> = emptyList(),
+    /** The session's slash commands (main view only); empty: no picker. */
+    val commands: List<SlashCommand> = emptyList(),
     /** A thread's snapshot said the companion doesn't know that agent. */
     val missing: Boolean = false,
 )
@@ -84,7 +87,11 @@ object ChatReducer {
                 epoch = f.epoch,
                 entries = entries,
                 lastSeq = maxOf(f.entries.maxOfOrNull { it.seq } ?: 0, f.maxSeq),
-                pending = confirm(v.pending, snapshotCandidates(v, f)),
+                pending = confirm(v.pending, snapshotCandidates(v, f)).let { p ->
+                    // A /clear's echo goes with the old session: the new
+                    // session's epoch is its delivery.
+                    if (v.loaded && f.epoch != v.epoch) p.filterNot { it.status != PendingStatus.Failed && startsNewSession(it.text) } else p
+                },
                 gap = false,
                 hasMore = f.hasMore || entries.size < all.size,
                 loadingOlder = false,
@@ -94,6 +101,7 @@ object ChatReducer {
                 // A thread's snapshot sends neither: keep what the view has.
                 agents = f.agents?.associateBy { it.agentId } ?: v.agents,
                 tasks = f.tasks ?: v.tasks,
+                commands = f.commands ?: v.commands,
                 missing = f.missing,
                 // A new epoch (companion restart / new session) dropped any held answer.
                 answering = if (v.loaded && f.epoch == v.epoch) v.answering - answeredResults(entries) else emptySet(),
@@ -144,6 +152,7 @@ object ChatReducer {
             else -> v
         }
         is ServerFrame.ChatTasks -> v.copy(tasks = f.tasks)
+        is ServerFrame.ChatCommands -> v.copy(commands = f.commands)
         else -> v
     }
 
@@ -226,13 +235,20 @@ object ChatReducer {
 
     private fun userText(e: ChatEntry): String? = (e.event as? ChatEvent.UserText)?.text?.trim()
 
+    private fun startsNewSession(text: String): Boolean =
+        text.substringBefore(' ').substringBefore('\n') in setOf("/clear", "/reset", "/new")
+
+    // A command comes back as `/name args`, however the space after its name was typed.
+    private fun sameText(a: String, b: String): Boolean =
+        a == b || (a.startsWith("/") && b.startsWith("/") && a.replaceFirst(Regex("\\s+"), " ") == b.replaceFirst(Regex("\\s+"), " "))
+
     // Each delivered text confirms the oldest unconfirmed pending bubble with
     // the same text, so sending "yes" twice needs two deliveries.
     private fun confirm(pending: List<PendingMsg>, texts: List<String>): List<PendingMsg> {
         if (pending.isEmpty() || texts.isEmpty()) return pending
         val out = pending.toMutableList()
         for (t in texts) {
-            val i = out.indexOfFirst { it.status != PendingStatus.Failed && it.text == t }
+            val i = out.indexOfFirst { it.status != PendingStatus.Failed && sameText(it.text, t) }
             if (i >= 0) out.removeAt(i)
         }
         return out

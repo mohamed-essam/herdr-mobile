@@ -325,8 +325,8 @@ func TestInitialSnapshotIncludesWorkspacesAndTabs(t *testing.T) {
 	defer c.Close(websocket.StatusNormalClosure, "")
 
 	welcome := readUntil(t, ctx, c, "welcome")
-	if welcome["companionProtocol"].(float64) != 10 {
-		t.Fatalf("want companionProtocol 10, got %v", welcome["companionProtocol"])
+	if welcome["companionProtocol"].(float64) != 12 {
+		t.Fatalf("want companionProtocol 11, got %v", welcome["companionProtocol"])
 	}
 	ws := readUntil(t, ctx, c, "workspaces")
 	arr := ws["workspaces"].([]any)
@@ -1182,5 +1182,24 @@ func TestSetAttachArgvReplacesTheAttachProgram(t *testing.T) {
 	}
 	if got := <-gotTarget; got != "term_7" {
 		t.Fatalf("target: got %q", got)
+	}
+}
+
+func TestInitialSnapshotIncludesLimitsWhenKnown(t *testing.T) {
+	s := NewServer(AllowAll{}, &stubRPC{})
+	s.SetLimitsSnapshot(func() []byte {
+		return []byte(`{"t":"limits","limits":[{"kind":"seven_day","percentUsed":18}],"observedAt":5}`)
+	})
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	ctx := context.Background()
+	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close(websocket.StatusNormalClosure, "")
+	l := readUntil(t, ctx, c, "limits")
+	if l["observedAt"].(float64) != 5 {
+		t.Fatalf("limits frame: %+v", l)
 	}
 }

@@ -3,18 +3,27 @@
 // background, from their launch results; ended by their task notifications.
 export type TaskKind = 'shell' | 'subagent' | 'workflow' | 'monitor'
 export type TaskStatus = 'running' | 'done' | 'failed'
-export type Task = { id: string; kind: TaskKind; label: string; toolUseId: string; status: TaskStatus; startedAt: number; endedAt?: number }
+// detail: the whole command (a shell's, a monitor's) when the label doesn't
+// already show all of it; description: what the launch said it does.
+export type Task = { id: string; kind: TaskKind; label: string; toolUseId: string; status: TaskStatus; startedAt: number; endedAt?: number; detail?: string; description?: string }
 export type TasksState = Map<string, Task> // by task id
 export type TasksControl = { type: 'tasks'; tasks: Task[] }
 
 // A finished task stays listed this long.
 export const TASK_TTL_MS = 600_000
 export const LABEL_MAX = 120
+export const DETAIL_MAX = 4000
 
 // One line, at most LABEL_MAX characters.
 function label(s: string): string {
   const one = s.replace(/\s+/g, ' ').trim()
   return one.length > LABEL_MAX ? one.slice(0, LABEL_MAX - 1) + '…' : one
+}
+
+// As written (newlines kept), at most DETAIL_MAX characters.
+function detail(s: string): string {
+  const t = s.trim()
+  return t.length > DETAIL_MAX ? t.slice(0, DETAIL_MAX - 1) + '…' : t
 }
 
 // A notice's status word: `completed` is done, anything else failed.
@@ -32,10 +41,13 @@ export function taskFromLaunch(t: TasksState, tool: string, toolUseId: string, i
   let id = ''
   let kind: TaskKind
   let text = ''
+  let command = ''
+  let description = ''
   if (tool === 'Bash') {
     id = str(r.backgroundTaskId)
     kind = 'shell'
-    text = str(input.command)
+    text = command = str(input.command)
+    description = str(input.description).trim()
   } else if (tool === 'Agent') {
     if (r.status !== 'async_launched') return false
     id = str(r.agentId)
@@ -49,15 +61,21 @@ export function taskFromLaunch(t: TasksState, tool: string, toolUseId: string, i
     id = str(r.taskId)
     kind = 'monitor'
     text = str(input.description) || str(input.command)
+    command = str(input.command)
   } else return false
   if (!id) return false
-  t.set(id, { id, kind, label: label(text), toolUseId, status: 'running', startedAt: now })
+  const task: Task = { id, kind, label: label(text), toolUseId, status: 'running', startedAt: now }
+  if (command.trim() && detail(command) !== task.label) task.detail = detail(command)
+  if (description) task.description = description
+  t.set(id, task)
   return true
 }
 
 // Ends the task the notice names (by task id, else by tool-use id), or lists
-// an unknown one as already finished. A repeat updates in place.
+// an unknown one as already finished. A repeat updates in place. A notice
+// without a status is a running monitor's event, not an end: it changes nothing.
 export function taskFromNotice(t: TasksState, n: { taskId?: string; toolUseId?: string; status: string; summary: string }, now: number): boolean {
+  if (!n.status) return false
   const status = noticeStatus(n.status)
   const known = (n.taskId ? t.get(n.taskId) : undefined) ?? (n.toolUseId ? [...t.values()].find(k => k.toolUseId === n.toolUseId) : undefined)
   if (known) {
@@ -68,6 +86,17 @@ export function taskFromNotice(t: TasksState, n: { taskId?: string; toolUseId?: 
   const id = n.taskId ?? n.toolUseId ?? `notice-${now}`
   const kind: TaskKind = n.summary.startsWith('Agent "') ? 'subagent' : n.summary.startsWith('Workflow') ? 'workflow' : 'shell'
   t.set(id, { id, kind, label: label(n.summary), toolUseId: n.toolUseId ?? '', status, startedAt: now, endedAt: now })
+  return true
+}
+
+// A TaskStop result ends the running task it names: a stopped task often gets
+// no notice at all.
+export function taskFromStop(t: TasksState, result: unknown, now: number): boolean {
+  if (!result || typeof result !== 'object') return false
+  const k = t.get(str((result as Record<string, unknown>).task_id))
+  if (!k || k.status !== 'running') return false
+  k.status = 'failed'
+  k.endedAt = now
   return true
 }
 

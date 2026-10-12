@@ -16,56 +16,79 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import dev.herdr.mobile.data.PaneRepository
+import dev.herdr.mobile.data.Server
+import dev.herdr.mobile.data.ServerOpen
 import dev.herdr.mobile.data.Settings
+import dev.herdr.mobile.data.defaultServerName
 import dev.herdr.mobile.data.pushEnabled
+import dev.herdr.mobile.data.resolveServerOpen
+import dev.herdr.mobile.data.savedAt
+import dev.herdr.mobile.data.withRemoved
+import dev.herdr.mobile.data.withRenamed
 import dev.herdr.mobile.net.CompanionClient
+import dev.herdr.mobile.push.EXTRA_PANE_ID
+import dev.herdr.mobile.push.EXTRA_SERVER_ID
+import dev.herdr.mobile.push.Notifications
 import dev.herdr.mobile.ui.CompanionAddress
 import dev.herdr.mobile.ui.ConnectScreen
 import dev.herdr.mobile.ui.DashboardScreen
 import dev.herdr.mobile.ui.DashboardViewModel
 import dev.herdr.mobile.ui.FirstConnectionScreen
+import dev.herdr.mobile.ui.ServerSheet
 import dev.herdr.mobile.ui.theme.HerdrTheme
+import java.util.UUID
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.unifiedpush.android.connector.UnifiedPush
 
-/** Where the app is: setup, the first connection attempt, or the dashboard. */
+/** Where the app is: setup (or adding a server), the first connection attempt, or the dashboard. */
 private sealed interface Route {
     data object Loading : Route
-    data object Connect : Route
-    data class FirstConnect(val address: CompanionAddress, val push: Boolean) : Route
+    /** [adding]: from the dashboard's server sheet, so Back returns there. */
+    data class Connect(val adding: Boolean = false, val previousId: String? = null) : Route
+    data class FirstConnect(val serverId: String, val address: CompanionAddress, val push: Boolean, val adding: Boolean, val previousId: String? = null) : Route
     data object Dashboard : Route
 }
 
-/** One companion connection and the view model fed by it. */
-private class Session(val client: CompanionClient, val vm: DashboardViewModel)
+/** One companion connection, the server it belongs to, and the view model fed by it. */
+private class Session(val serverId: String?, val client: CompanionClient, val vm: DashboardViewModel)
+
+/** A tapped notification's target; [serverId] is null on ones posted before multiple servers. */
+private data class OpenTarget(val serverId: String?, val paneId: String)
+
+private fun Intent.openTarget(): OpenTarget? =
+    getStringExtra(EXTRA_PANE_ID)?.let { OpenTarget(getStringExtra(EXTRA_SERVER_ID), it) }
 
 class MainActivity : ComponentActivity() {
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
-    private var pushRegistered = false
+    private var permissionAsked = false
 
-    /** Ask for the notification permission and register with a UnifiedPush distributor, once. */
-    private fun enablePush() {
-        if (pushRegistered) return
-        pushRegistered = true
-        if (Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+    /** Ask for the notification permission once, then register each server's UnifiedPush instance. */
+    private fun enablePush(serverIds: List<String>) {
+        if (serverIds.isEmpty()) return
+        if (!permissionAsked) {
+            permissionAsked = true
+            if (Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
         // UnifiedPush connector 3.3.3 dropped the 2.x `registerAppWithDialog` helper.
         // Pick (or reuse) a distributor first, then register once one is confirmed.
+        // The instance is the server id, so each companion gets its own endpoint.
         UnifiedPush.tryUseCurrentOrDefaultDistributor(this) { success ->
-            if (success) UnifiedPush.register(this)
+            if (success) serverIds.forEach { UnifiedPush.register(this, it) }
         }
     }
 
-    /** A pane to open, from a tapped notification; cleared once the dashboard handles it. */
-    private var openRequest by mutableStateOf<String?>(null)
+    /** A notification to act on; cleared once handled. */
+    private var openTarget by mutableStateOf<OpenTarget?>(null)
 
     // singleTop: a notification tapped while the app is open lands here instead
     // of recreating the activity (and its companion session).
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        intent.getStringExtra("paneId")?.let { openRequest = it }
+        intent.openTarget()?.let { openTarget = it }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -73,9 +96,10 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val settings = Settings(applicationContext)
-        fun newSession(): Session {
+        fun newSession(serverId: String?): Session {
             val client = CompanionClient()
             return Session(
+                serverId,
                 client,
                 DashboardViewModel(
                     client,
@@ -89,77 +113,180 @@ class MainActivity : ComponentActivity() {
         }
         // Only a fresh launch honours the extra: a recreated activity still carries
         // the launch intent, and must not reopen a pane the user has since left.
-        if (savedInstanceState == null) openRequest = intent.getStringExtra("paneId")
+        if (savedInstanceState == null) openTarget = intent.openTarget()
 
         setContent {
-            var session by remember { mutableStateOf(newSession()) }
+            var session by remember { mutableStateOf(newSession(null)) }
             var route by remember { mutableStateOf<Route>(Route.Loading) }
             var pushOn by remember { mutableStateOf(false) }
-            var companionUrl by remember { mutableStateOf<String?>(null) }
+            val servers by settings.servers.collectAsState(initial = emptyList())
+            // The live session is the source of truth for which server is active; the
+            // stored id lags behind a switch until DataStore re-emits.
+            val activeId = session.serverId
+            val active = servers.firstOrNull { it.id == activeId }
+            var showServers by remember { mutableStateOf(false) }
+            // A pane id handed to the dashboard (from a notification), on the active server.
+            var dashboardOpen by remember { mutableStateOf<String?>(null) }
             // What the connect screen shows again after a failed first attempt.
             var draftInput by remember { mutableStateOf("") }
             var draftPush by remember { mutableStateOf(false) }
 
+            /** Drops the current socket and starts a fresh session on [server] (or none). */
+            fun connectTo(server: Server?) {
+                session.client.close()
+                session = newSession(server?.id)
+                // An unparseable host (OkHttp is stricter than our field) just never connects.
+                server?.let { runCatching { session.vm.start(it.url) } }
+            }
+
+            fun switchTo(server: Server) {
+                if (server.id == session.serverId) return
+                lifecycleScope.launch { settings.setActiveServer(server.id) }
+                connectTo(server)
+                route = Route.Dashboard
+            }
+
+            fun removeServer(server: Server) {
+                val left = servers.withRemoved(server.id, activeId)
+                if (pushOn) UnifiedPush.unregister(this@MainActivity, server.id)
+                Notifications.cancelServer(this@MainActivity, server.id)
+                lifecycleScope.launch {
+                    settings.setServers(left.servers, left.activeId)
+                    settings.removePushEndpoint(server.id)
+                }
+                if (server.id != session.serverId) return
+                showServers = false
+                val next = left.servers.firstOrNull { it.id == left.activeId }
+                connectTo(next)
+                if (next == null) { draftInput = ""; draftPush = false; pushOn = false; route = Route.Connect() }
+            }
+
             LaunchedEffect(Unit) {
-                val stored = settings.companionUrl.first()
-                if (stored == null) {
-                    route = Route.Connect
+                settings.migrate()
+                val all = settings.servers.first()
+                val stored = settings.activeServerId.first()
+                val start = all.firstOrNull { it.id == stored } ?: all.firstOrNull()
+                if (start == null) {
+                    route = Route.Connect()
                     return@LaunchedEffect
                 }
-                companionUrl = stored
+                if (start.id != stored) settings.setActiveServer(start.id)
+                connectTo(start)
                 route = Route.Dashboard
-                session.vm.start(stored)
                 if (pushEnabled(settings.pushEnabledChoice.first(), hasCompanionUrl = true)) {
-                    enablePush()
+                    enablePush(all.map { it.id })
                     pushOn = true
                 }
             }
 
-            // Forward whatever push endpoint the UnifiedPush receiver saves to the
-            // companion, so it knows where to deliver notifications for this device.
+            // Forward the session's own server's endpoint to its companion, so it
+            // knows where to deliver notifications. The session is captured once: a
+            // switch reassigns `session` before this effect is cancelled, and reading
+            // the live value would send one server's endpoint to another's companion.
             LaunchedEffect(session, pushOn) {
+                val s = session
+                val id = s.serverId ?: return@LaunchedEffect
                 if (!pushOn) return@LaunchedEffect
-                settings.pushEndpoint.filterNotNull().collect { endpoint -> session.vm.registerPush(endpoint) }
+                settings.pushEndpoint(id).filterNotNull().distinctUntilChanged().collect { s.vm.registerPush(it) }
+            }
+
+            // A tapped notification: switch to its server if needed, then open the pane.
+            // It waits through startup and setup, and is handled once on the dashboard.
+            LaunchedEffect(openTarget, route) {
+                val t = openTarget ?: return@LaunchedEffect
+                if (route != Route.Dashboard) return@LaunchedEffect
+                val all = settings.servers.first()
+                when (val o = resolveServerOpen(t.serverId, session.serverId, all)) {
+                    ServerOpen.Stay -> dashboardOpen = t.paneId
+                    is ServerOpen.Switch -> { switchTo(o.server); dashboardOpen = t.paneId }
+                    ServerOpen.Unknown -> {}
+                }
+                openTarget = null
             }
 
             HerdrTheme {
                 when (val r = route) {
                     Route.Loading -> Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {}
-                    Route.Connect -> ConnectScreen(draftInput, draftPush) { input, address, push ->
+                    is Route.Connect -> ConnectScreen(
+                        draftInput,
+                        draftPush,
+                        showPush = !(r.adding && pushOn),
+                        duplicateOf = { a -> servers.savedAt(a.url)?.name },
+                        onBack = if (r.adding) ({
+                            // A failed attempt already replaced the session; put the previous server back.
+                            if (session.serverId != r.previousId) connectTo(servers.firstOrNull { it.id == r.previousId })
+                            route = Route.Dashboard
+                        }) else null,
+                    ) { input, address, push ->
                         draftInput = input
                         draftPush = push
-                        // An unparseable host (OkHttp is stricter than our field) just never connects;
-                        // the first-connection screen then offers Back.
+                        val id = UUID.randomUUID().toString()
+                        session.client.close()
+                        session = newSession(id)
+                        // An unparseable host just never connects; the first-connection screen then offers Back.
                         runCatching { session.vm.start(address.url) }
-                        route = Route.FirstConnect(address, push)
+                        route = Route.FirstConnect(id, address, push || (r.adding && pushOn), r.adding, r.previousId)
                     }
                     is Route.FirstConnect -> {
                         // Drop the failed attempt; a fresh session keeps a stale socket and
-                        // its collectors from feeding the next one.
+                        // its collectors from feeding the next one. Adding a server puts the
+                        // previous server's session back behind the connect screen.
                         fun back() {
-                            session.client.close()
-                            session = newSession()
-                            route = Route.Connect
+                            connectTo(if (r.adding) servers.firstOrNull { it.id == r.previousId } else null)
+                            route = Route.Connect(adding = r.adding, previousId = r.previousId)
                         }
+                        // Once the server is saved, going back to the connect screen would
+                        // reject the same address as a duplicate; leave for the dashboard.
+                        var saved by remember(r) { mutableStateOf(false) }
+                        fun leave() { if (saved) route = Route.Dashboard else back() }
                         val connected by session.vm.connected.collectAsState()
-                        BackHandler(enabled = !connected) { back() }
+                        BackHandler(enabled = !connected) { leave() }
                         FirstConnectionScreen(
                             session.vm,
                             r.address.hostPort,
                             onConnected = {
-                                // Only now is the address worth keeping: later launches go
-                                // straight to the dashboard with it.
+                                // Only now is the address worth keeping: it joins the list as the active server.
+                                saved = true
+                                val server = Server(r.serverId, defaultServerName(r.address.url), r.address.url)
                                 lifecycleScope.launch {
-                                    settings.setCompanionUrl(r.address.url)
+                                    settings.addServer(server)
                                     settings.setPushEnabled(r.push)
                                 }
-                                if (r.push) { enablePush(); pushOn = true }
+                                if (r.push) {
+                                    enablePush(if (pushOn) listOf(server.id) else servers.map { it.id } + server.id)
+                                }
+                                // Adding keeps push on if it was; first-time setup follows the choice made.
+                                pushOn = if (r.adding) pushOn || r.push else r.push
                             },
-                            onContinue = { companionUrl = r.address.url; route = Route.Dashboard },
-                            onBack = ::back,
+                            onContinue = { route = Route.Dashboard },
+                            onBack = ::leave,
                         )
                     }
-                    Route.Dashboard -> DashboardScreen(session.vm, openRequest, { openRequest = null }, companionUrl)
+                    Route.Dashboard -> {
+                        key(session) {
+                            DashboardScreen(
+                                session.vm, dashboardOpen, { dashboardOpen = null }, active?.url,
+                                serverName = active?.name,
+                                onServers = { showServers = true },
+                            )
+                        }
+                        if (showServers) ServerSheet(
+                            servers,
+                            activeId,
+                            onSwitch = { showServers = false; switchTo(it) },
+                            onRename = { s, name ->
+                                lifecycleScope.launch { settings.setServers(servers.withRenamed(s.id, name), activeId) }
+                            },
+                            onRemove = ::removeServer,
+                            onAdd = {
+                                showServers = false
+                                draftInput = ""
+                                draftPush = false
+                                route = Route.Connect(adding = true, previousId = session.serverId)
+                            },
+                            onDismiss = { showServers = false },
+                        )
+                    }
                 }
             }
         }

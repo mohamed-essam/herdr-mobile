@@ -473,7 +473,7 @@ fun OtherAgentDialog(onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun HerdrDialog(
+internal fun HerdrDialog(
     title: String,
     onDismiss: () -> Unit,
     confirmLabel: String,

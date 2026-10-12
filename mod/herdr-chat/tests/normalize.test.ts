@@ -38,9 +38,9 @@ describe('normalizeBlocks', () => {
   test('string content is treated as one text block', () => {
     expect(normalizeBlocks('user', 'hi', 'u3')).toEqual([{ type: 'user_text', uuid: 'u3', text: 'hi' }])
   })
-  test('assistant text and tool_use blocks each yield an event; thinking is dropped', () => {
+  test('assistant text and tool_use blocks each yield an event; empty thinking is dropped', () => {
     const out = normalizeBlocks('assistant', [
-      { type: 'thinking', thinking: 'hmm' },
+      { type: 'thinking', thinking: '' },
       { type: 'text', text: 'Running tests' },
       { type: 'tool_use', id: 't9', name: 'Bash', input: { command: 'npm   test' } },
     ], 'a1')
@@ -48,6 +48,20 @@ describe('normalizeBlocks', () => {
       { type: 'assistant_text', uuid: 'a1#1', text: 'Running tests' },
       { type: 'tool_use', uuid: 'a1#2', toolUseId: 't9', tool: 'Bash', summary: 'Bash: npm test' },
     ])
+  })
+  test('non-empty thinking blocks surface as assistant_text (newer models speak to the user in them)', () => {
+    const out = normalizeBlocks('assistant', [
+      { type: 'thinking', thinking: 'I think X because Y' },
+      { type: 'tool_use', id: 't1', name: 'AskUserQuestion', input: {} },
+    ], 'a3')
+    expect(out).toEqual([
+      { type: 'assistant_text', uuid: 'a3#0', text: 'I think X because Y' },
+      { type: 'tool_use', uuid: 'a3#1', toolUseId: 't1', tool: 'AskUserQuestion', summary: 'AskUserQuestion' },
+    ])
+  })
+  test('blank thinking (whitespace only) stays dropped', () => {
+    const out = normalizeBlocks('assistant', [{ type: 'thinking', thinking: '  \n' }], 'a4')
+    expect(out).toEqual([])
   })
   test('blank assistant text is skipped', () => {
     expect(normalizeBlocks('assistant', [{ type: 'text', text: '  \n' }], 'a2')).toEqual([])

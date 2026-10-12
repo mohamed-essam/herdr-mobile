@@ -23,7 +23,7 @@ type Notifier interface {
 }
 
 // ShouldNotify encodes the two v1 triggers. displayName is the friendly pane
-// name shown in the title (the project/cwd basename); it falls back to the
+// name shown in the title (the workspace label); it falls back to the
 // workspace id when empty. lastBody is the last non-empty output line for the
 // pane (used as the blocked notification body).
 func ShouldNotify(tr state.Transition, displayName, lastBody string) (Push, bool) {
@@ -32,6 +32,8 @@ func ShouldNotify(tr state.Transition, displayName, lastBody string) (Push, bool
 		name = tr.WorkspaceID
 	}
 	switch {
+	case tr.AgentGone:
+		return Clear(tr.PaneID, tr.WorkspaceID), true
 	case tr.To == "blocked":
 		return Push{Kind: "blocked", PaneID: tr.PaneID, WorkspaceID: tr.WorkspaceID,
 			Title: name + " needs you", Body: lastBody}, true
@@ -39,10 +41,15 @@ func ShouldNotify(tr state.Transition, displayName, lastBody string) (Push, bool
 		return Push{Kind: "finished", PaneID: tr.PaneID, WorkspaceID: tr.WorkspaceID,
 			Title: name + " finished", Body: ""}, true
 	case tr.To == "working":
-		return Push{Kind: "clear", PaneID: tr.PaneID, WorkspaceID: tr.WorkspaceID}, true
+		return Clear(tr.PaneID, tr.WorkspaceID), true
 	default:
 		return Push{}, false
 	}
+}
+
+// Clear withdraws whatever notification the pane has on the phone.
+func Clear(paneID, workspaceID string) Push {
+	return Push{Kind: "clear", PaneID: paneID, WorkspaceID: workspaceID}
 }
 
 type HTTPNotifier struct {

@@ -47,7 +47,7 @@ fun workflowGroups(agents: List<AgentSummary>): List<Pair<String?, List<AgentSum
     agents.groupBy { it.phase }.map { it.key to it.value }
 
 private fun speakerOf(ev: ChatEvent): Speaker = when (ev) {
-    is ChatEvent.UserText -> Speaker.User
+    is ChatEvent.UserText, is ChatEvent.CommandOutput -> Speaker.User
     is ChatEvent.TaskNotice -> Speaker.Notice
     else -> Speaker.Agent
 }

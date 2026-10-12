@@ -3,6 +3,7 @@ package dev.herdr.mobile.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,6 +12,7 @@ import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -48,18 +50,27 @@ import kotlinx.coroutines.delay
 fun ConnectScreen(
     initialInput: String,
     initialPush: Boolean,
+    showPush: Boolean = true,
+    duplicateOf: (CompanionAddress) -> String? = { null },
+    onBack: (() -> Unit)? = null,
     onConnect: (input: String, address: CompanionAddress, push: Boolean) -> Unit,
 ) {
     val c = Herdr.colors
     var input by rememberSaveable { mutableStateOf(initialInput) }
     var push by rememberSaveable { mutableStateOf(initialPush) }
     val address = parseCompanionAddress(input)
+    val duplicate = address?.let(duplicateOf)
     val steps = connectStepStates(hostEntered = address != null)
-    fun connect() { address?.let { onConnect(input.trim(), it, push) } }
+    fun connect() { if (duplicate == null) address?.let { onConnect(input.trim(), it, push) } }
+    onBack?.let { BackHandler(onBack = it) }
 
     Column(Modifier.fillMaxSize().background(c.crust).statusBarsPadding().navigationBarsPadding().imePadding()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Column(Modifier.padding(start = 24.dp, end = 24.dp, top = 48.dp, bottom = 32.dp)) {
+                onBack?.let {
+                    Text("← back", style = HerdrType.meta, color = c.subtext1,
+                        modifier = Modifier.padding(bottom = 16.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = it))
+                }
                 Wordmark(style = HerdrType.wordmark.copy(fontSize = 28.sp))
                 Spacer(Modifier.height(8.dp))
                 Text("One terminal for the whole herd, in your pocket.", style = HerdrType.body, color = c.subtext1)
@@ -72,30 +83,33 @@ fun ConnectScreen(
                 Step(2, steps[1]) {
                     Text("Enter its tailnet address", style = HerdrType.title, color = c.text)
                     AddressField(input, address, onChange = { input = it }, onGo = ::connect)
-                    if (input.isNotBlank() && address == null) {
-                        Text("That doesn't look like a host or ws:// address.", style = HerdrType.small, color = c.red)
-                    } else {
-                        Text("Keep it on your tailnet. The companion has no auth.", style = HerdrType.small, color = c.overlay2)
+                    when {
+                        duplicate != null -> Text("Already saved as $duplicate.", style = HerdrType.small, color = c.red)
+                        input.isNotBlank() && address == null ->
+                            Text("That doesn't look like a host or ws:// address.", style = HerdrType.small, color = c.red)
+                        else -> Text("Keep it on your tailnet. The companion has no auth.", style = HerdrType.small, color = c.overlay2)
                     }
                 }
-                Step(3, steps[2], dim = steps[2] == StepState.Upcoming && !push) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text("Notifications", style = HerdrType.title, color = c.text)
-                            Text("UnifiedPush · optional", style = HerdrType.small, color = c.overlay2)
+                if (showPush) {
+                    Step(3, steps[2], dim = steps[2] == StepState.Upcoming && !push) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text("Notifications", style = HerdrType.title, color = c.text)
+                                Text("UnifiedPush · optional", style = HerdrType.small, color = c.overlay2)
+                            }
+                            Switch(
+                                checked = push,
+                                onCheckedChange = { push = it },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = c.crust,
+                                    checkedTrackColor = c.mauve,
+                                    checkedBorderColor = Color.Transparent,
+                                    uncheckedThumbColor = c.overlay0,
+                                    uncheckedTrackColor = c.surface0,
+                                    uncheckedBorderColor = Color.Transparent,
+                                ),
+                            )
                         }
-                        Switch(
-                            checked = push,
-                            onCheckedChange = { push = it },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = c.crust,
-                                checkedTrackColor = c.mauve,
-                                checkedBorderColor = Color.Transparent,
-                                uncheckedThumbColor = c.overlay0,
-                                uncheckedTrackColor = c.surface0,
-                                uncheckedBorderColor = Color.Transparent,
-                            ),
-                        )
                     }
                 }
             }
@@ -104,7 +118,7 @@ fun ConnectScreen(
         PrimaryButton(
             "Connect",
             onClick = ::connect,
-            enabled = address != null,
+            enabled = address != null && duplicate == null,
             modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 32.dp),
         )
     }

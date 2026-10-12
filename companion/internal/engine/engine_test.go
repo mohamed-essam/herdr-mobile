@@ -255,6 +255,72 @@ func TestEngineFiresBlockedPushToRegisteredEndpoint(t *testing.T) {
 	}
 }
 
+// pushRecorder collects the pushes the engine posts.
+func pushRecorder(t *testing.T) (*httptest.Server, chan map[string]any) {
+	t.Helper()
+	got := make(chan map[string]any, 8)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var m map[string]any
+		json.NewDecoder(r.Body).Decode(&m)
+		got <- m
+	}))
+	t.Cleanup(srv.Close)
+	return srv, got
+}
+
+func TestClosedPaneFiresClearPush(t *testing.T) {
+	f := newFakeHerdr(t)
+	f.SetPanes([]herdr.PaneInfo{{PaneID: "w6:p1", WorkspaceID: "w6", Agent: "claude", AgentStatus: "blocked"}})
+	pushSrv, gotPush := pushRecorder(t)
+
+	e := New(Config{SocketPath: f.SocketPath(), ListenAddr: "127.0.0.1:0", PollInterval: 100 * time.Millisecond})
+	e.setEndpoint(pushSrv.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go e.pollLoop(ctx)
+
+	time.Sleep(200 * time.Millisecond) // first poll establishes the pane
+	f.SetPanes(nil)
+
+	select {
+	case m := <-gotPush:
+		if m["kind"] != "clear" || m["paneId"] != "w6:p1" || m["workspaceId"] != "w6" {
+			t.Fatalf("bad push for a closed pane: %v", m)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no clear push fired when the pane closed")
+	}
+}
+
+func TestFinishedIsSuppressedWhenPaneClosesDuringDebounce(t *testing.T) {
+	f := newFakeHerdr(t)
+	f.SetPanes([]herdr.PaneInfo{{PaneID: "w6:p1", WorkspaceID: "w6", Agent: "claude", AgentStatus: "working"}})
+	pushSrv, gotPush := pushRecorder(t)
+
+	e := New(Config{SocketPath: f.SocketPath(), ListenAddr: "127.0.0.1:0", PollInterval: 100 * time.Millisecond, DebounceFinished: 500 * time.Millisecond})
+	e.setEndpoint(pushSrv.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go e.pollLoop(ctx)
+
+	time.Sleep(200 * time.Millisecond)
+	f.SetPanes([]herdr.PaneInfo{{PaneID: "w6:p1", WorkspaceID: "w6", Agent: "claude", AgentStatus: "idle"}})
+	time.Sleep(200 * time.Millisecond) // working -> idle seen; finished is debouncing
+	f.SetPanes(nil)
+
+	deadline := time.After(1500 * time.Millisecond)
+	for {
+		select {
+		case m := <-gotPush:
+			if m["kind"] == "finished" {
+				t.Fatalf("finished fired for a pane closed during the debounce: %v", m)
+			}
+		case <-deadline:
+			return
+		}
+	}
+}
+
 func TestResumeFiresClearPush(t *testing.T) {
 	f := newFakeHerdr(t)
 	f.SetPanes([]herdr.PaneInfo{{PaneID: "w6:p1", WorkspaceID: "w6", Agent: "claude", AgentStatus: "blocked"}})
@@ -353,5 +419,28 @@ func TestPollOncePopulatesWorkspacesAndTabs(t *testing.T) {
 	tabs := e.store.Tabs()
 	if len(tabs) != 1 || tabs[0].TabID != "w7:t1" {
 		t.Fatalf("tabs not populated: %+v", tabs)
+	}
+}
+
+func TestDisplayNamePrefersWorkspaceLabel(t *testing.T) {
+	f := newFakeHerdr(t)
+	f.SetPanes([]herdr.PaneInfo{
+		{PaneID: "w7:p1", WorkspaceID: "w7", CWD: "/home/me/work/herdr-mobile"},
+		{PaneID: "w8:p1", WorkspaceID: "w8", CWD: "/home/me/work/omega3"},
+		{PaneID: "w9:p1", WorkspaceID: "w9"},
+	})
+	f.SetWorkspaces([]herdr.WorkspaceInfo{{WorkspaceID: "w7", Label: "mobile chat"}})
+
+	e := New(Config{SocketPath: f.SocketPath(), ListenAddr: "127.0.0.1:0"})
+	e.pollOnce(context.Background())
+
+	for pane, want := range map[string]string{
+		"w7:p1": "mobile chat", // the workspace label, not the repo folder
+		"w8:p1": "omega3",      // no label: the cwd basename
+		"w9:p1": "w9",          // neither: the raw id
+	} {
+		if got := e.displayName(pane); got != want {
+			t.Errorf("displayName(%s) = %q, want %q", pane, got, want)
+		}
 	}
 }

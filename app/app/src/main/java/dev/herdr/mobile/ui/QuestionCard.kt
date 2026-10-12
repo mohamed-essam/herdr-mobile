@@ -88,13 +88,15 @@ fun QuestionSheet(
     agent: String,
     enabled: Boolean,
     sending: Boolean,
+    // One per question, held by the caller so minimizing keeps the picks.
+    inputs: List<QuestionInput>,
+    onInputs: (List<QuestionInput>) -> Unit,
+    onMinimize: () -> Unit,
     modifier: Modifier = Modifier,
     onSubmit: (Map<String, String>) -> Unit,
 ) {
     val c = Herdr.colors
-    // Indexed by question, so a repeat with a different count starts fresh.
-    var inputs by remember(q.toolUseId, q.questions.size) { mutableStateOf(List(q.questions.size) { QuestionInput() }) }
-    fun update(i: Int, f: (QuestionInput) -> QuestionInput) { inputs = inputs.toMutableList().also { it[i] = f(it[i]) } }
+    fun update(i: Int, f: (QuestionInput) -> QuestionInput) { onInputs(inputs.toMutableList().also { it[i] = f(it[i]) }) }
     val active = enabled && !sending
     val answers = buildAnswers(q.questions, inputs)
 
@@ -108,8 +110,13 @@ fun QuestionSheet(
             .navigationBarsPadding()
             .padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
     ) {
-        Box(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 12.dp), contentAlignment = Alignment.Center) {
-            Box(Modifier.size(width = 32.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(c.surface1))
+        // The handle (or the chevron) folds the sheet to a bar, to read the chat.
+        Box(Modifier.fillMaxWidth().clickable(onClick = onMinimize).padding(top = 4.dp, bottom = 4.dp)) {
+            Box(Modifier.align(Alignment.Center).size(width = 32.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(c.surface1))
+            Text(
+                "▾ hide", style = HerdrType.button, color = c.overlay2,
+                modifier = Modifier.align(Alignment.CenterEnd).padding(vertical = 8.dp),
+            )
         }
         Column(
             Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),

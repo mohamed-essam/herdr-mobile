@@ -13,6 +13,7 @@ import (
 
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/chatbridge"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/herdr"
+	"github.com/mohamed-essam/herdr-mobile/companion/internal/limits"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/notify"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/proto"
 	"github.com/mohamed-essam/herdr-mobile/companion/internal/state"
@@ -27,6 +28,9 @@ type Config struct {
 	// ChatSocket is the Unix socket the herdr-chat mod syncs over; empty
 	// disables the chat view.
 	ChatSocket string
+	// StateDir holds what survives a restart (limits.json); empty keeps it
+	// in memory only.
+	StateDir string
 }
 
 type Engine struct {
@@ -35,9 +39,11 @@ type Engine struct {
 	store  *state.Store
 	srv    *wsserver.Server
 	hub    *chatbridge.Hub
+	limits *limits.Tracker
 
-	mu       sync.Mutex
-	endpoint string
+	mu           sync.Mutex
+	endpoint     string
+	endpointPath string // where endpoint is kept across restarts; "" = memory only
 
 	trigger chan struct{}
 	subs    map[string]context.CancelFunc
@@ -54,6 +60,24 @@ func New(cfg Config) *Engine {
 	e := &Engine{cfg: cfg, client: c, store: state.NewStore()}
 	e.srv = wsserver.NewServer(wsserver.AllowAll{}, c)
 	e.hub = chatbridge.NewHub(nil)
+	path := ""
+	if cfg.StateDir != "" {
+		path = filepath.Join(cfg.StateDir, "limits.json")
+	}
+	e.limits = limits.New(path, nil)
+	if cfg.StateDir != "" {
+		e.endpointPath = filepath.Join(cfg.StateDir, "push-endpoint.json")
+	}
+	e.endpoint = loadEndpoint(e.endpointPath)
+	// Runs under the tracker's lock: Broadcast is non-blocking.
+	e.limits.SetOnChange(func(l limits.Limits) { e.srv.Broadcast(proto.Limits(l)) })
+	e.hub.SetOnLimits(e.limits.Observe)
+	e.srv.SetLimitsSnapshot(func() []byte {
+		if l, ok := e.limits.Current(); ok {
+			return proto.Limits(l)
+		}
+		return nil
+	})
 	// Liveness callbacks run serialized under the hub's lock while a mod sync
 	// may be waiting: this must stay fast and non-blocking, and must never call
 	// back into the hub (deadlock). SetChat + Broadcast (non-blocking) is safe.
@@ -66,7 +90,8 @@ func New(cfg Config) *Engine {
 	// it, never call back into the hub). The hub delivers at most one per mod
 	// sync (about once a second per pane) and only on a change.
 	e.hub.SetOnSummary(func(paneID string, s chatbridge.Summary) {
-		if p, changed := e.store.SetSummary(paneID, (*state.Activity)(s.Activity), (*state.Ask)(s.Ask), s.BgRunning); changed {
+		sum := state.Summary{Activity: (*state.Activity)(s.Activity), Ask: (*state.Ask)(s.Ask), BgRunning: s.BgRunning, Context: (*state.Context)(s.Context)}
+		if p, changed := e.store.SetSummary(paneID, sum); changed {
 			e.srv.Broadcast(proto.PaneUpdate(p))
 		}
 	})
@@ -83,8 +108,12 @@ func New(cfg Config) *Engine {
 
 func (e *Engine) setEndpoint(ep string) {
 	e.mu.Lock()
+	changed := ep != e.endpoint
 	e.endpoint = ep
 	e.mu.Unlock()
+	if changed {
+		saveEndpoint(e.endpointPath, ep)
+	}
 }
 
 // Poke requests an immediate poll (coalesced with the ticker). Used by the
@@ -231,18 +260,21 @@ func (e *Engine) pollOnce(ctx context.Context) {
 		if ch.Kind == "removed" {
 			e.hub.Drop(ch.PaneID)
 			e.srv.Broadcast(proto.PaneRemoved(ch.PaneID))
+			// A closed pane's notification would only lead nowhere.
+			e.fire(ctx, notify.Clear(ch.PaneID, ch.Pane.WorkspaceID))
 		} else {
 			e.srv.Broadcast(proto.PaneUpdate(ch.Pane))
 		}
 	}
-	for _, tr := range transitions {
-		e.handleTransition(ctx, tr)
-	}
-
+	// Workspaces before transitions, so a notification title uses this poll's
+	// workspace label.
 	if ws, err := e.client.ListWorkspaces(ctx); err == nil {
 		if e.store.ApplyWorkspaces(ws) {
 			e.srv.Broadcast(proto.WorkspacesSnapshot(e.store.Workspaces()))
 		}
+	}
+	for _, tr := range transitions {
+		e.handleTransition(ctx, tr)
 	}
 	if tabs, err := e.client.ListTabs(ctx); err == nil {
 		if e.store.ApplyTabs(tabs) {
@@ -269,11 +301,16 @@ func (e *Engine) handleTransition(ctx context.Context, tr state.Transition) {
 			case <-ctx.Done():
 			case <-time.After(e.cfg.DebounceFinished):
 				for _, p := range e.store.Snapshot() {
-					if p.PaneID == tr.PaneID && p.AgentStatus == "working" {
+					if p.PaneID != tr.PaneID {
+						continue
+					}
+					if p.AgentStatus == "working" {
 						return // resumed; suppress
 					}
+					e.fire(ctx, push)
+					return
 				}
-				e.fire(ctx, push)
+				// The pane closed meanwhile: nothing to tell.
 			}
 		}()
 		return
@@ -281,12 +318,18 @@ func (e *Engine) handleTransition(ctx context.Context, tr state.Transition) {
 	e.fire(ctx, push)
 }
 
-// displayName returns the friendly pane name for notification titles: the cwd
-// basename (the project folder, e.g. "omega3") if present, else the workspace
-// id. Read from the store snapshot since a Transition carries only the id.
+// displayName returns the friendly pane name for notification titles: the
+// pane's workspace label, else the cwd basename (the project folder, e.g.
+// "omega3"), else the workspace id. Read from the store since a Transition
+// carries only the ids.
 func (e *Engine) displayName(paneID string) string {
 	for _, p := range e.store.Snapshot() {
 		if p.PaneID == paneID {
+			for _, w := range e.store.Workspaces() {
+				if w.WorkspaceID == p.WorkspaceID && w.Label != "" {
+					return w.Label
+				}
+			}
 			if b := filepath.Base(p.CWD); b != "" && b != "." && b != string(filepath.Separator) {
 				return b
 			}
