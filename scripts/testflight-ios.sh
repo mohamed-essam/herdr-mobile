@@ -68,6 +68,7 @@ want() { # <Info.plist key path> <value> <where it's set>
 log "Checking ${APP#"$REPO/"}…"
 want CFBundleIcons.CFBundlePrimaryIcon.CFBundleIconName AppIcon ASSETCATALOG_COMPILER_APPICON_NAME
 want ITSAppUsesNonExemptEncryption false HerdrMobile-Info.plist
+want MinimumOSVersion 18.0 IPHONEOS_DEPLOYMENT_TARGET
 
 plutil -lint -s "$APP/PrivacyInfo.xcprivacy" && ok "PrivacyInfo.xcprivacy present and lints" \
   || fail "PrivacyInfo.xcprivacy: expected a valid plist in the app bundle (ios/HerdrMobile/PrivacyInfo.xcprivacy)"
