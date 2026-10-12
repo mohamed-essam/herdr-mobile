@@ -1,0 +1,4 @@
+name: herdr-hermes
+version: 0.1.0
+description: "Streams a Hermes session to herdr-mobile's chat view."
+requires_env: []
