@@ -88,7 +88,7 @@ struct ThreadScreen: View {
             else { ("", c.overlay2) }
         VStack(spacing: 0) {
             PaneHeader(context: context, breadcrumb: [label, type == label ? nil : type].compactMap { $0 }.joined(separator: " · "),
-                       status: status, statusColor: color, onBack: onBack)
+                       status: status, statusColor: color, onBack: onBack, masksBreadcrumb: true)
             if view.missing {
                 VStack(spacing: 16) {
                     Text("This thread is no longer available").font(HerdrFont.body).foregroundStyle(c.overlay2)
@@ -225,6 +225,7 @@ private struct Composer: View {
                 .padding(.horizontal, 16).padding(.vertical, 14)
                 .background(c.base, in: .rect(cornerRadius: HerdrRadius.tile))
                 .accessibilityIdentifier("composer")
+                .maskedInReports()
             if hasText {
                 Button(action: onSend) {
                     Text("↑").font(HerdrFont.title).foregroundStyle(canSend ? c.crust : c.overlay0)
@@ -301,6 +302,7 @@ private struct TasksSheet: View {
                             .accessibilityIdentifier("task-\(t.id)")
                     }
                 }
+                .maskedInReports()
                 Spacer()
             }
             .padding(20)

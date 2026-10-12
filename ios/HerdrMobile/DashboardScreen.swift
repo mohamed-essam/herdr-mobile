@@ -261,21 +261,24 @@ private struct NeedsYouCard: View {
             }
             if let ask = pane.ask, let choice = ask.inlineChoice {
                 question(choice.question)
-                if let sending, sending.toolUseId == ask.toolUseId {
-                    SendingOptions(paneId: pane.paneId, item: choice, picked: sending.label)
-                } else {
-                    FlowLayout(spacing: 8) {
-                        ForEach(choice.options, id: \.label) { o in
-                            Button(o.label) { onAnswer(o.label) }
-                                .buttonStyle(SecondaryButtonStyle())
-                                .disabled(!enabled)
-                                .accessibilityIdentifier("choice-\(pane.paneId)-\(o.label)")
+                Group {
+                    if let sending, sending.toolUseId == ask.toolUseId {
+                        SendingOptions(paneId: pane.paneId, item: choice, picked: sending.label)
+                    } else {
+                        FlowLayout(spacing: 8) {
+                            ForEach(choice.options, id: \.label) { o in
+                                Button(o.label) { onAnswer(o.label) }
+                                    .buttonStyle(SecondaryButtonStyle())
+                                    .disabled(!enabled)
+                                    .accessibilityIdentifier("choice-\(pane.paneId)-\(o.label)")
+                            }
+                            Button("Other…", action: onOpen)
+                                .buttonStyle(SecondaryButtonStyle(ghost: true))
+                                .accessibilityIdentifier("other-\(pane.paneId)")
                         }
-                        Button("Other…", action: onOpen)
-                            .buttonStyle(SecondaryButtonStyle(ghost: true))
-                            .accessibilityIdentifier("other-\(pane.paneId)")
                     }
                 }
+                .maskedInReports()
             } else if let ask = pane.ask {
                 question(ask.questions.first?.question.nonEmpty ?? "Claude has a question")
                 Button("Answer in chat ›", action: onOpen)
@@ -285,6 +288,7 @@ private struct NeedsYouCard: View {
                 HStack {
                     Text(activityLine(pane.activity) ?? "Waiting for you")
                         .font(HerdrFont.body).foregroundStyle(c.subtext1).lineLimit(3)
+                        .maskedInReports()
                     Spacer()
                     Button("›", action: onOpen)
                         .buttonStyle(SecondaryButtonStyle(ghost: true, height: 40))
@@ -310,6 +314,7 @@ private struct NeedsYouCard: View {
 
     private func question(_ text: String) -> some View {
         Text(text).font(HerdrFont.body).foregroundStyle(c.text).accessibilityIdentifier("question-\(ctx.pane.paneId)")
+            .maskedInReports()
     }
 }
 
@@ -355,6 +360,7 @@ private struct ResumedRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(label) resumed").font(HerdrFont.title).foregroundStyle(c.text).lineLimit(1)
                 Text("You answered \(answer)").font(HerdrFont.small).foregroundStyle(c.overlay2).lineLimit(1)
+                    .maskedInReports()
             }
             Spacer()
             WorkspaceBadge(number: number, size: 20)
@@ -430,6 +436,7 @@ private struct PaneRow: View {
                 HStack(spacing: 8) {
                     Text(activityLine(pane.activity) ?? [pane.displayName, ctx.tabCrumb].filter { !$0.isEmpty }.joined(separator: " · "))
                         .font(HerdrFont.meta).foregroundStyle(c.subtext1).lineLimit(1)
+                        .maskedInReports()
                     if let badge = pane.bgBadge { BgChip(paneId: pane.paneId, text: badge) }
                 }
             }

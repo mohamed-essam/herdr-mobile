@@ -1,6 +1,15 @@
 {
-  "originHash" : "74e87cc4717bce1a466cf711d79248e7bf49f604aed092a6d922ec29bfed6685",
+  "originHash" : "82510aa6fb6475425789bd0276c569453c58e1f727f1c3730a7226c162c7daa9",
   "pins" : [
+    {
+      "identity" : "luciq-ios-sdk",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/luciqai/luciq-ios-sdk",
+      "state" : {
+        "revision" : "b09d42632eb1d21ccd03f3a61da0743f261553d7",
+        "version" : "19.11.0"
+      }
+    },
     {
       "identity" : "networkimage",
       "kind" : "remoteSourceControl",

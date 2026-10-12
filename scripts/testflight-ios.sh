@@ -58,9 +58,10 @@ xcodebuild -quiet -skipPackagePluginValidation -project "$REPO/ios/HerdrMobile.x
 failed=0
 fail() { printf '\033[31mFAIL\033[0m %s\n' "$*"; failed=1; }
 ok() { printf '\033[32mok\033[0m   %s\n' "$*"; }
+info() { plutil -extract "$1" raw -o - "$APP/Info.plist" 2>/dev/null || true; } # <key path>
 want() { # <Info.plist key path> <value> <where it's set>
   local got
-  got="$(plutil -extract "$1" raw -o - "$APP/Info.plist" 2>/dev/null || true)"
+  got="$(info "$1")"
   [[ $got == "$2" ]] && ok "$1 = $2" || fail "$1: expected $2, got '${got}' ($3)"
 }
 
@@ -70,6 +71,26 @@ want ITSAppUsesNonExemptEncryption false HerdrMobile-Info.plist
 
 plutil -lint -s "$APP/PrivacyInfo.xcprivacy" && ok "PrivacyInfo.xcprivacy present and lints" \
   || fail "PrivacyInfo.xcprivacy: expected a valid plist in the app bundle (ios/HerdrMobile/PrivacyInfo.xcprivacy)"
+
+# Luciq: Release, and so TestFlight, carries the production token and never the development one.
+# Both come from the gitignored xcconfig and are compared without printing either.
+TOKENS="$REPO/ios/Config/Luciq.local.xcconfig"
+token() { [[ -f $TOKENS ]] && sed -nE "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*([^[:space:]]*).*/\1/p" "$TOKENS" | tail -1 || true; }
+dev="$(token LUCIQ_APP_TOKEN_DEBUG)"
+prod="$(token LUCIQ_APP_TOKEN_RELEASE)"
+got="$(info LuciqAppToken)"
+if [[ -n $prod ]]; then
+  [[ $got == "$prod" ]] && ok "LuciqAppToken is the production token" \
+    || fail "LuciqAppToken: expected the production token (LUCIQ_APP_TOKEN_RELEASE, ios/Config/Luciq.xcconfig)"
+else
+  [[ -z $got ]] && ok "LuciqAppToken empty: no production token, Luciq off" \
+    || fail "LuciqAppToken: expected empty without LUCIQ_APP_TOKEN_RELEASE in ${TOKENS#"$REPO/"}"
+fi
+if [[ -n $dev ]] && grep -rqF -f <(printf '%s\n' "$dev") "$APP"; then
+  fail "the development token is in the app bundle (LUCIQ_APP_TOKEN_DEBUG belongs to Debug only)"
+else
+  ok "no development token in the app bundle"
+fi
 
 icon_info="$(sips -g hasAlpha -g pixelWidth -g pixelHeight "$ICON" 2>&1)"
 [[ $icon_info == *"hasAlpha: no"* && $icon_info == *"pixelWidth: 1024"* && $icon_info == *"pixelHeight: 1024"* ]] \

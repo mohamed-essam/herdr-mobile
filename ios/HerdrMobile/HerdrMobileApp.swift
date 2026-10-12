@@ -6,6 +6,7 @@ struct HerdrMobileApp: App {
     private let options: LaunchOptions
 
     init() {
+        LuciqReports.start() // first, to catch everything after launch
         options = LaunchOptions.load(from: .standard, domain: Bundle.main.bundleIdentifier!)
         if options.disableAnimations {
             UIView.setAnimationsEnabled(false)

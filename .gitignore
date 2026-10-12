@@ -25,3 +25,5 @@ mod/herdr-chat/.claude-plugin/types/
 /ios/HerdrKit/.build/
 /ios/HerdrKit/.swiftpm/
 xcuserdata/
+# Luciq app tokens (copy ios/Config/Luciq.local.xcconfig.example)
+/ios/Config/Luciq.local.xcconfig

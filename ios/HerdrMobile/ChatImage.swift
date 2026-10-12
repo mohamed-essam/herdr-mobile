@@ -107,6 +107,7 @@ struct ImageViewer: View {
         .accessibilityLabel("image")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("imageViewer")
+        .maskedInReports()
     }
 
     /// Panning stops at the zoomed image's edges.

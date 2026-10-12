@@ -106,6 +106,7 @@ struct ChatTimelineView: View {
                     .accessibilityIdentifier("loadingEarlier")
             }
         }
+        .maskedInReports()
     }
 
     /// Pages back while the oldest item is in view. A rejected page leaves `hasMore` set, so

@@ -34,6 +34,7 @@ struct TerminalScreen: View {
             ZStack {
                 TerminalSurface(session: session, mods: $mods)
                     .accessibilityIdentifier("terminal")
+                    .maskedInReports()
                 if let exit = session.exit {
                     ExitOverlay(copy: exit) { Task { await session.reattach() } }
                 } else if session.showsReconnectOverlay {

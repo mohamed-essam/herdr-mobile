@@ -1,0 +1,11 @@
+// Luciq app tokens for the HerdrMobile target, read into Info.plist as LuciqAppToken.
+// The values live in the gitignored Luciq.local.xcconfig (copy Luciq.local.xcconfig.example);
+// without it both stay empty and the app runs with Luciq off. Kept outside the synchronized
+// HerdrMobile/ folder so neither file is copied into the app.
+LUCIQ_APP_TOKEN_DEBUG =
+LUCIQ_APP_TOKEN_RELEASE =
+#include? "Luciq.local.xcconfig"
+
+// Debug reports to the development app; Release, and so TestFlight, to production.
+LUCIQ_APP_TOKEN[config=Debug] = $(LUCIQ_APP_TOKEN_DEBUG)
+LUCIQ_APP_TOKEN[config=Release] = $(LUCIQ_APP_TOKEN_RELEASE)

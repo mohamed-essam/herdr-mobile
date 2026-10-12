@@ -18,6 +18,8 @@ struct PaneHeader: View {
     let statusColor: Color
     let onBack: () -> Void
     var toggle: Toggle?
+    /// For a breadcrumb that quotes the agent (a thread's subagent label).
+    var masksBreadcrumb = false
     @Environment(\.herdr) private var c
 
     var body: some View {
@@ -48,9 +50,10 @@ struct PaneHeader: View {
                     Text(context.workspaceLabel).font(HerdrFont.display).foregroundStyle(c.text).lineLimit(1)
                         .accessibilityIdentifier("chatTitle")
                 }
-                Text("\(breadcrumb.isEmpty ? "" : "\(breadcrumb) · ")\(Text(status).foregroundStyle(statusColor))")
+                let line = Text("\(breadcrumb.isEmpty ? "" : "\(breadcrumb) · ")\(Text(status).foregroundStyle(statusColor))")
                     .font(HerdrFont.meta).foregroundStyle(c.overlay2).lineLimit(1)
                     .accessibilityIdentifier("chatStatus")
+                if masksBreadcrumb { line.maskedInReports() } else { line }
             }
             .padding(.horizontal, 20).padding(.top, 4).padding(.bottom, 16)
             Rectangle().fill(c.base).frame(height: 1)

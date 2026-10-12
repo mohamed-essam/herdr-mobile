@@ -42,6 +42,7 @@ struct QuestionSheet: View {
         .overlay(alignment: .top) { Rectangle().fill(c.red.opacity(0.25)).frame(height: 1).padding(.horizontal, 20) }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("questionSheet")
+        .maskedInReports()
     }
 
     private func fields(_ active: Bool) -> some View {

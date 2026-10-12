@@ -10,10 +10,12 @@
 		4D0000000000000000000010 /* HerdrKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4D0000000000000000000011 /* HerdrKit */; };
 		4D0000000000000000000013 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 4D0000000000000000000014 /* MarkdownUI */; };
 		4D0000000000000000000016 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 4D0000000000000000000017 /* SwiftTerm */; };
+		4D0000000000000000000019 /* Luciq in Frameworks */ = {isa = PBXBuildFile; productRef = 4D000000000000000000001A /* Luciq */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		4D0000000000000000000001 /* HerdrMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HerdrMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4D000000000000000000001C /* Luciq.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Luciq.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -32,6 +34,7 @@
 				4D0000000000000000000010 /* HerdrKit in Frameworks */,
 				4D0000000000000000000013 /* MarkdownUI in Frameworks */,
 				4D0000000000000000000016 /* SwiftTerm in Frameworks */,
+				4D0000000000000000000019 /* Luciq in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -42,8 +45,17 @@
 			isa = PBXGroup;
 			children = (
 				4D0000000000000000000002 /* HerdrMobile */,
+				4D000000000000000000001D /* Config */,
 				4D0000000000000000000005 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		4D000000000000000000001D /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				4D000000000000000000001C /* Luciq.xcconfig */,
+			);
+			path = Config;
 			sourceTree = "<group>";
 		};
 		4D0000000000000000000005 /* Products */ = {
@@ -77,6 +89,7 @@
 				4D0000000000000000000011 /* HerdrKit */,
 				4D0000000000000000000014 /* MarkdownUI */,
 				4D0000000000000000000017 /* SwiftTerm */,
+				4D000000000000000000001A /* Luciq */,
 			);
 			productName = HerdrMobile;
 			productReference = 4D0000000000000000000001 /* HerdrMobile.app */;
@@ -110,6 +123,7 @@
 				4D0000000000000000000012 /* XCLocalSwiftPackageReference "HerdrKit" */,
 				4D0000000000000000000015 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 				4D0000000000000000000018 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
+				4D000000000000000000001B /* XCRemoteSwiftPackageReference "luciq-ios-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 4D0000000000000000000005 /* Products */;
@@ -186,6 +200,7 @@
 		};
 		4D000000000000000000000E /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D000000000000000000001C /* Luciq.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
@@ -216,6 +231,7 @@
 		};
 		4D000000000000000000000F /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D000000000000000000001C /* Luciq.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
@@ -291,6 +307,14 @@
 				version = 1.11.2;
 			};
 		};
+		4D000000000000000000001B /* XCRemoteSwiftPackageReference "luciq-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/luciqai/luciq-ios-sdk";
+			requirement = {
+				kind = exactVersion;
+				version = 19.11.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -307,6 +331,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 4D0000000000000000000018 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
 			productName = SwiftTerm;
+		};
+		4D000000000000000000001A /* Luciq */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4D000000000000000000001B /* XCRemoteSwiftPackageReference "luciq-ios-sdk" */;
+			productName = Luciq;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
