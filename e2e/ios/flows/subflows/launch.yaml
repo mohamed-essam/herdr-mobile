@@ -1,5 +1,5 @@
 # Load SCENARIO in the fake companion and launch a fresh app on it, clock frozen.
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runScript:
     file: ../../scripts/control.js

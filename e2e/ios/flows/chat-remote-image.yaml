@@ -1,6 +1,6 @@
 # Agent-written Markdown never loads an image itself (brief override 5): a message with a
 # remote image, inline and as a block, shows its text and makes no request.
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runFlow:
     file: subflows/open-chat.yaml

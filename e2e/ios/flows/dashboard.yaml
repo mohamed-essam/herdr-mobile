@@ -1,6 +1,6 @@
 # The dashboard scenario renders as sections, blocked first; the switcher groups by repo;
 # a pane_update mid-flow shows up live.
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runFlow:
     file: subflows/launch.yaml

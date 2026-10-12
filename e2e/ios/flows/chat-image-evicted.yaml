@@ -1,6 +1,6 @@
 # An image still on screen opens full screen after the 30-image cache evicted it: the
 # viewer shows the bytes the row decoded, not a blank cover with no way out.
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runFlow:
     file: subflows/launch.yaml

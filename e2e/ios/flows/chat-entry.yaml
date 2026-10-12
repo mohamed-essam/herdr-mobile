@@ -1,7 +1,7 @@
 # Every dashboard control that opens a pane opens its chat (row tap, "›", "Answer in chat ›",
 # "Other…"); a shell has no chat and opens its terminal. Back closes the chat. A pane
 # whose mod stops reporting shows the banner; a pane that goes away pops back to the dashboard.
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runFlow:
     file: subflows/launch.yaml

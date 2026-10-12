@@ -1,6 +1,6 @@
 # A dropped socket shows "reconnecting…" over a dead key bar; the reconnect opens a fresh
 # attach (the companion killed the old PTY).
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runFlow: subflows/open-terminal.yaml
 - runScript:

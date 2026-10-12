@@ -1,5 +1,5 @@
 # Send the scenario's frames named NAME (POST /play).
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runScript:
     file: ../../scripts/control.js

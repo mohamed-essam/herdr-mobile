@@ -1,5 +1,5 @@
 # Tapping an option chip on a "needs you" card answers the question in place (chat_answer).
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runFlow:
     file: subflows/launch.yaml

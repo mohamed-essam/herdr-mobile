@@ -1,7 +1,7 @@
 # A pending question pins a sheet where the composer was. "Other…" on the dashboard leads
 # here, where a typed answer is sent with chat_answer; the sheet goes once the question's
 # result arrives, and the history shows the answer. A multi-question ask needs every answer.
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runFlow:
     file: subflows/launch.yaml

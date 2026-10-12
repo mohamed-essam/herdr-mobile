@@ -1,7 +1,7 @@
 # Subagent and workflow cards: the subagent card shows its summary and opens its thread
 # (read-only), its header following the summary; a nested card stacks another thread; a missing thread says so; back walks up
 # the stack to the chat. The workflow card groups its agents by phase and folds past six.
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runFlow:
     file: subflows/open-chat.yaml

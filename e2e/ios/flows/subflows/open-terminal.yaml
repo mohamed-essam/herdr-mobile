@@ -1,5 +1,5 @@
 # Launch the "terminal" scenario and open the shell pane w1:p1 in its terminal, attached.
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runFlow:
     file: launch.yaml

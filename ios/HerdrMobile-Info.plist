@@ -12,6 +12,9 @@
 	<array>
 		<string>JetBrainsMono-Regular.ttf</string>
 	</array>
+	<!-- Export compliance: the app's own traffic is cleartext ws://; WireGuard encryption belongs to the Tailscale app. Without this, each TestFlight build waits in "Missing Compliance". -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

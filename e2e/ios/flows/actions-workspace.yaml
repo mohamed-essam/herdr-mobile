@@ -1,6 +1,6 @@
 # Workspace actions: "+" creates a workspace, a tile's sheet adds a tab, and closing a
 # base worktree workspace warns about the linked one it also closes.
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runFlow:
     file: subflows/launch.yaml

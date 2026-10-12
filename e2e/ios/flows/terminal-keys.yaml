@@ -1,6 +1,6 @@
 # Each key-bar key sends its xterm bytes; ctrl and alt arm for one typed key on a tap, lock
 # on a long press, and a bar key drops a lingering one-shot. The bar hides and comes back.
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runFlow: subflows/open-terminal.yaml
 - tapOn: { id: key-esc }

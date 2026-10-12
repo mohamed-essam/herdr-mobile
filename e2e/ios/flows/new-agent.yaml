@@ -1,6 +1,6 @@
 # The New Agent picker lists the companion's agents, starts one, remembers it as recent,
 # and runs a typed "Other…" command.
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runFlow:
     file: subflows/launch.yaml

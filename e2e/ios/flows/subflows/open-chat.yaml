@@ -1,5 +1,5 @@
 # Launch the "chat" scenario and open pane ROW (a dashboard row id, e.g. row-w1:p1) in chat.
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runFlow:
     file: launch.yaml

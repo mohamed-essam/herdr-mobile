@@ -1,6 +1,6 @@
 # Scrolling to the top pages back through older history, and a summary that arrived before
 # its parent card shows on that card once the page with its call comes in.
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runFlow:
     file: subflows/open-chat.yaml

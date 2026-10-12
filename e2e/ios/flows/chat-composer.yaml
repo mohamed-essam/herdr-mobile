@@ -1,6 +1,6 @@
 # The composer: Interrupt (esc) while the agent works, a message queued while it is busy
 # and confirmed when it is delivered, and a failed send with Retry.
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runFlow:
     file: subflows/open-chat.yaml

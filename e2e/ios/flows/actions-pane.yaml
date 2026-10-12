@@ -1,6 +1,6 @@
 # A pane's action sheet: rename, split, move, the "Tab actions" pivot, and a shell's close
 # (no confirmation). Each sends its frame, checked through GET /received.
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runFlow:
     file: subflows/launch.yaml

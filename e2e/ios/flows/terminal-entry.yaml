@@ -1,7 +1,7 @@
 # Every way into a terminal: the chat's ">_ terminal" toggle and back to a fresh chat, the
 # "chat unavailable" banner's "Open terminal" (no chat toggle once the mod stops), and a
 # created pane opening by its terminalId once it shows up.
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runFlow:
     file: subflows/launch.yaml

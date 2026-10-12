@@ -1,6 +1,6 @@
 # The background-tasks strip counts the pane's tasks; its sheet lists them, and picking a
 # subagent's row scrolls the chat to its card. A live chat_tasks replaces the list.
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runFlow:
     file: subflows/launch.yaml

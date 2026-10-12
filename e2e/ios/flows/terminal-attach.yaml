@@ -1,6 +1,6 @@
 # Opening a shell pane attaches its terminal with the emulator's size; the header shows
 # the pane and "attached", and the attach program's input reaches the fake.
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runFlow: subflows/open-terminal.yaml
 - assertVisible: { id: chatTitle, text: shell }

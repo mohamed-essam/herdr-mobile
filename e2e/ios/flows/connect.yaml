@@ -1,5 +1,5 @@
 # Launch against the fake companion and see the dashboard connected; stop it and see "Reconnecting".
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runFlow:
     file: subflows/launch.yaml

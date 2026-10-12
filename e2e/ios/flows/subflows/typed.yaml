@@ -1,5 +1,5 @@
 # Assert terminal term_1 has been typed into, ending with WANT (a JSON string).
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runScript:
     file: ../../scripts/typed.js

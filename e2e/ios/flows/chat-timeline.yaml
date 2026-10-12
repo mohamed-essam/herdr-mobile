@@ -1,7 +1,7 @@
 # A chat opens at its newest message and follows live output. Markdown, timestamps, the
 # tool rail (tap to expand), inline images reserved from imageSizes with a full-screen
 # viewer, task notices, and the link rule (only http(s) and mailto open).
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runFlow:
     file: subflows/open-chat.yaml

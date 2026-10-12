@@ -1,5 +1,5 @@
 # The terminal ending shows the exit overlay with its reason; Reattach opens a new attach.
-appId: dev.herdr.mobile
+appId: dev.instabug.herdr.mobile
 ---
 - runFlow: subflows/open-terminal.yaml
 - runScript:
