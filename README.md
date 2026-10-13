@@ -189,6 +189,8 @@ no App Store review, and only people on your App Store Connect team can install 
   Access → Integrations → App Store Connect API → Team Keys → **+**, Access: **Admin**. Note the
   **Key ID** and the **Issuer ID** shown on that page, and download the `.p8` file (Apple
   lets you download it once). Keep the `.p8` outside this repo, e.g. `~/.appstoreconnect/`.
+  The herdr app's existing key (the `.p8`, its Key ID and the Issuer ID) is in 1Password with
+  yousefhamza; ask them for it instead of making a new one.
 - **Xcode 26.6.** If `xcode-select -p` points at another Xcode, prefix each command below with
   `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` to run it with Xcode 26.6
   without changing your default, e.g.
@@ -234,6 +236,10 @@ no App Store review, and only people on your App Store Connect team can install 
    Store Connect has processed it.` Processing takes a few minutes; App Store Connect emails you
    when the build is ready. Run it again for each new build: Xcode raises the build number on
    upload.
+
+   Uploading from the command line needs this API key. Being signed in to Xcode with your Apple
+   ID is not enough: `xcodebuild` then fails with `Failed to find an account with App Store
+   Connect access`. Without the key, use the Xcode alternative below.
 
 4. **Add internal testers** once, in App Store Connect → Apps → your app → TestFlight →
    Internal Testing → **+**: create a group, tick **Enable automatic distribution**, and add
