@@ -1,0 +1,19 @@
+# Launch against the fake companion and see the dashboard connected; stop it and see "Reconnecting".
+appId: dev.instabug.herdr.mobile
+---
+- runFlow:
+    file: subflows/launch.yaml
+    env:
+      SCENARIO: one-idle-pane
+- assertVisible:
+    id: paneCount
+    text: 1 pane
+- runScript:
+    file: ../scripts/control.js
+    env:
+      ENDPOINT: /stop
+- extendedWaitUntil:
+    visible:
+      id: reconnecting
+      text: Reconnecting.*
+    timeout: 15000

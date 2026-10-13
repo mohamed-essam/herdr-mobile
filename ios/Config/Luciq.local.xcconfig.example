@@ -1,0 +1,5 @@
+// Copy to Luciq.local.xcconfig (gitignored, never committed) and fill in the app tokens from
+// the Luciq dashboard (Settings → SDK Integration). Debug builds use the development app's
+// token; Release, and so TestFlight, the production app's.
+LUCIQ_APP_TOKEN_DEBUG =
+LUCIQ_APP_TOKEN_RELEASE =

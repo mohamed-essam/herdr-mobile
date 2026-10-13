@@ -1,0 +1,37 @@
+{
+  "workspaces": [
+    {"workspaceId": "w1", "label": "shell", "number": 1, "focused": true, "paneCount": 1, "tabCount": 1, "lastActivity": 1791279000000},
+    {"workspaceId": "w2", "label": "app", "number": 2, "agentStatus": "idle", "focused": false, "paneCount": 1, "tabCount": 1, "lastActivity": 1791279000000}
+  ],
+  "tabs": [
+    {"tabId": "w1:t1", "label": "1", "number": 1, "workspaceId": "w1", "focused": true, "paneCount": 1},
+    {"tabId": "w2:t1", "label": "1", "number": 1, "workspaceId": "w2", "agentStatus": "idle", "focused": true, "paneCount": 1}
+  ],
+  "panes": [
+    {"paneId": "w1:p1", "workspaceId": "w1", "tabId": "w1:t1", "terminalId": "term_1", "cwd": "/Users/dev/shell", "focused": true},
+    {"paneId": "w2:p1", "workspaceId": "w2", "tabId": "w2:t1", "terminalId": "term_2", "cwd": "/Users/dev/app", "focused": false,
+     "agent": "claude", "agentStatus": "idle", "chat": true}
+  ],
+  "chats": {
+    "w2:p1": {"events": [{"seq": 1, "event": {"type": "assistant_text", "uuid": "a1", "text": "Ready when you are.", "ts": 1791278640000}}]}
+  },
+  "created": {"paneId": "w3:p1", "terminalId": "term_9"},
+  "frames": {
+    "chat-off": [
+      {"t": "pane_update", "pane": {"paneId": "w2:p1", "workspaceId": "w2", "tabId": "w2:t1", "terminalId": "term_2", "cwd": "/Users/dev/app", "focused": false, "agent": "claude", "agentStatus": "idle"}}
+    ],
+    "new-pane": [
+      {"t": "workspaces", "workspaces": [
+        {"workspaceId": "w1", "label": "shell", "number": 1, "focused": false, "paneCount": 1, "tabCount": 1, "lastActivity": 1791279000000},
+        {"workspaceId": "w2", "label": "app", "number": 2, "agentStatus": "idle", "focused": false, "paneCount": 1, "tabCount": 1, "lastActivity": 1791279000000},
+        {"workspaceId": "w3", "label": "scratch", "number": 3, "focused": true, "paneCount": 1, "tabCount": 1, "lastActivity": 1791279000000}
+      ]},
+      {"t": "tabs", "tabs": [
+        {"tabId": "w1:t1", "label": "1", "number": 1, "workspaceId": "w1", "focused": true, "paneCount": 1},
+        {"tabId": "w2:t1", "label": "1", "number": 1, "workspaceId": "w2", "agentStatus": "idle", "focused": true, "paneCount": 1},
+        {"tabId": "w3:t1", "label": "1", "number": 1, "workspaceId": "w3", "focused": true, "paneCount": 1}
+      ]},
+      {"t": "pane_update", "pane": {"paneId": "w3:p1", "workspaceId": "w3", "tabId": "w3:t1", "terminalId": "term_9", "cwd": "/Users/dev/scratch", "focused": true}}
+    ]
+  }
+}

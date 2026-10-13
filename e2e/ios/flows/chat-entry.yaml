@@ -1,0 +1,61 @@
+# Every dashboard control that opens a pane opens its chat (row tap, "›", "Answer in chat ›",
+# "Other…"); a shell has no chat and opens its terminal. Back closes the chat. A pane
+# whose mod stops reporting shows the banner; a pane that goes away pops back to the dashboard.
+appId: dev.instabug.herdr.mobile
+---
+- runFlow:
+    file: subflows/launch.yaml
+    env:
+      SCENARIO: chat
+- tapOn: { id: "open-w4:p1" }
+- assertVisible: { id: chatTitle, text: notes }
+- assertVisible: { id: chatStatus, text: ".*claude · idle" }
+- tapOn: { id: chatBack }
+- tapOn: { id: "answerInChat-w2:p1" }
+- assertVisible: { id: chatTitle, text: ask }
+- tapOn: { id: chatBack }
+- scrollUntilVisible:
+    element: { id: "other-w5:p1" }
+- tapOn: { id: "other-w5:p1" }
+- assertVisible: { id: chatTitle, text: pick }
+- tapOn: { id: chatBack }
+- scrollUntilVisible:
+    element: { id: "row-w1:p2" }
+- tapOn: { id: "row-w1:p2" }
+- extendedWaitUntil:
+    visible: { id: chatStatus, text: ".*attached" }
+    timeout: 10000
+- assertNotVisible: { id: composer }
+- tapOn: { id: chatBack }
+- tapOn: { id: "row-w1:p1" }
+- assertVisible: { id: chatTitle, text: app }
+- assertVisible: { id: terminalToggle, enabled: true }
+- runScript:
+    file: ../scripts/received.js
+    env:
+      CALL: ChatSubscribe
+      ARGS: '["w1:p1",""]'
+- tapOn: { id: chatBack }
+- assertVisible: { id: paneCount }
+- runScript:
+    file: ../scripts/received.js
+    env:
+      CALL: ChatClose
+      ARGS: '["w1:p1",""]'
+
+# The mod stops reporting, then the pane closes.
+- scrollUntilVisible:
+    element: { id: "row-w1:p1" }
+- tapOn: { id: "row-w1:p1" }
+- runFlow:
+    file: subflows/play.yaml
+    env:
+      NAME: chat-off
+- assertVisible: { id: unavailableBanner, text: ".*chat unavailable — mod not reporting.*" }
+- assertVisible: { id: openTerminal, enabled: true }
+- runFlow:
+    file: subflows/play.yaml
+    env:
+      NAME: app-removed
+- assertVisible: { id: paneCount, text: 5 panes }
+- assertNotVisible: { id: chatTitle }

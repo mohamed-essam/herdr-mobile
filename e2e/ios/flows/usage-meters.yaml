@@ -1,0 +1,47 @@
+# Usage meters: the 5h/7d limits strip on the dashboard, a context bar per agent row, and
+# the usage line in the chat and terminal headers. An old reading shows its age, and one
+# whose every window has reset is hidden.
+appId: dev.instabug.herdr.mobile
+---
+- runFlow:
+    file: subflows/launch.yaml
+    env:
+      SCENARIO: usage
+- assertVisible: { id: limit-five_hour, text: "5h 42% ↻ 2h13m" }
+- assertVisible: { id: limit-seven_day, text: "7d 18% ↻ Thu .*" }
+- assertNotVisible: { id: limitsAge }
+- assertVisible: { id: "ctx-w1:p1", text: "context 61%" }
+- assertVisible: { id: "ctx-w2:p1", text: "context 92%" }
+- assertNotVisible: { id: "ctx-w3:p1" }
+
+- tapOn: { id: "row-w1:p1" }
+- assertVisible: { id: usageLine, text: "ctx 61% · 5h 42% ↻ 2h13m · 7d 18% ↻ Thu .*" }
+- tapOn: { id: terminalToggle }
+- assertVisible: { id: usageLine, text: "ctx 61% · 5h 42% ↻ 2h13m · 7d 18% ↻ Thu .*" }
+- tapOn: { id: chatBack }
+
+# Three hours old: the 5h window has reset since, the 7d one still counts.
+- runFlow:
+    file: subflows/play.yaml
+    env:
+      NAME: aged
+- assertVisible: { id: limit-five_hour, text: "5h —" }
+- assertVisible: { id: limit-seven_day, text: "7d 64% ↻ Thu .*" }
+- assertVisible: { id: limitsAge, text: "as of 3h ago" }
+
+# Every window reset and no mod reporting: nothing to show, here or in a header.
+- runFlow:
+    file: subflows/play.yaml
+    env:
+      NAME: reset
+- assertNotVisible: { id: limitsStrip }
+- tapOn: { id: "row-w2:p1" }
+- assertVisible: { id: usageLine, text: "ctx 92%" }
+- tapOn: { id: chatBack }
+- scrollUntilVisible:
+    element: { id: "row-w3:p1" }
+- tapOn: { id: "row-w3:p1" }
+- extendedWaitUntil:
+    visible: { id: chatStatus }
+    timeout: 5000
+- assertNotVisible: { id: usageLine }

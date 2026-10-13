@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged into the generated Info.plist. Kept outside the synchronized HerdrMobile/ folder so it isn't also copied as a resource. -->
+<plist version="1.0">
+<dict>
+	<!-- The companion speaks cleartext ws:// over the tailnet (WireGuard encrypts it), as Android's usesCleartextTraffic="true". Without this, ATS blocks hostnames such as box.tailnet.ts.net (IPs are exempt). -->
+	<!-- Shown if iOS asks before the app reaches a companion on the local network (a LAN address rather than a tailnet one). -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>herdr connects to the herdr companion running on your computer.</string>
+	<!-- The terminal and its key bar use JetBrains Mono (OFL, licence in Fonts/), as on Android. -->
+	<key>UIAppFonts</key>
+	<array>
+		<string>JetBrainsMono-Regular.ttf</string>
+	</array>
+	<!-- Export compliance: the app's own traffic is cleartext ws://; WireGuard encryption belongs to the Tailscale app. Without this, each TestFlight build waits in "Missing Compliance". -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<!-- Luciq's app token for this configuration (ios/Config/Luciq.xcconfig). Empty without the gitignored token file, and Luciq stays off. -->
+	<key>LuciqAppToken</key>
+	<string>$(LUCIQ_APP_TOKEN)</string>
+	<!-- Luciq's bug report form can attach voice notes and images. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>herdr needs access to your microphone so you can attach voice notes to bug reports.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>herdr needs access to your photo library so you can attach images to bug reports.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+</dict>
+</plist>

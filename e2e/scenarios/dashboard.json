@@ -1,0 +1,31 @@
+{
+  "workspaces": [
+    {"workspaceId": "w1", "label": "api", "number": 1, "agentStatus": "blocked", "focused": true, "paneCount": 3, "tabCount": 2, "lastActivity": 1791279000000, "worktree": {"repoName": "shop"}},
+    {"workspaceId": "w2", "label": "api-feature", "number": 2, "agentStatus": "done", "focused": false, "paneCount": 1, "tabCount": 1, "lastActivity": 1791278000000, "worktree": {"repoName": "shop", "isLinkedWorktree": true}},
+    {"workspaceId": "w3", "label": "notes", "number": 3, "agentStatus": "idle", "focused": false, "paneCount": 1, "tabCount": 1, "lastActivity": 1791270000000}
+  ],
+  "tabs": [
+    {"tabId": "w1:t1", "label": "1", "number": 1, "workspaceId": "w1", "agentStatus": "blocked", "focused": true, "paneCount": 2},
+    {"tabId": "w1:t2", "label": "2", "number": 2, "workspaceId": "w1", "agentStatus": "working", "focused": false, "paneCount": 1},
+    {"tabId": "w2:t1", "label": "1", "number": 1, "workspaceId": "w2", "agentStatus": "done", "focused": false, "paneCount": 1},
+    {"tabId": "w3:t1", "label": "1", "number": 1, "workspaceId": "w3", "agentStatus": "idle", "focused": false, "paneCount": 1}
+  ],
+  "panes": [
+    {"paneId": "w1:p1", "workspaceId": "w1", "tabId": "w1:t1", "terminalId": "term_1", "cwd": "/Users/dev/shop", "focused": true, "agent": "claude", "agentStatus": "blocked", "chat": true,
+     "activity": {"kind": "question", "text": "Which database?", "ts": 1791279000000},
+     "ask": {"toolUseId": "toolu_db", "questions": [{"question": "Which database?", "header": "DB", "options": [{"label": "Postgres", "description": "relational"}, {"label": "SQLite"}], "multiSelect": false}]}},
+    {"paneId": "w1:p2", "workspaceId": "w1", "tabId": "w1:t1", "terminalId": "term_2", "cwd": "/Users/dev/shop", "focused": false},
+    {"paneId": "w1:p3", "workspaceId": "w1", "tabId": "w1:t2", "terminalId": "term_3", "cwd": "/Users/dev/shop", "focused": false, "agent": "codex", "agentStatus": "working",
+     "activity": {"kind": "tool", "tool": "Bash", "text": "Bash: npm test", "ts": 1791278900000}, "bgRunning": 2},
+    {"paneId": "w2:p1", "workspaceId": "w2", "tabId": "w2:t1", "terminalId": "term_4", "cwd": "/Users/dev/shop-feature", "focused": false, "agent": "claude", "agentStatus": "done",
+     "activity": {"kind": "text", "text": "All tests pass.", "ts": 1791278000000}},
+    {"paneId": "w3:p1", "workspaceId": "w3", "tabId": "w3:t1", "terminalId": "term_5", "cwd": "/Users/dev/wiki", "focused": false, "agent": "claude", "agentStatus": "idle"}
+  ],
+  "agents": ["claude", "codex", "gemini"],
+  "worktrees": {
+    "w1": [
+      {"path": "/Users/dev/shop", "branch": "main", "is_linked_worktree": false, "open_workspace_id": "w1"},
+      {"path": "/Users/dev/shop-feature", "branch": "feature", "is_linked_worktree": true, "open_workspace_id": "w2"}
+    ]
+  }
+}

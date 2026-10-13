@@ -1,0 +1,89 @@
+# Saved servers: the dashboard's server chip opens the list; add one (an address already
+# saved is refused), rename it, switch, remove the active one, and back out of adding a
+# server that never answers, which keeps the previous one. The list survives a relaunch,
+# and -resetState clears it. One fake companion stands in for two servers: 127.0.0.1 and
+# localhost reach the same port; port 1 is a server that is down.
+appId: dev.instabug.herdr.mobile
+---
+- runFlow:
+    file: subflows/launch.yaml
+    env:
+      SCENARIO: one-idle-pane
+- assertVisible: { id: serverChip, text: "127.0.0.1:18787.*" }
+
+# Add a second server.
+- tapOn: { id: serverChip }
+- assertVisible: { id: "server-127.0.0.1:18787", text: ".*✓.*" }
+- tapOn: { id: addServer }
+- tapOn: { id: addressField }
+- inputText: "127.0.0.1:18787"
+- assertVisible: { id: addressError, text: "Already saved as 127.0.0.1:18787." }
+- assertVisible: { id: connectButton, enabled: false }
+- eraseText: 20
+- inputText: "localhost:18787"
+- tapOn: { id: connectButton }
+- extendedWaitUntil:
+    visible: { id: seeWhoNeedsYou }
+    timeout: 10000
+- tapOn: { id: seeWhoNeedsYou }
+- assertVisible: { id: serverChip, text: "localhost:18787.*" }
+- assertVisible: { id: paneCount, text: "1 pane" }
+
+# Rename it.
+- tapOn: { id: serverChip }
+- tapOn: { id: "serverMenu-localhost:18787" }
+- tapOn: { text: Rename }
+- tapOn: { id: serverRenameField }
+- eraseText: 20
+- inputText: laptop
+- tapOn: { id: serverRenameSave }
+- assertVisible: { id: serverChip, text: "laptop.*" }
+
+# Switch back, then remove the active server: the other one takes over.
+- tapOn: { id: serverChip }
+- assertVisible: { id: server-laptop, text: ".*✓.*" }
+- tapOn: { id: "server-127.0.0.1:18787" }
+- assertVisible: { id: serverChip, text: "127.0.0.1:18787.*" }
+- assertVisible: { id: paneCount, text: "1 pane" }
+- tapOn: { id: serverChip }
+- tapOn: { id: "serverMenu-127.0.0.1:18787" }
+- tapOn: { text: Remove }
+- tapOn: { id: serverRemoveConfirm }
+- assertVisible: { id: serverChip, text: "laptop.*" }
+- assertVisible: { id: paneCount, text: "1 pane" }
+
+# Back out of adding a server that is down: the previous one stays.
+- tapOn: { id: serverChip }
+- tapOn: { id: addServer }
+- tapOn: { id: addressField }
+- inputText: "127.0.0.1:1"
+- tapOn: { id: connectButton }
+- extendedWaitUntil:
+    visible: { id: backButton }
+    timeout: 15000
+- tapOn: { id: backButton }
+- tapOn: { id: connectBack }
+- assertVisible: { id: serverChip, text: "laptop.*" }
+- extendedWaitUntil:
+    visible: { id: paneCount, text: "1 pane" }
+    timeout: 5000
+
+# Saved across a relaunch; -resetState clears the list.
+- launchApp:
+    stopApp: true
+    arguments:
+      disableAnimations: "YES"
+      fixedNow: "2026-10-06T09:35:00Z"
+- extendedWaitUntil:
+    visible: { id: serverChip, text: "laptop.*" }
+    timeout: 10000
+- tapOn: { id: serverChip }
+- assertNotVisible: { id: "server-127.0.0.1:18787" }
+- launchApp:
+    stopApp: true
+    arguments:
+      resetState: "YES"
+- extendedWaitUntil:
+    visible: { id: addressField }
+    timeout: 10000
+- assertNotVisible: { id: connectBack }

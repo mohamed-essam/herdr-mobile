@@ -108,6 +108,11 @@ func (s *Server) SetHerdrInfo(ver string, prot int)                { s.herdrVer,
 func (s *Server) SetPoke(fn func())                                { s.poke = fn }
 func (s *Server) SetChat(h ChatHub)                                { s.chat = h }
 
+// SetAttachArgv replaces the program term_open runs for a target (default:
+// `herdr terminal attach <target> --takeover`). The e2e fake companion uses it
+// so a test never takes over a real herdr pane.
+func (s *Server) SetAttachArgv(fn func(target string) []string) { s.attachArgv = fn }
+
 func (s *Server) Broadcast(frame []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

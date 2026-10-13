@@ -1,0 +1,57 @@
+# A pane's action sheet: rename, split, move, the "Tab actions" pivot, and a shell's close
+# (no confirmation). Each sends its frame, checked through GET /received.
+appId: dev.instabug.herdr.mobile
+---
+- runFlow:
+    file: subflows/launch.yaml
+    env:
+      SCENARIO: dashboard
+- longPressOn: { id: "row-w1:p3" }
+- assertVisible: { id: sheetTitle, text: codex }
+- assertVisible: { id: sheetPath, text: shop › api › tab 2 }
+- tapOn: { id: action-rename }
+- tapOn: { id: renameField }
+- eraseText
+- inputText: build
+- tapOn: { id: renameSave }
+- runScript:
+    file: ../scripts/received.js
+    env: { CALL: RenamePane, ARGS: '["w1:p3","build"]' }
+
+- longPressOn: { id: "row-w1:p3" }
+- tapOn: { id: action-splitRight }
+- assertNotVisible: { id: sheetTitle }
+- runScript:
+    file: ../scripts/received.js
+    env: { CALL: SplitPane, ARGS: '["w1:p3","","right"]' }
+
+- longPressOn: { id: "row-w1:p3" }
+- tapOn: { id: action-move }
+- tapOn: { id: move-newWorkspace }
+- runScript:
+    file: ../scripts/received.js
+    env: { CALL: MovePane, ARGS: '["w1:p3","new_workspace","",""]' }
+
+- longPressOn: { id: "row-w1:p3" }
+- tapOn: { id: action-move }
+- tapOn: { id: "move-tab-w1:t1" }
+- runScript:
+    file: ../scripts/received.js
+    env: { CALL: MovePane, ARGS: '["w1:p3","tab","w1:t1","down"]' }
+
+- longPressOn: { id: "row-w1:p3" }
+- tapOn: { id: action-tabActions }
+- assertVisible: { id: sheetTitle, text: tab 2 }
+- tapOn: { id: action-newShell }
+- runScript:
+    file: ../scripts/received.js
+    env: { CALL: SplitPane, ARGS: '["","w1","down"]' }
+
+# A shell closes without a confirmation.
+- scrollUntilVisible:
+    element: { id: "row-w1:p2" }
+- longPressOn: { id: "row-w1:p2" }
+- tapOn: { id: action-close }
+- runScript:
+    file: ../scripts/received.js
+    env: { CALL: ClosePane, ARGS: '["w1:p2"]' }

@@ -1,0 +1,33 @@
+# First launch: enter the companion's address, see the herd summary, reach the dashboard.
+# The address is kept: the next launch goes straight to the dashboard.
+# A *.nip.io hostname, not an IP: ATS exempts IPs (standing rule 9).
+appId: dev.instabug.herdr.mobile
+---
+- runScript:
+    file: ../scripts/control.js
+    env:
+      ENDPOINT: /scenario
+      NAME: dashboard
+- launchApp:
+    clearState: true
+    arguments:
+      resetState: "YES"
+      disableAnimations: "YES"
+- assertVisible: { id: connectButton, enabled: false }
+- tapOn: { id: addressField }
+- inputText: ${COMPANION_HOST}
+- tapOn: { id: connectButton }
+- extendedWaitUntil:
+    visible: { id: firstConnectState, text: Connected }
+    timeout: 15000
+- assertVisible: { id: herdLine, text: 2 repos · 3 workspaces · 5 panes }
+- tapOn: { id: seeWhoNeedsYou }
+- assertVisible: { id: paneCount, text: 5 panes }
+
+- stopApp
+- launchApp:
+    arguments:
+      disableAnimations: "YES"
+- extendedWaitUntil:
+    visible: { id: paneCount, text: 5 panes }
+    timeout: 15000

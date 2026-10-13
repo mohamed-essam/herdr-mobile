@@ -1,0 +1,40 @@
+# Drafts are kept per pane while the app runs, and a question sheet folds to a bar to read
+# the chat, keeping its picks.
+appId: dev.instabug.herdr.mobile
+---
+- runFlow:
+    file: subflows/launch.yaml
+    env:
+      SCENARIO: commands
+- tapOn: { id: "row-w1:p1" }
+- tapOn: { id: composer }
+- inputText: "half a thought"
+- tapOn: { id: chatBack }
+- scrollUntilVisible:
+    element: { id: "row-w3:p1" }
+- tapOn: { id: "row-w3:p1" }
+- assertNotVisible: { id: composer, text: "half a thought" }
+- tapOn: { id: composer }
+- inputText: "web draft"
+- tapOn: { id: terminalToggle }
+- tapOn: { id: chatToggle }
+- assertVisible: { id: composer, text: "web draft" }
+- tapOn: { id: chatBack }
+- scrollUntilVisible:
+    element: { id: "row-w1:p1" }
+    direction: UP
+- tapOn: { id: "row-w1:p1" }
+- assertVisible: { id: composer, text: "half a thought" }
+- tapOn: { id: chatBack }
+
+# The question sheet folds to a bar and back, with the pick still made.
+- tapOn: { id: "answerInChat-w2:p1" }
+- assertVisible: { id: questionSheet }
+- tapOn: { id: sheetChoice-SQLite }
+- tapOn: { id: questionHide }
+- assertNotVisible: { id: questionSheet }
+- assertVisible: { id: questionBar, text: ".*claude asks · 2 questions.*" }
+- assertVisible: { id: msg-1, text: "Set up storage" }
+- tapOn: { id: questionBar }
+- assertVisible: { id: questionSheet }
+- assertVisible: { id: sheetChoice-SQLite, selected: true }

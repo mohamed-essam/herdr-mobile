@@ -171,6 +171,90 @@ cd app && ANDROID_HOME=$HOME/Android/Sdk ./gradlew :app:testDebugUnitTest :app:a
 Requirements: Go 1.23+, JDK 17, Android SDK (compileSdk 36). Design notes and specs for
 every feature live under [`docs/`](docs/).
 
+## Release to internal TestFlight
+
+How to ship the iOS app (`ios/`) to your own team through TestFlight. Internal testing only:
+no App Store review, and only people on your App Store Connect team can install it.
+
+### Prerequisites
+
+- **A paid Apple Developer Program team.** A free Apple ID can't upload to TestFlight.
+- **An App Store Connect app record** for the bundle ID `dev.instabug.herdr.mobile`:
+  1. [Certificates, Identifiers & Profiles](https://developer.apple.com/account/resources/identifiers/list)
+     → Identifiers → **+** → App IDs → App → Explicit Bundle ID `dev.instabug.herdr.mobile`,
+     no capabilities.
+  2. [App Store Connect](https://appstoreconnect.apple.com) → Apps → **+** → New App → iOS,
+     any name nobody has taken, that Bundle ID, any SKU.
+- **An App Store Connect team API key with the Admin role.** App Store Connect → Users and
+  Access → Integrations → App Store Connect API → Team Keys → **+**, Access: **Admin**. Note the
+  **Key ID** and the **Issuer ID** shown on that page, and download the `.p8` file (Apple
+  lets you download it once). Keep the `.p8` outside this repo, e.g. `~/.appstoreconnect/`.
+  The herdr app's existing key (the `.p8`, its Key ID and the Issuer ID) is in 1Password with
+  yousefhamza; ask them for it instead of making a new one.
+- **Xcode 26.6.** If `xcode-select -p` points at another Xcode, prefix each command below with
+  `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` to run it with Xcode 26.6
+  without changing your default, e.g.
+  `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -version`.
+
+### Steps
+
+1. **Set up the Luciq token file** (crash and bug reports). Copy the example and fill in the
+   two app tokens from the Luciq dashboard (Settings → SDK Integration):
+
+   ```bash
+   cp ios/Config/Luciq.local.xcconfig.example ios/Config/Luciq.local.xcconfig
+   # edit it: LUCIQ_APP_TOKEN_DEBUG = <development app token>
+   #          LUCIQ_APP_TOKEN_RELEASE = <production app token>
+   ```
+
+   `ios/Config/Luciq.local.xcconfig` is gitignored; never commit it. Debug builds use the
+   development token, Release builds (and so TestFlight) the production one. Without the file
+   the app still builds and runs, with Luciq off.
+
+2. **Check the release build** without signing or uploading anything:
+
+   ```bash
+   scripts/testflight-ios.sh --check
+   ```
+
+   It archives the Release build unsigned into `build/testflight/`, prints one `ok` or `FAIL`
+   line per check (app icon, export compliance, privacy manifest, the Luciq production token,
+   no development token in the app), and ends with `All checks passed.` Without the token file
+   it prints `ok   LuciqAppToken empty: no production token, Luciq off`.
+
+3. **Archive, sign and upload:**
+
+   ```bash
+   ASC_KEY_PATH=$HOME/.appstoreconnect/AuthKey_ABC123DEFG.p8 \
+   ASC_KEY_ID=ABC123DEFG \
+   ASC_ISSUER_ID=00000000-0000-0000-0000-000000000000 \
+   scripts/testflight-ios.sh
+   ```
+
+   (Placeholders: use your own key path, Key ID and Issuer ID.) It runs the same checks on the
+   signed archive, then uploads it and prints `Uploaded. The build shows in TestFlight once App
+   Store Connect has processed it.` Processing takes a few minutes; App Store Connect emails you
+   when the build is ready. Run it again for each new build: Xcode raises the build number on
+   upload.
+
+   Uploading from the command line needs this API key. Being signed in to Xcode with your Apple
+   ID is not enough: `xcodebuild` then fails with `Failed to find an account with App Store
+   Connect access`. Without the key, use the Xcode alternative below.
+
+4. **Add internal testers** once, in App Store Connect → Apps → your app → TestFlight →
+   Internal Testing → **+**: create a group, tick **Enable automatic distribution**, and add
+   testers (they must be users on your team, under Users and Access). Every processed build
+   then reaches them on its own.
+
+5. **Install.** Each tester installs the **TestFlight** app from the App Store, opens the email
+   invite (or the app), and taps **Install** next to herdr.
+
+**Xcode alternative to steps 2–3.** Open `ios/HerdrMobile.xcodeproj`, pick **Any iOS Device
+(arm64)** as the destination, then **Product → Archive**. When the Organizer opens, select the
+archive → **Distribute App** → **TestFlight Internal Only** → **Distribute**. This still needs
+the token file from step 1 (without it the build has Luciq off), and it skips the script's
+checks.
+
 ## Contributing
 
 Issues and pull requests are welcome — please read [`CONTRIBUTING.md`](CONTRIBUTING.md)

@@ -1,0 +1,24 @@
+# The background-tasks strip counts the pane's tasks; its sheet lists them, and picking a
+# subagent's row scrolls the chat to its card. A live chat_tasks replaces the list.
+appId: dev.instabug.herdr.mobile
+---
+- runFlow:
+    file: subflows/launch.yaml
+    env:
+      SCENARIO: chat
+- scrollUntilVisible:
+    element: { id: "row-w1:p1" }
+- assertVisible: { id: "bg-w1:p1", text: ⟳ 2 }
+- tapOn: { id: "row-w1:p1" }
+- assertVisible: { id: tasksStrip, text: ⟳ 2 running · 1 done }
+- tapOn: { id: tasksStrip }
+- assertVisible: { id: task-b1, text: ".*npm run dev.*running.*" }
+- assertVisible: { id: task-wf1, text: ".*review.*done.*3m 00s.*" }
+- tapOn: { id: task-ag1 }
+- assertNotVisible: { id: task-b1 }
+- assertVisible: { id: "card-toolu_a1" }
+- runFlow:
+    file: subflows/play.yaml
+    env:
+      NAME: tasks-done
+- assertVisible: { id: tasksStrip, text: ⟳ 1 failed }

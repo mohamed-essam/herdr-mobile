@@ -1,0 +1,69 @@
+# Every way into a terminal: the chat's ">_ terminal" toggle and back to a fresh chat, the
+# "chat unavailable" banner's "Open terminal" (no chat toggle once the mod stops), and a
+# created pane opening by its terminalId once it shows up.
+appId: dev.instabug.herdr.mobile
+---
+- runFlow:
+    file: subflows/launch.yaml
+    env:
+      SCENARIO: terminal
+- tapOn: { id: "row-w2:p1" }
+- assertVisible: { id: composer }
+- tapOn: { id: terminalToggle }
+- extendedWaitUntil:
+    visible: { id: chatStatus, text: ".*attached" }
+    timeout: 10000
+- runScript:
+    file: ../scripts/received.js
+    env:
+      CALL: TermOpen
+      ARGS: '["term_2"]'
+- runScript:
+    file: ../scripts/received.js
+    env:
+      CALL: ChatClose
+      ARGS: '["w2:p1",""]'
+- tapOn: { id: chatToggle }
+- assertVisible: { id: composer }
+- runScript:
+    file: ../scripts/received.js
+    env:
+      CALL: ChatSubscribe
+      ARGS: '["w2:p1",""]'
+      COUNT: 2
+
+# The mod stops reporting: the banner opens the terminal, which offers no way back to chat.
+- runFlow:
+    file: subflows/play.yaml
+    env:
+      NAME: chat-off
+- tapOn: { id: openTerminal }
+- extendedWaitUntil:
+    visible: { id: chatStatus, text: ".*attached" }
+    timeout: 10000
+- assertNotVisible: { id: chatToggle }
+- tapOn: { id: chatBack }
+
+# A new workspace opens its pane's terminal as soon as the pane appears.
+- tapOn: { id: newWorkspaceButton }
+- runScript:
+    file: ../scripts/received.js
+    env:
+      CALL: CreateWorkspace
+      ARGS: '[]'
+- assertVisible: { id: paneCount }
+- runFlow:
+    file: subflows/play.yaml
+    env:
+      NAME: new-pane
+- extendedWaitUntil:
+    visible: { id: chatTitle, text: scratch }
+    timeout: 10000
+- extendedWaitUntil:
+    visible: { id: chatStatus, text: ".*attached" }
+    timeout: 10000
+- runScript:
+    file: ../scripts/received.js
+    env:
+      CALL: TermOpen
+      ARGS: '["term_9"]'

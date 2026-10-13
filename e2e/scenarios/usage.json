@@ -1,0 +1,41 @@
+{
+  "workspaces": [
+    {"workspaceId": "w1", "label": "api", "number": 1, "agentStatus": "working", "focused": true, "paneCount": 1, "tabCount": 1, "lastActivity": 1791279000000},
+    {"workspaceId": "w2", "label": "web", "number": 2, "agentStatus": "idle", "focused": false, "paneCount": 1, "tabCount": 1, "lastActivity": 1791279000000},
+    {"workspaceId": "w3", "label": "scratch", "number": 3, "focused": false, "paneCount": 1, "tabCount": 1, "lastActivity": 1791279000000}
+  ],
+  "tabs": [
+    {"tabId": "w1:t1", "label": "1", "number": 1, "workspaceId": "w1", "agentStatus": "working", "focused": true, "paneCount": 1},
+    {"tabId": "w2:t1", "label": "1", "number": 1, "workspaceId": "w2", "agentStatus": "idle", "focused": false, "paneCount": 1},
+    {"tabId": "w3:t1", "label": "1", "number": 1, "workspaceId": "w3", "focused": false, "paneCount": 1}
+  ],
+  "panes": [
+    {"paneId": "w1:p1", "workspaceId": "w1", "tabId": "w1:t1", "terminalId": "term_1", "cwd": "/Users/dev/api", "focused": true, "agent": "claude", "agentStatus": "working", "chat": true,
+     "activity": {"kind": "tool", "tool": "Bash", "text": "Bash: go test ./...", "ts": 1791279200000},
+     "context": {"percent": 61, "tokens": 122000, "window": 200000}},
+    {"paneId": "w2:p1", "workspaceId": "w2", "tabId": "w2:t1", "terminalId": "term_2", "cwd": "/Users/dev/web", "focused": false, "agent": "claude", "agentStatus": "idle", "chat": true,
+     "activity": {"kind": "text", "text": "Done.", "ts": 1791279100000},
+     "context": {"percent": 92, "window": 200000}},
+    {"paneId": "w3:p1", "workspaceId": "w3", "tabId": "w3:t1", "terminalId": "term_3", "cwd": "/tmp", "focused": false}
+  ],
+  "limits": {
+    "limits": [
+      {"kind": "five_hour", "percentUsed": 42.4, "resetsAt": "2026-10-06T11:48:00Z"},
+      {"kind": "seven_day", "percentUsed": 18, "resetsAt": "2026-10-08T14:00:00Z"}
+    ],
+    "observedAt": 1791279240000
+  },
+  "chats": {
+    "w1:p1": {"state": "working", "events": [
+      {"seq": 1, "event": {"type": "user_text", "uuid": "u1", "text": "Run the tests", "ts": 1791279000000}}
+    ]}
+  },
+  "frames": {
+    "aged": [
+      {"t": "limits", "limits": [{"kind": "five_hour", "percentUsed": 97, "resetsAt": "2026-10-06T09:00:00Z"}, {"kind": "seven_day", "percentUsed": 64, "resetsAt": "2026-10-08T14:00:00Z"}], "observedAt": 1791268500000}
+    ],
+    "reset": [
+      {"t": "limits", "limits": [{"kind": "five_hour", "percentUsed": 97, "resetsAt": "2026-10-06T09:00:00Z"}, {"kind": "seven_day", "percentUsed": 64, "resetsAt": "2026-10-06T09:30:00Z"}], "observedAt": 1791268500000}
+    ]
+  }
+}
