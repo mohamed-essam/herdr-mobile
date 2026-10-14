@@ -32,6 +32,13 @@ import dev.herdr.mobile.ui.theme.HerdrType
 import kotlinx.coroutines.delay
 
 /**
+ * The chat's agent name: what the mod reports (it knows which agent it runs
+ * in), else herdr's guess from the process, pane.agent, else claude; blanks skipped.
+ */
+fun chatAgentLabel(paneAgent: String?, viewAgent: String?): String =
+    viewAgent?.takeIf { it.isNotBlank() } ?: paneAgent?.takeIf { it.isNotBlank() } ?: "claude"
+
+/**
  * A pane's chat: the header, the timeline ([ChatTimelineList]) and the
  * composer (with Interrupt while the agent works) at the bottom; a pending
  * question replaces it as a pinned sheet. [listState] is hoisted to the pane,
@@ -74,7 +81,7 @@ fun ChatScreen(
     }
 
     val ctx = remember(repoTree, pane) { paneContexts(repoTree)[pane.paneId] ?: fallbackContext(pane) }
-    val agent = pane.agent?.takeIf { it.isNotBlank() } ?: "claude"
+    val agent = chatAgentLabel(pane.agent, view.agent)
     val working = view.state == "working"
     val asking = remember(view.entries, view.answered) { pendingQuestion(view.entries, view.answered) }
     // Minimized, the sheet folds to a bar so the chat can be read at full size;

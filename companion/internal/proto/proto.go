@@ -54,7 +54,7 @@ func ParseClient(b []byte) (ClientMsg, error) {
 func must(v any) []byte { b, _ := json.Marshal(v); return b }
 
 func Welcome(version string, protocol int) []byte {
-	return must(map[string]any{"t": "welcome", "herdrVersion": version, "herdrProtocol": protocol, "companionProtocol": 12})
+	return must(map[string]any{"t": "welcome", "herdrVersion": version, "herdrProtocol": protocol, "companionProtocol": 13})
 }
 func PanesSnapshot(p []state.Pane) []byte {
 	return must(map[string]any{"t": "panes", "panes": p})
@@ -157,6 +157,9 @@ func ChatSnapshot(s chatbridge.Snapshot) []byte {
 		m["tasks"] = tasks
 		if s.Commands != nil {
 			m["commands"] = s.Commands
+		}
+		if s.Agent != "" {
+			m["agent"] = s.Agent
 		}
 	}
 	return must(m)

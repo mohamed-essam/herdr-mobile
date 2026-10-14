@@ -1,0 +1,34 @@
+{
+  "paneId": "w1:p1",
+  "sessionId": "s1",
+  "events": [
+    {
+      "type": "hello",
+      "sessionId": "s1",
+      "cwd": "/work/demo",
+      "agent": "hermes"
+    },
+    {
+      "type": "snapshot_begin",
+      "total": 1
+    },
+    {
+      "type": "snapshot_chunk",
+      "events": [
+        {
+          "type": "user_text",
+          "uuid": "h-0",
+          "text": "hi",
+          "ts": 1000
+        }
+      ]
+    },
+    {
+      "type": "snapshot_end"
+    },
+    {
+      "type": "state",
+      "state": "working"
+    }
+  ]
+}

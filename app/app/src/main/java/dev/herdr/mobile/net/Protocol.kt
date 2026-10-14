@@ -316,6 +316,7 @@ sealed interface ServerFrame {
         val agentId: String? = null, val missing: Boolean = false,
         val agents: List<AgentSummary>? = null, val tasks: List<BgTask>? = null,
         val commands: List<SlashCommand>? = null,
+        val agent: String? = null,
     ) : ServerFrame
     /** A [stale] page (the epoch moved on) carries no entries and hasMore false. */
     data class ChatHistoryPage(val reqId: String, val paneId: String, val epoch: Int, val entries: List<ChatEntry>, val hasMore: Boolean, val stale: Boolean = false, val agentId: String? = null) : ServerFrame
@@ -409,7 +410,8 @@ fun parseServerFrame(text: String): ServerFrame {
             obj.bool("hasMore"),
             maxSeq(obj["events"] as? JsonArray),
             obj.strOrNull("agentId"), obj.bool("missing"),
-            obj.agentsOrNull("agents"), obj.tasksOrNull("tasks"), obj.commandsOrNull("commands"))
+            obj.agentsOrNull("agents"), obj.tasksOrNull("tasks"), obj.commandsOrNull("commands"),
+            obj.strOrNull("agent")?.takeIf { it.isNotBlank() })
         "chat_history_page" -> ServerFrame.ChatHistoryPage(
             obj.str("reqId"), obj.str("paneId"),
             obj["epoch"]?.jsonPrimitive?.intOrNull ?: 0,

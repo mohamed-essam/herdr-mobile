@@ -143,6 +143,70 @@ Update both the companion (rebuild and restart it) and the plugin (`/reload-plug
 in running Claude sessions); an older app keeps working against a newer companion,
 and a newer plugin keeps working against an older companion.
 
+### Chat view for Hermes panes (optional)
+
+herdr-mobile can show [Hermes](https://github.com/NousResearch/hermes-agent) panes as
+a chat too. It needs the `herdr-hermes` Hermes plugin in
+[`hermes/herdr-hermes`](hermes/herdr-hermes) (Python 3.10 or newer, standard library
+only), which streams the session to the same companion chat socket. The companion
+must be protocol 13 or newer; the header then says `hermes`.
+
+Copy or link the directory into Hermes' plugins directory, then enable it:
+
+    ln -s /path/to/herdr-mobile/hermes/herdr-hermes ~/.hermes/plugins/herdr-hermes
+    hermes plugins validate ~/.hermes/plugins/herdr-hermes
+    hermes plugins enable herdr-hermes
+
+(`hermes plugins install <git-url | owner/repo>` suits a Git repository that holds the
+plugin at its root; it asks whether to enable the plugin, and `--enable` or
+`--no-enable` skips that prompt. This repository keeps the plugin in a subdirectory,
+hence the link above.) Restart running Hermes sessions afterwards.
+
+The socket rules are the Claude plugin's: the plugin uses `HERDR_MOBILE_CHAT_SOCK`,
+else `$XDG_RUNTIME_DIR/herdr-mobile/chat.sock`, in the environment Hermes runs in
+(set it to the same path you gave `--chat-socket`). A custom socket path must be in
+a directory only you can access (mode 0700 or stricter), otherwise the plugin stays
+off and logs a warning. The plugin does nothing outside a herdr pane (no
+`HERDR_PANE_ID`).
+
+The chat shows the session's history, replies, tool calls with their results, and
+the working/idle state. A message typed on the phone is injected into the running
+Hermes session as a prompt, and a phone message naming a command registered by a
+plugin runs that command.
+
+Limits to know about:
+
+- Questions Hermes asks (clarify, approvals, sudo) appear as read-only notices;
+  answer them in the terminal.
+- Only commands registered by plugins run as commands from the phone. Built-in
+  Hermes slash commands (`/model`, `/new`, ...) are sent as plain text, so the
+  classic CLI runs them in the terminal while TUI and gateway sessions treat them as
+  a prompt. The phone gets no command picker for Hermes.
+- Injecting into TUI or gateway sessions is off by default. Set
+  `plugins.entries.herdr-hermes.allow_gateway_injection: true` in Hermes' config; it
+  also needs a session key, which Hermes hands the plugin only after the session's
+  first stop or question, so until then a phone prompt there can be refused (the chat
+  shows the refusal). Classic CLI sessions need neither.
+- A prompt Hermes rewrites before running it (a skill's slash command, say) appears
+  twice: as sent and as rewritten.
+- The chat follows the pane's terminal conversation (classic CLI or TUI). A
+  messaging gateway run in a herdr pane shows nothing: its chats are left out.
+- The chat shows whole messages, not streaming deltas, and tool rows from forked
+  runs (background review, `/btw`) and subagents are left out.
+- If the phone connects, or the companion restarts, in the middle of a turn, that
+  turn's already-sent tool calls are not in the rebuilt history until the next resync
+  (replies and later events still arrive).
+- After `/resume` to another session inside one Hermes process, the phone switches to
+  the new session at the next prompt.
+- With several Hermes profiles in one process, phone prompts go in through the first
+  profile.
+- There is no unload hook: disabling the plugin stops its hooks only after a Hermes
+  restart, and its sync loop keeps running until then.
+- The commands the phone can run are read from Hermes' internal plugin-command
+  registry, which may change between Hermes versions; if it does, the phone's slash
+  commands are sent as text instead.
+- Python 3.10 or newer is assumed; the package metadata does not enforce it.
+
 ### App
 
 Download `app-debug.apk` from the [latest release](https://github.com/mohamed-essam/herdr-mobile/releases/latest)

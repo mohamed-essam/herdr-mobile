@@ -79,11 +79,29 @@ func TestTermFrames(t *testing.T) {
 	}
 }
 
-func TestWelcomeAdvertisesProtocol12(t *testing.T) {
+func TestWelcomeAdvertisesProtocol13(t *testing.T) {
 	var got map[string]any
 	json.Unmarshal(Welcome("0.7.1", 14), &got)
-	if got["companionProtocol"].(float64) != 12 {
-		t.Fatalf("want companionProtocol 12, got %v", got["companionProtocol"])
+	if got["companionProtocol"].(float64) != 13 {
+		t.Fatalf("want companionProtocol 13, got %v", got["companionProtocol"])
+	}
+}
+
+func TestChatSnapshotAgentField(t *testing.T) {
+	var m map[string]any
+	json.Unmarshal(ChatSnapshot(chatbridge.Snapshot{PaneID: "p", Agent: "hermes"}), &m)
+	if m["agent"] != "hermes" {
+		t.Fatalf("main snapshot agent: %v", m)
+	}
+	m = nil
+	json.Unmarshal(ChatSnapshot(chatbridge.Snapshot{PaneID: "p"}), &m)
+	if _, has := m["agent"]; has {
+		t.Fatalf("empty agent must omit the key: %v", m)
+	}
+	m = nil
+	json.Unmarshal(ChatSnapshot(chatbridge.Snapshot{PaneID: "p", AgentID: "aa1", Agent: "hermes"}), &m)
+	if _, has := m["agent"]; has {
+		t.Fatalf("thread snapshot has no agent: %v", m)
 	}
 }
 

@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format is based on
 
 ## Unreleased
 
+- Chat view for Hermes panes (companion protocol 13): the new `herdr-hermes` Hermes plugin
+  (`hermes/herdr-hermes`, Python 3.10+, standard library only) streams a Hermes session to the companion's chat
+  socket, the same `/sync` protocol the herdr-chat plugin speaks: history, replies, tool calls and results, the
+  working/idle state, phone prompts injected into the session, and commands registered by plugins run from the
+  phone. Its `hello` event carries `agent: "hermes"`; the companion keeps it per pane (reset by a new session
+  without one) and adds `agent` to `chat_snapshot` (omitted for Claude), and the chat header shows the agent
+  name. Questions are read-only (answer in the terminal), built-in slash commands are sent as text, and TUI or
+  gateway injection needs `plugins.entries.herdr-hermes.allow_gateway_injection: true`. See the README. Update
+  the companion and the app; an older companion simply shows no agent name.
 - Server switcher: save more than one companion and switch between them from the dashboard header's server chip
   (a sheet lists them, with Rename, Remove and "+ Add server"). One server is connected at a time; notifications
   keep arriving from every saved server, prefixed with its name when more than one is saved, and tapping one

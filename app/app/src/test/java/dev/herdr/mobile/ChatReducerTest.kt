@@ -133,6 +133,8 @@ class ChatReducerTest {
         fun failed(e: String?) = pendingLabel(p.copy(status = PendingStatus.Failed, error = e), "idle")
         assertEquals("Claude isn't connected", failed("no_mod"))
         assertEquals("too many queued messages", failed("outbox_full"))
+        assertEquals("queued — Hermes is busy", pendingLabel(p, "working", "hermes"))
+        assertEquals("Hermes isn't connected", pendingLabel(p.copy(status = PendingStatus.Failed, error = "no_mod"), "idle", "hermes"))
         assertEquals("empty message", failed("empty"))
         assertEquals("failed: socket closed", failed("socket closed"))
         assertEquals("failed: error", failed(null))
@@ -527,5 +529,29 @@ class ChatReducerTest {
         assertEquals(2, v.tasks.size)
         v = onFrame(v, ServerFrame.ChatTasks("p", listOf(task("c"))))
         assertEquals(listOf("c"), v.tasks.map { it.id })
+    }
+
+    // ---- protocol 13: the reported agent ----
+
+    @Test fun snapshotSetsAgentAndALaterOneWithoutClearsIt() {
+        var v = onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", emptyList(), agent = "hermes"))
+        assertEquals("hermes", v.agent)
+        v = onFrame(v, snap(1, user(1, "x")))
+        assertNull(v.agent)
+    }
+
+    @Test fun threadSnapshotDoesNotChangeAgent() {
+        var v = onFrame(ChatView(), ServerFrame.ChatSnapshot("p", 1, "idle", emptyList(), agent = "hermes"))
+        v = onFrame(v, ServerFrame.ChatSnapshot("p", 1, "idle", emptyList(), agentId = "a", agent = "other"))
+        assertEquals("hermes", v.agent)
+    }
+
+    @Test fun chatAgentLabelPrecedence() {
+        assertEquals("claude", dev.herdr.mobile.ui.chatAgentLabel("", null))
+        assertEquals("claude", dev.herdr.mobile.ui.chatAgentLabel(null, " "))
+        assertEquals("hermes", dev.herdr.mobile.ui.chatAgentLabel(null, "hermes"))
+        assertEquals("codex", dev.herdr.mobile.ui.chatAgentLabel("codex", null))
+        // The mod knows which agent it runs in; herdr's pane.agent is a guess from the process.
+        assertEquals("hermes", dev.herdr.mobile.ui.chatAgentLabel("codex", "hermes"))
     }
 }
