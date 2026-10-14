@@ -160,8 +160,7 @@ Copy or link the directory into Hermes' plugins directory, then enable it:
 (`hermes plugins install <git-url | owner/repo>` suits a Git repository that holds the
 plugin at its root; it asks whether to enable the plugin, and `--enable` or
 `--no-enable` skips that prompt. This repository keeps the plugin in a subdirectory,
-hence the link above. This flow has not been verified against a live Hermes.) Restart
-running Hermes sessions afterwards.
+hence the link above.) Restart running Hermes sessions afterwards.
 
 The socket rules are the Claude plugin's: the plugin uses `HERDR_MOBILE_CHAT_SOCK`,
 else `$XDG_RUNTIME_DIR/herdr-mobile/chat.sock`, in the environment Hermes runs in
@@ -188,8 +187,10 @@ Limits to know about:
   also needs a session key, which Hermes hands the plugin only after the session's
   first stop or question, so until then a phone prompt there can be refused (the chat
   shows the refusal). Classic CLI sessions need neither.
-- A prompt Hermes rewrites before running it can appear twice (the phone's row and
-  the rewritten one).
+- A prompt Hermes rewrites before running it (a skill's slash command, say) appears
+  twice: as sent and as rewritten.
+- The chat follows the pane's terminal conversation (classic CLI or TUI). A
+  messaging gateway run in a herdr pane shows nothing: its chats are left out.
 - The chat shows whole messages, not streaming deltas, and tool rows from forked
   runs (background review, `/btw`) and subagents are left out.
 - If the phone connects, or the companion restarts, in the middle of a turn, that

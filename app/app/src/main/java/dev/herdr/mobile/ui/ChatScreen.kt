@@ -31,9 +31,12 @@ import dev.herdr.mobile.ui.theme.HerdrRadius
 import dev.herdr.mobile.ui.theme.HerdrType
 import kotlinx.coroutines.delay
 
-/** The chat's agent name: herdr's pane.agent, else what the mod reports, else claude; blanks skipped. */
+/**
+ * The chat's agent name: what the mod reports (it knows which agent it runs
+ * in), else herdr's guess from the process, pane.agent, else claude; blanks skipped.
+ */
 fun chatAgentLabel(paneAgent: String?, viewAgent: String?): String =
-    paneAgent?.takeIf { it.isNotBlank() } ?: viewAgent?.takeIf { it.isNotBlank() } ?: "claude"
+    viewAgent?.takeIf { it.isNotBlank() } ?: paneAgent?.takeIf { it.isNotBlank() } ?: "claude"
 
 /**
  * A pane's chat: the header, the timeline ([ChatTimelineList]) and the

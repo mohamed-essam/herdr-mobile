@@ -258,10 +258,11 @@ object ChatReducer {
     }
 }
 
-fun pendingLabel(p: PendingMsg, state: String): String = when (p.status) {
-    PendingStatus.Queued -> if (state == "working") "queued — Claude is busy" else "sending…"
+/** [agent] is the chat's agent label (chatAgentLabel), shown capitalized. */
+fun pendingLabel(p: PendingMsg, state: String, agent: String = "claude"): String = when (p.status) {
+    PendingStatus.Queued -> if (state == "working") "queued — ${agent.replaceFirstChar { it.uppercaseChar() }} is busy" else "sending…"
     PendingStatus.Failed -> when (p.error) {
-        "no_mod" -> "Claude isn't connected"
+        "no_mod" -> "${agent.replaceFirstChar { it.uppercaseChar() }} isn't connected"
         "outbox_full" -> "too many queued messages"
         "empty" -> "empty message"
         else -> "failed: ${p.error ?: "error"}"

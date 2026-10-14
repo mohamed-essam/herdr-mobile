@@ -195,7 +195,7 @@ fun ChatTimelineList(
                         if (head) SpeakerLabel("you", c.mauve)
                         PendingMessage(
                             p,
-                            label = pendingLabel(p, view.state),
+                            label = pendingLabel(p, view.state, agentLabel),
                             onRetry = if (p.status != PendingStatus.Queued) ({ vm.retryChat(paneId, p.id) }) else null,
                         )
                     }

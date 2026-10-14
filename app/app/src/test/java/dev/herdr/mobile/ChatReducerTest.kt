@@ -133,6 +133,8 @@ class ChatReducerTest {
         fun failed(e: String?) = pendingLabel(p.copy(status = PendingStatus.Failed, error = e), "idle")
         assertEquals("Claude isn't connected", failed("no_mod"))
         assertEquals("too many queued messages", failed("outbox_full"))
+        assertEquals("queued — Hermes is busy", pendingLabel(p, "working", "hermes"))
+        assertEquals("Hermes isn't connected", pendingLabel(p.copy(status = PendingStatus.Failed, error = "no_mod"), "idle", "hermes"))
         assertEquals("empty message", failed("empty"))
         assertEquals("failed: socket closed", failed("socket closed"))
         assertEquals("failed: error", failed(null))
@@ -548,6 +550,8 @@ class ChatReducerTest {
         assertEquals("claude", dev.herdr.mobile.ui.chatAgentLabel("", null))
         assertEquals("claude", dev.herdr.mobile.ui.chatAgentLabel(null, " "))
         assertEquals("hermes", dev.herdr.mobile.ui.chatAgentLabel(null, "hermes"))
-        assertEquals("codex", dev.herdr.mobile.ui.chatAgentLabel("codex", "hermes"))
+        assertEquals("codex", dev.herdr.mobile.ui.chatAgentLabel("codex", null))
+        // The mod knows which agent it runs in; herdr's pane.agent is a guess from the process.
+        assertEquals("hermes", dev.herdr.mobile.ui.chatAgentLabel("codex", "hermes"))
     }
 }
