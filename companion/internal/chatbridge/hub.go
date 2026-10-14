@@ -636,7 +636,7 @@ func (h *Hub) History(paneID, agentID string, epoch, beforeSeq, limit int) (even
 		}
 		ring = t.events
 	}
-	events, hasMore = page(ring, beforeSeq, limit)
+	events, hasMore = Page(ring, beforeSeq, limit)
 	return events, hasMore, true
 }
 

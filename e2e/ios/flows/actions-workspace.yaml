@@ -1,0 +1,45 @@
+# Workspace actions: "+" creates a workspace, a tile's sheet adds a tab, and closing a
+# base worktree workspace warns about the linked one it also closes.
+appId: dev.instabug.herdr.mobile
+---
+- runFlow:
+    file: subflows/launch.yaml
+    env:
+      SCENARIO: dashboard
+- tapOn: { id: newWorkspaceButton }
+- runScript:
+    file: ../scripts/received.js
+    env: { CALL: CreateWorkspace, ARGS: '[]' }
+
+- tapOn: { id: workspacesButton }
+- longPressOn: { id: tile-w1 }
+- assertVisible: { id: sheetTitle, text: api }
+- tapOn: { id: action-newTab }
+- runScript:
+    file: ../scripts/received.js
+    env: { CALL: CreateTab, ARGS: '["w1"]' }
+
+- tapOn: { id: workspacesButton }
+- longPressOn: { id: tile-w1 }
+- tapOn: { id: action-close }
+- extendedWaitUntil:
+    visible: { id: closeHeadline, text: api ends 3 panes across 2 tabs }
+    timeout: 5000
+- assertVisible: { id: alsoCloses, text: ".*api-feature.*" }
+- tapOn: { id: closeCancel }
+- assertNotVisible: { id: closeHeadline }
+- runScript:
+    file: ../scripts/received.js
+    env: { CALL: ListWorktrees, ARGS: '["w1"]' }
+
+- tapOn: { id: workspacesButton }
+- longPressOn: { id: tile-w1 }
+- tapOn: { id: action-close }
+- extendedWaitUntil:
+    visible: { id: holdToClose }
+    timeout: 5000
+- longPressOn: { id: holdToClose }
+- assertNotVisible: { id: closeHeadline }
+- runScript:
+    file: ../scripts/received.js
+    env: { CALL: CloseWorkspace, ARGS: '["w1"]' }

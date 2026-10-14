@@ -1,0 +1,444 @@
+{
+ "workspaces": [
+  {
+   "workspaceId": "w1",
+   "label": "api",
+   "number": 1,
+   "agentStatus": "idle",
+   "focused": true,
+   "paneCount": 1,
+   "tabCount": 1,
+   "lastActivity": 1791279000000
+  },
+  {
+   "workspaceId": "w2",
+   "label": "ask",
+   "number": 2,
+   "agentStatus": "blocked",
+   "focused": false,
+   "paneCount": 1,
+   "tabCount": 1,
+   "lastActivity": 1791279000000
+  },
+  {
+   "workspaceId": "w3",
+   "label": "web",
+   "number": 3,
+   "agentStatus": "idle",
+   "focused": false,
+   "paneCount": 1,
+   "tabCount": 1,
+   "lastActivity": 1791279000000
+  }
+ ],
+ "tabs": [
+  {
+   "tabId": "w1:t1",
+   "label": "1",
+   "number": 1,
+   "workspaceId": "w1",
+   "focused": true,
+   "paneCount": 1
+  },
+  {
+   "tabId": "w2:t1",
+   "label": "1",
+   "number": 1,
+   "workspaceId": "w2",
+   "focused": false,
+   "paneCount": 1
+  },
+  {
+   "tabId": "w3:t1",
+   "label": "1",
+   "number": 1,
+   "workspaceId": "w3",
+   "focused": false,
+   "paneCount": 1
+  }
+ ],
+ "panes": [
+  {
+   "paneId": "w1:p1",
+   "workspaceId": "w1",
+   "tabId": "w1:t1",
+   "terminalId": "term_1",
+   "cwd": "/Users/dev/api",
+   "focused": true,
+   "agent": "claude",
+   "agentStatus": "idle",
+   "chat": true,
+   "bgRunning": 1
+  },
+  {
+   "paneId": "w2:p1",
+   "workspaceId": "w2",
+   "tabId": "w2:t1",
+   "terminalId": "term_2",
+   "cwd": "/Users/dev/db",
+   "focused": false,
+   "agent": "claude",
+   "agentStatus": "blocked",
+   "chat": true,
+   "activity": {
+    "kind": "question",
+    "text": "Which database?",
+    "ts": 1791279060000
+   },
+   "ask": {
+    "toolUseId": "toolu_ask",
+    "questions": [
+     {
+      "question": "Which database?",
+      "header": "DB",
+      "multiSelect": false,
+      "options": [
+       {
+        "label": "Postgres"
+       },
+       {
+        "label": "SQLite"
+       }
+      ]
+     },
+     {
+      "question": "Any constraints?",
+      "header": "Limits",
+      "multiSelect": false,
+      "kind": "text"
+     }
+    ]
+   }
+  },
+  {
+   "paneId": "w3:p1",
+   "workspaceId": "w3",
+   "tabId": "w3:t1",
+   "terminalId": "term_3",
+   "cwd": "/Users/dev/web",
+   "focused": false,
+   "agent": "claude",
+   "agentStatus": "idle",
+   "chat": true
+  }
+ ],
+ "chats": {
+  "w1:p1": {
+   "events": [
+    {
+     "seq": 1,
+     "event": {
+      "type": "user_text",
+      "uuid": "u1",
+      "text": "How full is the context?",
+      "ts": 1791279000000
+     }
+    },
+    {
+     "seq": 2,
+     "event": {
+      "type": "user_text",
+      "uuid": "u2",
+      "text": "/context",
+      "ts": 1791279010000
+     }
+    },
+    {
+     "seq": 3,
+     "event": {
+      "type": "command_output",
+      "uuid": "cmd-c1",
+      "command": "/context",
+      "text": "Context: 61% of 200k tokens\nMessages: 48k tokens",
+      "ts": 1791279011000
+     }
+    },
+    {
+     "seq": 4,
+     "event": {
+      "type": "user_text",
+      "uuid": "u4",
+      "text": "/nope",
+      "ts": 1791279020000
+     }
+    },
+    {
+     "seq": 5,
+     "event": {
+      "type": "command_output",
+      "uuid": "cmd-c2",
+      "command": "/nope",
+      "text": "Unknown command: /nope",
+      "isError": true,
+      "ts": 1791279021000
+     }
+    }
+   ],
+   "tasks": [
+    {
+     "id": "bg1",
+     "kind": "shell",
+     "label": "npm run dev -- --port 3000 --host 0.0.0.0 --open false --log-level debug --watch src --watch ass…",
+     "toolUseId": "toolu_3",
+     "status": "running",
+     "startedAt": 1791279000000,
+     "detail": "npm run dev -- --port 3000 --host 0.0.0.0 --open false \\\n  --log-level debug --watch src --watch assets",
+     "description": "Start the dev server"
+    },
+    {
+     "id": "bg2",
+     "kind": "monitor",
+     "label": "Watch the build log",
+     "toolUseId": "toolu_4",
+     "status": "done",
+     "startedAt": 1791279000000,
+     "endedAt": 1791279005000,
+     "detail": "tail -f build.log | grep -i error"
+    }
+   ],
+   "commands": [
+    {
+     "name": "clear",
+     "description": "Clear conversation history and free up context",
+     "source": "builtin"
+    },
+    {
+     "name": "compact",
+     "description": "Clear history but keep a summary in context",
+     "source": "builtin"
+    },
+    {
+     "name": "context",
+     "description": "Show current context usage",
+     "source": "builtin"
+    },
+    {
+     "name": "review",
+     "description": "Review a pull request",
+     "source": "project"
+    },
+    {
+     "name": "release-notes",
+     "description": "Draft release notes since the last tag",
+     "source": "herdr-tools"
+    }
+   ]
+  },
+  "w2:p1": {
+   "events": [
+    {
+     "seq": 1,
+     "event": {
+      "type": "user_text",
+      "uuid": "u1",
+      "text": "Set up storage",
+      "ts": 1791279000000
+     }
+    },
+    {
+     "seq": 2,
+     "event": {
+      "type": "question",
+      "uuid": "q2",
+      "toolUseId": "toolu_ask",
+      "questions": [
+       {
+        "question": "Which database?",
+        "header": "DB",
+        "multiSelect": false,
+        "options": [
+         {
+          "label": "Postgres"
+         },
+         {
+          "label": "SQLite"
+         }
+        ]
+       },
+       {
+        "question": "Any constraints?",
+        "header": "Limits",
+        "multiSelect": false,
+        "kind": "text"
+       }
+      ],
+      "ts": 1791279060000
+     }
+    }
+   ],
+   "commands": [
+    {
+     "name": "clear",
+     "description": "Clear conversation history and free up context",
+     "source": "builtin"
+    },
+    {
+     "name": "compact",
+     "description": "Clear history but keep a summary in context",
+     "source": "builtin"
+    },
+    {
+     "name": "context",
+     "description": "Show current context usage",
+     "source": "builtin"
+    },
+    {
+     "name": "review",
+     "description": "Review a pull request",
+     "source": "project"
+    },
+    {
+     "name": "release-notes",
+     "description": "Draft release notes since the last tag",
+     "source": "herdr-tools"
+    }
+   ]
+  },
+  "w3:p1": {
+   "events": [
+    {
+     "seq": 1,
+     "event": {
+      "type": "assistant_text",
+      "uuid": "a1",
+      "text": "Ready.",
+      "ts": 1791279000000
+     }
+    }
+   ],
+   "commands": [
+    {
+     "name": "clear",
+     "description": "Clear conversation history and free up context",
+     "source": "builtin"
+    },
+    {
+     "name": "compact",
+     "description": "Clear history but keep a summary in context",
+     "source": "builtin"
+    },
+    {
+     "name": "context",
+     "description": "Show current context usage",
+     "source": "builtin"
+    },
+    {
+     "name": "review",
+     "description": "Review a pull request",
+     "source": "project"
+    },
+    {
+     "name": "release-notes",
+     "description": "Draft release notes since the last tag",
+     "source": "herdr-tools"
+    }
+   ]
+  }
+ },
+ "frames": {
+  "ran": [
+   {
+    "t": "chat_event",
+    "paneId": "w1:p1",
+    "epoch": 1,
+    "seq": 6,
+    "event": {
+     "type": "user_text",
+     "uuid": "u6",
+     "text": "/review 42",
+     "ts": 1791279030000
+    }
+   },
+   {
+    "t": "chat_event",
+    "paneId": "w1:p1",
+    "epoch": 1,
+    "seq": 7,
+    "event": {
+     "type": "command_output",
+     "uuid": "cmd-c3",
+     "command": "/review 42",
+     "text": "Reviewing PR #42 (3 files)",
+     "ts": 1791279031000
+    }
+   }
+  ],
+  "cleared": [
+   {
+    "t": "chat_snapshot",
+    "paneId": "w1:p1",
+    "epoch": 2,
+    "state": "idle",
+    "events": [],
+    "hasMore": false,
+    "agents": [],
+    "tasks": [],
+    "commands": [
+     {
+      "name": "clear",
+      "description": "Clear conversation history and free up context",
+      "source": "builtin"
+     },
+     {
+      "name": "compact",
+      "description": "Clear history but keep a summary in context",
+      "source": "builtin"
+     },
+     {
+      "name": "context",
+      "description": "Show current context usage",
+      "source": "builtin"
+     },
+     {
+      "name": "review",
+      "description": "Review a pull request",
+      "source": "project"
+     },
+     {
+      "name": "release-notes",
+      "description": "Draft release notes since the last tag",
+      "source": "herdr-tools"
+     }
+    ]
+   }
+  ],
+  "more-commands": [
+   {
+    "t": "chat_commands",
+    "paneId": "w1:p1",
+    "commands": [
+     {
+      "name": "clear",
+      "description": "Clear conversation history and free up context",
+      "source": "builtin"
+     },
+     {
+      "name": "compact",
+      "description": "Clear history but keep a summary in context",
+      "source": "builtin"
+     },
+     {
+      "name": "context",
+      "description": "Show current context usage",
+      "source": "builtin"
+     },
+     {
+      "name": "review",
+      "description": "Review a pull request",
+      "source": "project"
+     },
+     {
+      "name": "release-notes",
+      "description": "Draft release notes since the last tag",
+      "source": "herdr-tools"
+     },
+     {
+      "name": "deploy",
+      "description": "Ship it",
+      "source": "project"
+     }
+    ]
+   }
+  ]
+ }
+}

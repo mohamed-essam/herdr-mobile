@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- scripts/testflight-ios.sh: export the archive straight to App Store Connect, internal TestFlight only. Outside HerdrMobile/ so it isn't copied into the app. Keys: xcodebuild -help. -->
+<plist version="1.0">
+<dict>
+	<key>method</key>
+	<string>app-store-connect</string>
+	<key>destination</key>
+	<string>upload</string>
+	<key>testFlightInternalTestingOnly</key>
+	<true/>
+</dict>
+</plist>

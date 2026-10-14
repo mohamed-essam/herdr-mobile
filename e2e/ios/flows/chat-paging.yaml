@@ -1,0 +1,20 @@
+# Scrolling to the top pages back through older history, and a summary that arrived before
+# its parent card shows on that card once the page with its call comes in.
+appId: dev.instabug.herdr.mobile
+---
+- runFlow:
+    file: subflows/open-chat.yaml
+    env:
+      ROW: "row-w1:p1"
+- scrollUntilVisible:
+    element: { id: msg-1 }
+    direction: UP
+    centerElement: true
+    timeout: 30000
+- assertVisible: { id: msg-1, text: ".*Start with a schema audit.*" }
+- runScript:
+    file: ../scripts/received.js
+    env:
+      CALL: ChatHistory
+      ARGS: '["w1:p1","",1,5,300]'
+- assertVisible: { id: "card-toolu_old", text: ".*schema audit.*" }

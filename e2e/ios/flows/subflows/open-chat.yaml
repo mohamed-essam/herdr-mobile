@@ -1,0 +1,13 @@
+# Launch the "chat" scenario and open pane ROW (a dashboard row id, e.g. row-w1:p1) in chat.
+appId: dev.instabug.herdr.mobile
+---
+- runFlow:
+    file: launch.yaml
+    env:
+      SCENARIO: chat
+- scrollUntilVisible:
+    element: { id: "${ROW}" }
+- tapOn: { id: "${ROW}" }
+- extendedWaitUntil:
+    visible: { id: chatTitle }
+    timeout: 5000

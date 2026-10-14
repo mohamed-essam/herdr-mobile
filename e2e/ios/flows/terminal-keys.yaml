@@ -1,0 +1,65 @@
+# Each key-bar key sends its xterm bytes; ctrl and alt arm for one typed key on a tap, lock
+# on a long press, and a bar key drops a lingering one-shot. The bar hides and comes back.
+appId: dev.instabug.herdr.mobile
+---
+- runFlow: subflows/open-terminal.yaml
+- tapOn: { id: key-esc }
+- runFlow: { file: subflows/typed.yaml, env: { WANT: '"\u001b"' } }
+- tapOn: { id: key-tab }
+- runFlow: { file: subflows/typed.yaml, env: { WANT: '"\t"' } }
+- tapOn: { id: key-home }
+- runFlow: { file: subflows/typed.yaml, env: { WANT: '"\u001b[H"' } }
+- tapOn: { id: key-end }
+- runFlow: { file: subflows/typed.yaml, env: { WANT: '"\u001b[F"' } }
+- tapOn: { id: key-pgup }
+- runFlow: { file: subflows/typed.yaml, env: { WANT: '"\u001b[5~"' } }
+- tapOn: { id: key-pgdn }
+- runFlow: { file: subflows/typed.yaml, env: { WANT: '"\u001b[6~"' } }
+- tapOn: { id: key-up }
+- runFlow: { file: subflows/typed.yaml, env: { WANT: '"\u001b[A"' } }
+- tapOn: { id: key-left }
+- runFlow: { file: subflows/typed.yaml, env: { WANT: '"\u001b[D"' } }
+- tapOn: { id: key-down }
+- runFlow: { file: subflows/typed.yaml, env: { WANT: '"\u001b[B"' } }
+- tapOn: { id: key-right }
+- runFlow: { file: subflows/typed.yaml, env: { WANT: '"\u001b[C"' } }
+
+# ctrl one-shot: ^C, then a plain c.
+- tapOn: { id: key-ctrl }
+- assertVisible: { id: key-ctrl, text: ".*armed.*" }
+- inputText: "c"
+- runFlow: { file: subflows/typed.yaml, env: { WANT: '"\u0003"' } }
+- assertVisible: { id: key-ctrl, text: ".*off.*" }
+- inputText: "c"
+- runFlow: { file: subflows/typed.yaml, env: { WANT: '"\u0003c"' } }
+
+# ctrl locked: ^A ^B until tapped off.
+- longPressOn: { id: key-ctrl }
+- assertVisible: { id: key-ctrl, text: ".*locked.*" }
+- inputText: "a"
+- inputText: "b"
+- runFlow: { file: subflows/typed.yaml, env: { WANT: '"\u0001\u0002"' } }
+- tapOn: { id: key-ctrl }
+- inputText: "d"
+- runFlow: { file: subflows/typed.yaml, env: { WANT: '"\u0001\u0002d"' } }
+
+# alt one-shot: ESC x; a bar key drops an armed alt.
+- tapOn: { id: key-alt }
+- inputText: "x"
+- runFlow: { file: subflows/typed.yaml, env: { WANT: '"d\u001bx"' } }
+- tapOn: { id: key-alt }
+- tapOn: { id: key-tab }
+- inputText: "y"
+- runFlow: { file: subflows/typed.yaml, env: { WANT: '"\u001bx\ty"' } }
+
+# The bar collapses to a handle and comes back.
+- tapOn: { id: keysHide }
+- assertNotVisible: { id: key-esc }
+- tapOn: { id: keysShow }
+- assertVisible: { id: key-esc }
+- runScript:
+    file: ../scripts/typed.js
+    env:
+      TARGET: term_1
+      EXACT: "YES"
+      WANT: '"\u001b\t\u001b[H\u001b[F\u001b[5~\u001b[6~\u001b[A\u001b[D\u001b[B\u001b[C\u0003c\u0001\u0002d\u001bx\ty"'
