@@ -51,7 +51,7 @@ class Loop:
         pane_id: str,
         socket: str,
         on_message: Callable[[str, str], None],
-        history: Callable[[], List[dict]],
+        history: Callable[[Callable[[], None]], List[dict]],
         tick: float = 1.0,
         sync: Callable = socket_client.sync,
     ) -> None:
@@ -135,9 +135,7 @@ class Loop:
                 return  # nothing to stream until Hermes names a session
             resync = self._need_resync and not self._offline
             if resync:
-                # The history read below covers everything queued so far.
                 self._need_resync = False
-                self._queue.clear()
                 cwd = self._cwd
         held = self._offline
         if resync:
@@ -161,9 +159,13 @@ class Loop:
 
     def _resync(self, session_id: str, cwd: str) -> bool:
         """Puts hello + the snapshot + the last state control ahead of events
-        pushed during the read."""
+        pushed after the history was copied.
+
+        `history` calls `_covered` at the moment it copies the history, under
+        the lock its hooks hold while they update the history and push what
+        it now holds, so no event is both in the snapshot and still queued."""
         try:
-            history = list(self._history())[-HISTORY_EVENTS:]
+            history = list(self._history(self._covered))[-HISTORY_EVENTS:]
             head = [events.hello(session_id, cwd)] + _snapshot(history)
         except Exception:
             with self._lock:
@@ -174,6 +176,11 @@ class Loop:
                 head.append(self._last_state)
             self._queue.extendleft(reversed(head))
         return True
+
+    def _covered(self) -> None:
+        # Everything queued so far is in the history being copied.
+        with self._lock:
+            self._queue.clear()
 
     def _take(self, session_id: str) -> List[dict]:
         """Events from the queue's head while the body stays <= BODY_BYTES.

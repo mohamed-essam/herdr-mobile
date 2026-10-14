@@ -40,8 +40,9 @@ def make(history=None, on_message=None):
     got = []
     calls = []
 
-    def hist():
+    def hist(covered):
         calls.append(1)
+        covered()
         return list(history or [])
 
     loop = Loop(
@@ -117,7 +118,9 @@ def test_events_pushed_during_history_build_follow_the_snapshot():
     loop.set_session("s1", "/w")
     loop.push(text(0))  # queued before the resync: covered by the history
 
-    def hist():
+    def hist(covered):
+        loop.push(text(8))  # before the copy: covered by it too
+        covered()
         loop.push(text(9))
         return [text(1)]
 
@@ -302,7 +305,7 @@ def test_history_error_retries_next_tick():
     loop.set_session("s1", "/w")
     state = {"fail": True}
 
-    def hist():
+    def hist(covered):
         if state["fail"]:
             state["fail"] = False
             raise OSError("db locked")

@@ -2,17 +2,18 @@ import threading
 
 import pytest
 
-from herdr_hermes.inject import REFUSED, Injector, parse_slash
+from herdr_hermes.inject import REFUSED, Injector, host_runs, parse_slash
 
 
 class FakeManager:
-    def __init__(self, commands):
+    def __init__(self, commands, cli):
         self._plugin_commands = commands
+        self._cli_ref = object() if cli else None
 
 
 class FakeCtx:
-    def __init__(self, commands=None, result=True):
-        self._manager = FakeManager(commands or {})
+    def __init__(self, commands=None, result=True, cli=True):
+        self._manager = FakeManager(commands or {}, cli)
         self.result = result
         self.injected = []
         self.on_inject = None
@@ -42,6 +43,15 @@ def make(ctx, key="sk-1", clock=None):
 
 def cmd(handler):
     return {"handler": handler, "description": "d"}
+
+
+def echo(msg_id, text, ts=1000000):
+    return {"type": "user_text", "uuid": "user-" + msg_id, "text": text, "ts": ts}
+
+
+def rows(pushed):
+    """The pushed events after each message's echo."""
+    return [e for e in pushed if e["type"] != "user_text"]
 
 
 # -- parse_slash (mirrors parseSlash in mod/herdr-chat/hooks/commands.ts) ----
@@ -96,11 +106,26 @@ def test_refused_pushes_exact_error_row():
         "Hermes refused the message: injection is not allowed for this session "
         "(set plugins.entries.herdr-hermes.allow_gateway_injection)"
     )
-    assert pushed == [{
+    # The echo confirms the phone's bubble; the error row follows it.
+    assert pushed == [echo("m1", "hello", 5000), {
         "type": "command_output", "uuid": "cmd-m1", "command": "hello",
         "text": REFUSED, "isError": True, "ts": 5000,
     }]
-    assert inj.consume_echo("hello") is False
+
+
+@pytest.mark.parametrize("result", [None, 0, ""])
+def test_falsy_result_is_refused(result):
+    inj, pushed = make(FakeCtx(result=result))
+    inj.submit("m1", "hello")
+    inj.run_pending()
+    assert rows(pushed)[0]["text"] == REFUSED
+
+
+def test_truthy_result_is_accepted():
+    inj, pushed = make(FakeCtx(result="msg-42"))
+    inj.submit("m1", "hello")
+    inj.run_pending()
+    assert pushed == []
 
 
 def test_inject_raising_pushes_error_row():
@@ -108,10 +133,10 @@ def test_inject_raising_pushes_error_row():
     inj, pushed = make(ctx)
     inj.submit("m1", "hello")
     inj.run_pending()
-    assert len(pushed) == 1
-    assert pushed[0]["isError"] is True and pushed[0]["uuid"] == "cmd-m1"
-    assert "boom" in pushed[0]["text"]
-    assert inj.consume_echo("hello") is False
+    assert pushed[0] == echo("m1", "hello")
+    assert len(pushed) == 2
+    assert pushed[1]["isError"] is True and pushed[1]["uuid"] == "cmd-m1"
+    assert "boom" in pushed[1]["text"]
 
 
 def test_unknown_slash_goes_to_inject():
@@ -120,7 +145,28 @@ def test_unknown_slash_goes_to_inject():
     inj.submit("m1", "/model gpt")
     inj.run_pending()
     assert ctx.injected == [("/model gpt", "user", "sk-1")]
+    # The CLI runs it as a command: no pre_llm_call will echo it.
+    assert pushed == [echo("m1", "/model gpt")]
+
+
+def test_slash_outside_the_cli_is_left_to_pre_llm_call():
+    # The TUI and the gateway send it to the model, whose pre_llm_call echoes it.
+    inj, pushed = make(FakeCtx(cli=False))
+    inj.submit("m1", "/model gpt")
+    inj.run_pending()
     assert pushed == []
+
+
+def test_injected_shell_line_is_echoed():
+    inj, pushed = make(FakeCtx())
+    inj.submit("m1", "!ls")
+    inj.run_pending()
+    assert pushed == [echo("m1", "!ls")]
+
+
+def test_host_runs():
+    assert host_runs("/help") and host_runs(" /model gpt ") and host_runs("!ls")
+    assert not host_runs("/Users/x/file.md please") and not host_runs("hello /help")
 
 
 # -- commands --------------------------------------------------------------
@@ -139,19 +185,19 @@ def test_known_slash_runs_command():
     inj.run_pending()
     assert calls == ["a b"]
     assert ctx.injected == []
-    assert pushed == [{
+    assert pushed == [echo("m7", "/foo a b", 2000), {
         "type": "command_output", "uuid": "cmd-m7", "command": "/foo a b",
         "text": "ran a b", "ts": 2000,
     }]
 
 
-def test_command_without_output_pushes_nothing():
+def test_command_without_output_pushes_only_its_echo():
     ctx = FakeCtx(commands={"foo": cmd(lambda a: None), "bar": cmd(lambda a: "  ")})
     inj, pushed = make(ctx)
     inj.submit("m1", "/foo")
     inj.submit("m2", "/bar")
     inj.run_pending()
-    assert pushed == []
+    assert pushed == [echo("m1", "/foo"), echo("m2", "/bar")]
 
 
 def test_command_raising_pushes_error_row():
@@ -162,6 +208,7 @@ def test_command_raising_pushes_error_row():
     inj, pushed = make(ctx)
     inj.submit("m1", "/foo")
     inj.run_pending()
+    pushed = rows(pushed)
     assert pushed[0]["command"] == "/foo"
     assert pushed[0]["text"] == "bad args"
     assert pushed[0]["isError"] is True
@@ -175,6 +222,7 @@ def test_async_command_handler():
     inj, pushed = make(ctx)
     inj.submit("m1", "/foo z")
     inj.run_pending()
+    pushed = rows(pushed)
     assert pushed[0]["text"] == "async z"
     assert "isError" not in pushed[0]
 
@@ -190,6 +238,7 @@ def test_command_exiting_keeps_worker_alive():
     inj.submit("m1", "/foo")
     inj.submit("m2", "after")
     inj.run_pending()
+    pushed = rows(pushed)
     assert pushed[0]["uuid"] == "cmd-m1" and pushed[0]["isError"] is True
     assert pushed[0]["text"] == "3"
     assert ctx.injected == [("after", "user", "sk-1")]
@@ -206,6 +255,7 @@ def test_async_command_cancelled_keeps_worker_alive():
     inj.submit("m1", "/foo")
     inj.submit("m2", "after")
     inj.run_pending()
+    pushed = rows(pushed)
     assert pushed[0]["uuid"] == "cmd-m1" and pushed[0]["isError"] is True
     assert pushed[0]["text"] == "CancelledError"
     assert ctx.injected == [("after", "user", "sk-1")]
@@ -225,6 +275,7 @@ def test_worker_thread_survives_system_exit():
         inj.submit("m2", "after")
     finally:
         inj.close()
+    pushed = rows(pushed)
     assert pushed[0]["isError"] is True and pushed[0]["text"] == "SystemExit"
     assert ctx.injected == [("after", "user", None)]
     assert not any(t.name == "herdr-hermes-inject" for t in threading.enumerate())
@@ -302,76 +353,3 @@ def test_run_pending_rejected_with_worker():
         inj.close()
 
 
-# -- echo ------------------------------------------------------------------
-
-
-def test_consume_echo_once():
-    ctx = FakeCtx()
-    inj, _ = make(ctx)
-    inj.submit("m1", "hello")
-    inj.run_pending()
-    assert inj.consume_echo("hello") is True
-    assert inj.consume_echo("hello") is False
-
-
-def test_consume_echo_ignores_surrounding_whitespace():
-    ctx = FakeCtx()
-    inj, _ = make(ctx)
-    inj.submit("m1", "  hello\n")
-    inj.run_pending()
-    assert inj.consume_echo("hello") is True
-
-
-def test_consume_echo_unknown_text():
-    inj, _ = make(FakeCtx())
-    assert inj.consume_echo("never sent") is False
-
-
-def test_consume_echo_expires_after_60s():
-    clock = Clock(100.0)
-    ctx = FakeCtx()
-    inj, _ = make(ctx, clock=clock)
-    inj.submit("m1", "hello")
-    inj.run_pending()
-    clock.t = 160.5
-    assert inj.consume_echo("hello") is False
-
-
-def test_consume_echo_within_60s():
-    clock = Clock(100.0)
-    ctx = FakeCtx()
-    inj, _ = make(ctx, clock=clock)
-    inj.submit("m1", "hello")
-    inj.run_pending()
-    clock.t = 159.0
-    assert inj.consume_echo("hello") is True
-
-
-def test_echo_recorded_before_inject_returns():
-    # Hermes may start the turn (and fire pre_llm_call) before inject_message returns.
-    ctx = FakeCtx()
-    inj, _ = make(ctx)
-    during = []
-    ctx.on_inject = lambda c: during.append(inj.consume_echo(c))
-    inj.submit("m1", "hello")
-    inj.run_pending()
-    assert during == [True]
-
-
-def test_slash_command_does_not_record_echo():
-    ctx = FakeCtx(commands={"foo": cmd(lambda a: None)})
-    inj, _ = make(ctx)
-    inj.submit("m1", "/foo")
-    inj.run_pending()
-    assert inj.consume_echo("/foo") is False
-
-
-def test_two_identical_messages_echo_twice():
-    ctx = FakeCtx()
-    inj, _ = make(ctx)
-    inj.submit("m1", "yes")
-    inj.submit("m2", "yes")
-    inj.run_pending()
-    assert inj.consume_echo("yes") is True
-    assert inj.consume_echo("yes") is True
-    assert inj.consume_echo("yes") is False

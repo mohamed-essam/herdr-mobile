@@ -23,7 +23,7 @@ def emitted_body():
 
     history = [{"type": "user_text", "uuid": "h-0", "text": "hi", "ts": 1000}]
     loop = Loop(pane_id="w1:p1", socket="unused", on_message=lambda i, t: None,
-                history=lambda: history, sync=fake_sync)
+                history=lambda covered: (covered(), history)[1], sync=fake_sync)
     loop.set_session("s1", "/work/demo")
     loop.push(events.state(True))
     loop.tick_once()

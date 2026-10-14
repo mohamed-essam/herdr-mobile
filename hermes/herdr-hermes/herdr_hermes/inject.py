@@ -12,6 +12,13 @@ those are methods on the CLI object (cli.py `HermesCLI.process_command`) or
 the gateway runner. A built-in slash therefore goes to `inject_message`
 like any text; in the classic CLI the REPL then runs it as a command, its
 output staying in the terminal.
+
+The phone's pending bubble is confirmed by a user_text with its text. An
+injected prompt gets it from pre_llm_call; what never reaches the model (a
+plugin command, a host-run slash or `!` shell line, a refused message) gets
+it here, ahead of its output or error, as the engine records a command for
+the Claude mod. Only the classic CLI runs an injected slash or `!` line
+itself; the TUI and the gateway send it to the model.
 """
 from __future__ import annotations
 
@@ -22,7 +29,7 @@ import queue
 import re
 import threading
 import time
-from typing import Any, Callable, List, Mapping, Optional, Set, Tuple
+from typing import Any, Callable, Mapping, Optional, Set, Tuple
 
 from . import events
 
@@ -32,10 +39,19 @@ REFUSED = (
     "Hermes refused the message: injection is not allowed for this session "
     "(set plugins.entries.herdr-hermes.allow_gateway_injection)"
 )
-ECHO_WINDOW = 60.0  # seconds a phone-injected prompt waits for its pre_llm_call
 COMMAND_TIMEOUT = 30.0  # an async handler's bound, as Hermes' own runner
 _WORKER = "herdr-hermes-inject"
 _SLASH = re.compile(r"/(\S+)(?:\s+([\s\S]*))?")
+
+
+def host_runs(text: str) -> bool:
+    """True for what the CLI runs itself instead of sending it to the model:
+    a slash command (cli.py `_looks_like_slash_command`: `/help`, not
+    `/Users/x`) or a `!` shell line."""
+    t = text.strip()
+    if t.startswith("!"):
+        return True
+    return t.startswith("/") and "/" not in t.split()[0][1:]
 
 
 def parse_slash(text: str, names: Set[str]) -> Optional[Tuple[str, str]]:
@@ -44,6 +60,11 @@ def parse_slash(text: str, names: Set[str]) -> Optional[Tuple[str, str]]:
     if not m or m.group(1) not in names:
         return None
     return m.group(1), (m.group(2) or "").strip()
+
+
+def _in_cli(ctx: Any) -> bool:
+    # hermes_cli/plugins_injection.py: the REPL takes it when one is attached.
+    return getattr(getattr(ctx, "_manager", None), "_cli_ref", None) is not None
 
 
 def _registry(ctx: Any) -> Mapping[str, dict]:
@@ -84,8 +105,6 @@ class Injector:
         self._session_key = session_key
         self._clock = clock
         self._jobs: "queue.Queue[Optional[Tuple[str, str]]]" = queue.Queue()
-        self._echo_lock = threading.Lock()
-        self._echoes: List[Tuple[str, float]] = []  # (stripped text, injected at)
         self._thread: Optional[threading.Thread] = None
         if start:
             self._thread = threading.Thread(target=self._run, name=_WORKER, daemon=True)
@@ -95,17 +114,6 @@ class Injector:
 
     def submit(self, msg_id: str, text: str) -> None:
         self._jobs.put((msg_id, text))
-
-    def consume_echo(self, text: str) -> bool:
-        """True once per phone-injected `text` from the last ECHO_WINDOW s."""
-        key = text.strip()
-        with self._echo_lock:
-            self._prune()
-            for i, (k, _) in enumerate(self._echoes):
-                if k == key:
-                    del self._echoes[i]
-                    return True
-        return False
 
     def command_names(self) -> Set[str]:
         return set(_registry(self._ctx))
@@ -157,9 +165,13 @@ class Injector:
     def _ts(self) -> int:
         return int(self._clock() * 1000)
 
+    def _echo(self, msg_id: str, text: str) -> None:
+        self._push(events.user_text(f"user-{msg_id}", text, self._ts()))
+
     def _run_command(self, msg_id: str, name: str, args: str, entry: Any) -> None:
         command = f"/{name} {args}" if args else f"/{name}"
         uuid = f"cmd-{msg_id}"
+        self._echo(msg_id, command)
         try:
             handler = entry["handler"]
             result = _resolve(handler(args))
@@ -171,25 +183,14 @@ class Injector:
             self._push(events.command_output(uuid, command, text, self._ts()))
 
     def _inject(self, msg_id: str, text: str) -> None:
-        # Recorded first: Hermes may start the turn (and fire pre_llm_call)
-        # before inject_message returns.
-        token = (text.strip(), self._clock())
-        with self._echo_lock:
-            self._echoes.append(token)
         try:
             ok = self._ctx.inject_message(text, "user", session_key=self._session_key())
-            error = None if ok is True else REFUSED
+            error = None if ok else REFUSED
         except Exception as exc:
             error = f"Hermes could not take the message: {_error_text(exc)}"
         if error is None:
+            if host_runs(text) and _in_cli(self._ctx):
+                self._echo(msg_id, text.strip())
             return
-        with self._echo_lock:
-            for i, t in enumerate(self._echoes):
-                if t is token:
-                    del self._echoes[i]
-                    break
+        self._echo(msg_id, text.strip())
         self._push(events.command_output(f"cmd-{msg_id}", text, error, self._ts(), is_error=True))
-
-    def _prune(self) -> None:
-        cutoff = self._clock() - ECHO_WINDOW
-        self._echoes = [e for e in self._echoes if e[1] >= cutoff]

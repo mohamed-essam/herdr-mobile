@@ -19,6 +19,13 @@ interim payloads only their session_id, remembered from the first two.
 Persist-disabled forks (background review, /btw) share the parent's
 session_id and fire only tool and interim hooks; those carry the fork's own
 turn_id, so they are dropped when it is not the main pre_llm_call's.
+
+The pane shows its terminal's conversation: payloads of another platform
+than the CLI's or the TUI's (a gateway's chats, which one process serves
+several of) are dropped, and so are tool and interim payloads, which name no
+platform, until a turn has given the pane its session. Session ids cannot
+tell the chats apart: compression gives the running conversation a new one
+and fires no hook.
 """
 from __future__ import annotations
 
@@ -45,6 +52,7 @@ HOOKS = (
     "on_human_input_request",
 )
 _SUBAGENT_PLATFORM = "subagent"
+_TERMINAL_PLATFORMS = ("cli", "tui")
 _OK = "ok"  # model_tools.py _tool_result_observer_fields' success status
 
 
@@ -61,12 +69,15 @@ class Hooks:
         self._cwd = cwd
         self._loop: Any = None
         self._injector: Any = None
-        self._lock = threading.Lock()  # guards the fields below
+        # Guards the fields below. Held across a history update and the events
+        # it covers (see history_events), so it is reentrant.
+        self._lock = threading.RLock()
         self._session_id: Optional[str] = None
         self._session_key: Optional[str] = None
         self._history: List[Any] = []
         self._subagents: Set[str] = set()
         self._turn_id = ""  # the main agent's current turn (pre_llm_call)
+        self._open_tools: Dict[str, List[str]] = {}  # tool name -> made-up ids, oldest first
         self._ids = itertools.count(1)
 
     def attach(self, loop: Any, injector: Any) -> None:
@@ -84,10 +95,12 @@ class Hooks:
         with self._lock:
             return self._session_key
 
-    def history_events(self) -> List[dict]:
-        """Called on the loop thread: converts a copy, never Hermes' list."""
+    def history_events(self, covered: Callable[[], None] = lambda: None) -> List[dict]:
+        """Called on the loop thread: converts a copy, never Hermes' list.
+        `covered` runs as the copy is taken, before any event pushed after it."""
         with self._lock:
             msgs = list(self._history)
+            covered()
         return history.from_messages(msgs, self._ts())
 
     def callbacks(self) -> Dict[str, Callable[..., None]]:
@@ -116,13 +129,17 @@ class Hooks:
         return "hermes-%d" % next(self._ids)
 
     def _skip(self, kw: Dict[str, Any]) -> bool:
-        """True for a subagent's payload; else remembers its session_key."""
+        """True for a subagent's or a messaging platform's payload; else
+        remembers its session_key."""
         sid = _str(kw.get("session_id"))
-        sub = bool(_str(kw.get("parent_session_id"))) or kw.get("platform") == _SUBAGENT_PLATFORM
+        platform = _str(kw.get("platform"))
+        sub = bool(_str(kw.get("parent_session_id"))) or platform == _SUBAGENT_PLATFORM
         with self._lock:
             if sub:
                 if sid:
                     self._subagents.add(sid)
+                return True
+            if platform and platform not in _TERMINAL_PLATFORMS:
                 return True
             if sid and sid in self._subagents:
                 return True
@@ -130,6 +147,12 @@ class Hooks:
             if key:
                 self._session_key = key
         return False
+
+    def _unsessioned(self) -> bool:
+        """True before a turn has given the pane its session: a tool or
+        interim payload then belongs to no conversation the pane shows."""
+        with self._lock:
+            return self._session_id is None
 
     def _forked(self, kw: Dict[str, Any]) -> bool:
         """True for a tool or interim payload from another turn than the main
@@ -151,8 +174,9 @@ class Hooks:
             if sid != self._session_id:
                 self._history = []
                 self._subagents.clear()
+                self._open_tools.clear()
             self._session_id = sid
-        self._loop.set_session(sid, self._cwd())
+            self._loop.set_session(sid, self._cwd())
 
     # -- the hooks -----------------------------------------------------------
 
@@ -166,47 +190,66 @@ class Hooks:
         if self._skip(kw):
             return
         sid = _str(kw.get("session_id"))
+        # The history and the events it covers go together (history_events).
         with self._lock:
-            adopt = bool(sid) and self._session_id is None
+            if sid and self._session_id is None:  # a resumed session fires no on_session_start
+                self._set_session(sid)
             self._turn_id = _str(kw.get("turn_id"))
-        if adopt:  # a resumed session fires no on_session_start
-            self._set_session(sid)
-        self._keep_history(kw)
-        text = _message_text(kw.get("user_message"))
-        if text.strip() and not self._injector.consume_echo(text):
-            self.push(events.user_text(self._uuid(), text, self._ts()))
-        self.push(events.state(True))
+            self._keep_history(kw)
+            text = _message_text(kw.get("user_message"))
+            if text.strip():  # a phone prompt too: it confirms the phone's bubble
+                self.push(events.user_text(self._uuid(), text, self._ts()))
+            self.push(events.state(True))
 
     def _post_llm_call(self, kw: Dict[str, Any]) -> None:
         if self._skip(kw):
             return
-        self._keep_history(kw)
-        text = _str(kw.get("assistant_response"))
-        if text.strip():
-            self.push(events.assistant_text(self._uuid(), text, self._ts()))
-        self.push(events.state(False))
+        with self._lock:
+            self._keep_history(kw)
+            text = _str(kw.get("assistant_response"))
+            if text.strip():
+                self.push(events.assistant_text(self._uuid(), text, self._ts()))
+            self.push(events.state(False))
 
     def _on_interim_message(self, kw: Dict[str, Any]) -> None:
         text = _str(kw.get("text"))
-        if self._skip(kw) or self._forked(kw) or not text.strip():
+        if self._skip(kw) or self._unsessioned() or self._forked(kw) or not text.strip():
             return
         self.push(events.assistant_text(self._uuid(), text, self._ts()))
 
-    def _tool_id(self, kw: Dict[str, Any]) -> str:
-        return _str(kw.get("tool_call_id")) or self._uuid()
+    # Without a tool_call_id, a call's result takes the oldest id made up for
+    # a call of the same tool, so the two still pair.
+    def _call_id(self, kw: Dict[str, Any]) -> str:
+        tid = _str(kw.get("tool_call_id"))
+        if tid:
+            return tid
+        tid = self._uuid()
+        with self._lock:
+            self._open_tools.setdefault(_str(kw.get("tool_name")), []).append(tid)
+        return tid
+
+    def _result_id(self, kw: Dict[str, Any]) -> str:
+        tid = _str(kw.get("tool_call_id"))
+        if tid:
+            return tid
+        with self._lock:
+            ids = self._open_tools.get(_str(kw.get("tool_name")))
+            if ids:
+                return ids.pop(0)
+        return self._uuid()
 
     def _pre_tool_call(self, kw: Dict[str, Any]) -> None:
-        if self._skip(kw) or self._forked(kw):
+        if self._skip(kw) or self._unsessioned() or self._forked(kw):
             return
         args = kw.get("args")
-        self.push(events.tool_use(self._tool_id(kw), _str(kw.get("tool_name")),
+        self.push(events.tool_use(self._call_id(kw), _str(kw.get("tool_name")),
                                   args if isinstance(args, dict) else {}, self._ts()))
 
     def _post_tool_call(self, kw: Dict[str, Any]) -> None:
-        if self._skip(kw) or self._forked(kw):
+        if self._skip(kw) or self._unsessioned() or self._forked(kw):
             return
         status = kw.get("status", _OK)
-        self.push(events.tool_result(self._tool_id(kw), kw.get("result"), status != _OK, self._ts()))
+        self.push(events.tool_result(self._result_id(kw), kw.get("result"), status != _OK, self._ts()))
 
     def _idle(self, kw: Dict[str, Any]) -> None:
         if self._skip(kw):

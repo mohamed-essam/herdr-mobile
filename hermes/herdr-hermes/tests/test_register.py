@@ -71,18 +71,11 @@ class FakeInjector:
         self.ctx = ctx
         self.push = push
         self.session_key = session_key
-        self.echoes = []
         self.submitted = []
         FakeInjector.instances.append(self)
 
     def submit(self, msg_id, text):
         self.submitted.append((msg_id, text))
-
-    def consume_echo(self, text):
-        if text.strip() in self.echoes:
-            self.echoes.remove(text.strip())
-            return True
-        return False
 
     def command_names(self):
         return set()
@@ -112,6 +105,13 @@ def active():
     herdr_hermes.register(ctx)
     (loop,) = FakeLoop.instances
     (inj,) = FakeInjector.instances
+    return ctx, loop, inj
+
+
+def in_session():
+    """active(), after a session start: tool and interim payloads need one."""
+    ctx, loop, inj = active()
+    ctx.call("on_session_start", session_id="s1", platform="cli")
     return ctx, loop, inj
 
 
@@ -186,6 +186,7 @@ def test_double_register_shares_one_loop():
     assert len(FakeLoop.instances) == 1 and len(FakeInjector.instances) == 1
     assert loop.started == 1
     assert set(ctx2.hooks) == ALL_HOOKS
+    ctx1.call("on_session_start", session_id="s1")
     ctx2.call("on_interim_message", text="hi")
     assert loop.events == [{"type": "assistant_text", "uuid": "hermes-1", "text": "hi", "ts": 1000}]
 
@@ -212,15 +213,11 @@ def test_pre_llm_call_pushes_user_text_and_working():
     ]
 
 
-def test_pre_llm_call_skips_the_echo_of_an_injected_prompt():
-    ctx, loop, inj = active()
-    ctx.call("on_session_start", session_id="s1")
-    inj.echoes.append("from phone")
+def test_pre_llm_call_pushes_a_phone_prompt_too():
+    # Its user_text is what confirms the phone's pending bubble.
+    ctx, loop, _ = in_session()
     ctx.call("pre_llm_call", session_id="s1", user_message="from phone", conversation_history=[])
-    assert loop.events == [{"type": "state", "state": "working"}]
-    # A second, typed turn with the same text is not an echo any more.
-    ctx.call("pre_llm_call", session_id="s1", user_message="from phone", conversation_history=[])
-    assert loop.events[1:] == [
+    assert loop.events == [
         {"type": "user_text", "uuid": "hermes-1", "text": "from phone", "ts": 1000},
         {"type": "state", "state": "working"},
     ]
@@ -274,7 +271,7 @@ def test_post_llm_call_without_text_only_goes_idle(resp):
 
 def test_on_interim_message_pushes_assistant_text():
     # agent/stream_delivery.py: _enqueue_stream_hook("on_interim_message", text=..., already_streamed=...)
-    ctx, loop, _ = active()
+    ctx, loop, _ = in_session()
     ctx.call("on_interim_message", turn_id="u", iteration=1, session_id="s1", model="m",
              provider="p", surface="cli", text="thinking aloud", already_streamed=False,
              telemetry_schema_version=1)
@@ -282,7 +279,7 @@ def test_on_interim_message_pushes_assistant_text():
 
 
 def test_pre_tool_call_pushes_tool_use_and_returns_none():
-    ctx, loop, _ = active()
+    ctx, loop, _ = in_session()
     r = ctx.call("pre_tool_call", tool_name="terminal", args={"command": "ls  -la"},
                  task_id="", session_id="s1", tool_call_id="call_1", turn_id="u1",
                  api_request_id="", middleware_trace=[])
@@ -294,16 +291,88 @@ def test_pre_tool_call_pushes_tool_use_and_returns_none():
 
 
 def test_pre_tool_call_with_non_dict_args():
-    ctx, loop, _ = active()
+    ctx, loop, _ = in_session()
     ctx.call("pre_tool_call", tool_name="x", args=["a"], tool_call_id="c")
     assert loop.events[0]["summary"] == ""
+
+
+def test_tool_ids_pair_without_a_tool_call_id():
+    ctx, loop, _ = in_session()
+    ctx.call("pre_tool_call", tool_name="read", args={})
+    ctx.call("pre_tool_call", tool_name="read", args={})
+    ctx.call("pre_tool_call", tool_name="terminal", args={})
+    ctx.call("post_tool_call", tool_name="terminal", result="t")
+    ctx.call("post_tool_call", tool_name="read", result="r1")
+    ctx.call("post_tool_call", tool_name="read", result="r2")
+    uses = [e["toolUseId"] for e in loop.events if e["type"] == "tool_use"]
+    results = [e["toolUseId"] for e in loop.events if e["type"] == "tool_result"]
+    assert results == [uses[2], uses[0], uses[1]]
+
+
+def test_tool_and_interim_payloads_wait_for_a_session():
+    # A gateway's tool payloads name no platform; its turns never give the pane a session.
+    ctx, loop, _ = active()
+    ctx.call("pre_tool_call", tool_name="t", args={}, tool_call_id="c", session_id="g1")
+    ctx.call("post_tool_call", tool_name="t", result="r", tool_call_id="c", session_id="g1")
+    ctx.call("on_interim_message", text="hi", session_id="g1")
+    assert loop.events == []
+
+
+@pytest.mark.parametrize("platform", ["telegram", "discord", "desktop", "cron"])
+def test_messaging_platform_payloads_are_dropped(platform):
+    ctx, loop, _ = active()
+    ctx.call("on_session_start", session_id="g1", platform=platform)
+    ctx.call("pre_llm_call", session_id="g1", user_message="hi", conversation_history=[], platform=platform)
+    ctx.call("post_llm_call", session_id="g1", assistant_response="yo", platform=platform)
+    ctx.call("on_session_end", session_id="g1", platform=platform)
+    ctx.call("agent_loop_stopped", session_key="k", platform=platform)
+    assert loop.sessions == [] and loop.events == []
+    assert FakeInjector.instances[0].session_key() is None
+
+
+@pytest.mark.parametrize("platform", ["cli", "tui", ""])
+def test_terminal_platform_payloads_are_kept(platform):
+    ctx, loop, _ = active()
+    ctx.call("pre_llm_call", session_id="s1", user_message="hi", conversation_history=[], platform=platform)
+    assert loop.sessions == [("s1", os.getcwd())]
+    assert [e["type"] for e in loop.events] == ["user_text", "state"]
+
+
+def test_history_copy_waits_for_the_events_it_covers():
+    # A resync copying the history while pre_llm_call runs must not get the
+    # prompt before its user_text is queued (it would be sent twice).
+    import threading
+    ctx, loop, _ = in_session()
+    hooks = herdr_hermes._runtime().panes["w1:p1"]
+    pushing, release = threading.Event(), threading.Event()
+    copied = []
+
+    def push(event):
+        if event["type"] == "user_text":
+            pushing.set()
+            release.wait(5)
+        loop.events.append(event)
+
+    loop.push = push
+    turn = threading.Thread(target=ctx.call, args=("pre_llm_call",), kwargs=dict(
+        session_id="s1", user_message="hi", conversation_history=[{"role": "user", "content": "hi"}]))
+    turn.start()
+    assert pushing.wait(5)
+    copy = threading.Thread(target=hooks.history_events, args=(lambda: copied.append(list(loop.events)),))
+    copy.start()
+    copy.join(0.2)
+    assert copied == []  # blocked behind the hook
+    release.set()
+    turn.join(5)
+    copy.join(5)
+    assert [e["type"] for e in copied[0]] == ["user_text", "state"]
 
 
 @pytest.mark.parametrize("status,is_error", [("ok", False), ("error", True), ("blocked", True),
                                              ("timeout", True), ("cancelled", True)])
 def test_post_tool_call_pushes_tool_result(status, is_error):
     # model_tools.py _tool_result_observer_fields: "ok" on success.
-    ctx, loop, _ = active()
+    ctx, loop, _ = in_session()
     r = ctx.call("post_tool_call", tool_name="terminal", args={}, result='{"output": "x"}',
                  task_id="", session_id="s1", tool_call_id="call_1", turn_id="", api_request_id="",
                  duration_ms=3, status=status, error_type=None, error_message=None, middleware_trace=[])
